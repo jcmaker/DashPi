@@ -1,0 +1,31 @@
+# Task 2 Report: Atomic Incident Storage and Retention Selection
+
+## Implementation
+
+- Added `sha256_file` for streaming SHA-256 calculation.
+- Added `atomic_write`: writes `.partial`, flushes and fsyncs, hashes the complete partial, then atomically renames it and returns `FileArtifact`.
+- Added `IncidentStore` metadata save/load round-trip, incident-ID path validation, and stale partial cleanup that preserves active partials.
+- Added pure `bytes_to_free` pressure calculation and chronological `choose_prunable_segments` with protected-segment exclusion.
+
+## Files changed
+
+- `src/dashpi/storage.py`
+- `tests/test_storage.py`
+
+## TDD evidence
+
+RED command:
+`/Users/justin/Documents/ChatGPT/DashPi/.worktrees/dashpi-mvp/.venv/bin/python -m pytest tests/test_storage.py -q`
+
+RED result: collection failed with `ModuleNotFoundError: No module named 'dashpi.storage'` (expected before implementation).
+
+GREEN command:
+`.../.venv/bin/python -m pytest tests/test_storage.py -q && .../.venv/bin/python -m pytest -q`
+
+GREEN result: focused `5 passed`; full suite `8 passed`.
+
+## Self-review and concerns
+
+- `git diff --check` passed; implementation is limited to the requested storage and tests.
+- Completed clips are not selected by retention when their paths are in `protected`.
+- No concerns identified within the requested scope. Directory fsync after rename is not added because the brief specifies the tested minimal implementation.
