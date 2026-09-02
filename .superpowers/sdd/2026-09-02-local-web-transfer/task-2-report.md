@@ -84,3 +84,90 @@ Output: no output (success).
 ## Concerns
 
 No blocking concerns. Integrity validation deliberately hashes the artifact for each download request; this is the smallest safe implementation required for this slice and is intentionally not cached.
+
+## Fix Round 1
+
+### Implementation
+
+- The clip route now derives the only allowed artifact pathname as `store.directory(incident_id) / "clip.mp4"`. It rejects metadata whose `FileArtifact.path` does not exactly describe that incident-local contract.
+- `range_response` now opens the canonical pathname once with `O_NOFOLLOW` where supported. It uses `lstat` plus `fstat` device/inode comparison, so a symlink or final-path replacement is also rejected on platforms without `O_NOFOLLOW`.
+- The same opened descriptor is verified as a regular, nonempty file with the stored byte length and SHA-256, then sought and streamed. It is closed on validation/range errors and in a generator `finally` after streaming.
+- Filesystem/open/integrity failures, including malformed digest metadata, become `409` before response headers or an ETag are made.
+
+### Added regression coverage
+
+- Valid digest/length metadata pointing to an outside path is rejected.
+- An incident-local clip symlink to a content-identical external file is rejected.
+- A test-only atomic replacement immediately after descriptor hashing proves the response retains the original descriptor's range body and ETag, rather than reopening the replacement pathname.
+- Malformed persisted digest metadata is rejected as `409` without an ETag.
+
+### RED
+
+Command:
+
+```console
+.venv/bin/python -m pytest tests/test_api.py::test_clip_rejects_metadata_path_outside_incident tests/test_api.py::test_clip_rejects_symlink_even_when_target_matches_metadata tests/test_api.py::test_clip_streams_opened_descriptor_after_path_replacement -q -W error
+```
+
+Output before the fix:
+
+```text
+FFF
+test_clip_rejects_metadata_path_outside_incident: expected 409, got 200
+test_clip_rejects_symlink_even_when_target_matches_metadata: expected 409, got 200
+test_clip_streams_opened_descriptor_after_path_replacement: expected original range bytes, got b'xxxxx'
+3 failed in 0.15s
+```
+
+Command:
+
+```console
+.venv/bin/python -m pytest tests/test_api.py::test_clip_rejects_malformed_digest_metadata -q -W error
+```
+
+Output before malformed-metadata handling:
+
+```text
+F
+TypeError: unsupported operand types(s) or combination of types: 'str' and 'NoneType'
+1 failed in 0.26s
+```
+
+### GREEN
+
+Command:
+
+```console
+.venv/bin/python -m pytest tests/test_ranges.py tests/test_api.py -q -W error
+```
+
+Output:
+
+```text
+21 passed in 0.18s
+```
+
+### Full suite
+
+Command:
+
+```console
+.venv/bin/python -m pytest -q -W error
+```
+
+Output:
+
+```text
+78 passed in 4.60s
+```
+
+### Self-review
+
+- No response is created until the canonical path's opened descriptor has passed all size/digest/file-type checks.
+- The descriptor survives a pathname replacement, while the ETag and body remain tied to the verified original bytes.
+- `lstat`/`fstat` identity matching supplements `O_NOFOLLOW` and rejects a symlink or changed final path without relying on metadata paths.
+- The test synchronization hook performs a real atomic replacement and asserts endpoint output; it does not assert mock calls.
+
+### Concerns
+
+No blocking concerns. The existing per-request SHA-256 verification remains intentionally uncached.
