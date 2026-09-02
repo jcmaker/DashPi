@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>DashPi 광학 전송</title>
+  <link rel="stylesheet" href="/tokens.css">
+</head>
+<body>
+  <main class="sender-workbench">
+    <section class="sender-controls" aria-labelledby="sender-heading">
+      <header class="masthead">
+        <p class="product-name">DashPi · Optical Transfer</p>
+        <h1 id="sender-heading">화면으로 데이터 보내기</h1>
+        <p class="status">인터넷이나 Wi-Fi 연결 없이 QR 프레임을 휴대폰 카메라로 전송합니다.</p>
+      </header>
+
+      <div id="warning-copy" class="warning" role="note">
+        <strong>이 광학 스트림은 not encrypted 상태입니다.</strong>
+        <span>화면을 line of sight로 볼 수 있는 사람은 영상이나 분석 리포트를 캡처할 수 있습니다.</span>
+      </div>
+
+      <label class="acknowledgement">
+        <input id="warning" type="checkbox" aria-describedby="warning-copy">
+        주변에 화면을 볼 수 있는 사람이 없는지 확인했습니다.
+      </label>
+
+      <fieldset class="calibration">
+        <legend>전송 및 화면 보정</legend>
+
+        <label for="artifact">전송 데이터</label>
+        <select id="artifact">
+          <option value="report">분석 리포트</option>
+          <option value="clip">이벤트 영상</option>
+        </select>
+
+        <label for="bytes">bytes/frame</label>
+        <select id="bytes">
+          <option value="512">512</option>
+          <option value="1024" selected>1024</option>
+          <option value="1465">1465</option>
+        </select>
+
+        <label for="scale">QR scale</label>
+        <div class="range-control">
+          <input id="scale" type="range" min="2" max="10" value="4">
+          <output id="scale-value" for="scale">4</output>
+        </div>
+
+        <label for="fps">frames/second</label>
+        <select id="fps">
+          <option value="10">10</option>
+          <option value="24" selected>24</option>
+          <option value="30">30</option>
+        </select>
+      </fieldset>
+
+      <div class="sender-actions">
+        <button id="start" type="button" disabled>전송 시작</button>
+        <button id="stop" type="button" disabled>중지</button>
+      </div>
+      <p id="sender-status" class="status" role="status" aria-live="polite">경고를 확인하면 전송을 시작할 수 있습니다.</p>
+    </section>
+
+    <section class="qr-stage" aria-labelledby="frame-heading">
+      <header class="frame-head">
+        <div>
+          <p class="product-name">Frame output</p>
+          <h2 id="frame-heading">QR 프레임</h2>
+        </div>
+        <p class="frame-count">Frame <output id="sequence">0</output></p>
+      </header>
+      <div class="canvas-wrap">
+        <canvas aria-label="Animated transfer QR" hidden></canvas>
+        <p id="canvas-placeholder">전송을 시작하면 QR이 표시됩니다.</p>
+      </div>
+    </section>
+  </main>
+  <script type="module" src="/assets/sender.js"></script>
+</body>
+</html>

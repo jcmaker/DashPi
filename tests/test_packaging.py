@@ -92,6 +92,12 @@ def test_installed_wheel_constructs_app_and_serves_local_ui(tmp_path):
                     "stylesheet = TestClient(app).get('/tokens.css')",
                     "assert stylesheet.status_code == 200",
                     "assert '--color-paper:' in stylesheet.text",
+                    "sender = TestClient(app).get('/sender.html')",
+                    "assert sender.status_code == 200",
+                    "assert '<title>DashPi 광학 전송</title>' in sender.text",
+                    "sender_script = TestClient(app).get('/assets/sender.js')",
+                    "assert sender_script.status_code == 200",
+                    "assert len(sender_script.content) > 1000",
                 ]
             ),
         ],

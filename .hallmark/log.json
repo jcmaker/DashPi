@@ -1,6 +1,13 @@
 [
   {
     "date": "2026-09-02",
+    "macrostructure": "Split Studio",
+    "theme": "Cobalt",
+    "enrichment": "functional QR output",
+    "brief": "Offline optical sender with confidentiality acknowledgement and display calibration"
+  },
+  {
+    "date": "2026-09-02",
     "macrostructure": "Workbench",
     "theme": "Cobalt",
     "enrichment": "none",
