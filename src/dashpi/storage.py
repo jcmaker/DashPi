@@ -47,10 +47,15 @@ class IncidentStore:
     def load(self, incident_id: str) -> IncidentMetadata:
         raw = json.loads((self.directory(incident_id) / "metadata.json").read_text())
         raw["state"] = IncidentState(raw["state"])
+        raw.setdefault("pre_seconds", 30.0)
+        raw.setdefault("post_seconds", raw["post_deadline_mono"] - raw["trigger_mono"])
         for key in ("clip", "report_json", "report_html"):
             if raw.get(key):
                 raw[key] = FileArtifact(
-                    Path(raw[key]["path"]), raw[key]["byte_length"], raw[key]["sha256"]
+                    Path(raw[key]["path"]),
+                    raw[key]["byte_length"],
+                    raw[key]["sha256"],
+                    raw[key].get("duration"),
                 )
         return IncidentMetadata(**raw)
 

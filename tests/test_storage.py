@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from dashpi.models import IncidentMetadata, Segment
+from dashpi.models import FileArtifact, IncidentMetadata, IncidentState, Segment
 from dashpi.storage import IncidentStore, atomic_write, bytes_to_free, choose_prunable_segments
 
 
@@ -13,8 +13,36 @@ def test_atomic_write_leaves_only_complete_file(tmp_path: Path):
 
 def test_store_round_trips_incident(tmp_path: Path):
     store = IncidentStore(tmp_path)
-    store.save(IncidentMetadata.new("inc-1", "2026-09-02T00:00:00Z", 40.0, 15.0))
-    assert store.load("inc-1").incident_id == "inc-1"
+    incident = IncidentMetadata.new("inc-1", "2026-09-02T00:00:00Z", 40.0, 15.0, pre_seconds=30.0)
+    incident.clip = atomic_write(store.directory("inc-1") / "clip.mp4", b"clip")
+    incident.clip = FileArtifact(incident.clip.path, incident.clip.byte_length, incident.clip.sha256, 44.9)
+    incident.report_json = atomic_write(store.directory("inc-1") / "report.json", b"{}")
+    incident.report_html = atomic_write(store.directory("inc-1") / "report.html", b"<main></main>")
+    incident.report_model = "moondream"
+    incident.report_generated_at = "2026-09-02T00:01:00Z"
+    incident.transition(IncidentState.CLIPPING, "2026-09-02T00:00:01Z")
+    incident.transition(IncidentState.ANALYZING, "2026-09-02T00:00:02Z")
+    incident.transition(IncidentState.READY, "2026-09-02T00:01:01Z")
+    store.save(incident)
+
+    loaded = store.load("inc-1")
+
+    assert loaded.to_dict() == incident.to_dict()
+
+
+def test_store_loads_metadata_written_before_window_fields(tmp_path: Path):
+    store = IncidentStore(tmp_path)
+    directory = store.directory("inc-1")
+    directory.mkdir(parents=True)
+    (directory / "metadata.json").write_text(
+        '{"incident_id":"inc-1","triggered_at":"now","trigger_mono":40.0,'
+        '"post_deadline_mono":55.0,"state":"ready","failure_reason":null,'
+        '"clip":null,"report_json":null,"report_html":null,"transitions":[]}'
+    )
+
+    loaded = store.load("inc-1")
+
+    assert (loaded.pre_seconds, loaded.post_seconds) == (30.0, 15.0)
 
 
 def test_retention_skips_protected_segments(tmp_path: Path):

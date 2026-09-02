@@ -24,6 +24,7 @@ class FileArtifact:
     path: Path
     byte_length: int
     sha256: str
+    duration: float | None = None
 
 
 @dataclass
@@ -37,11 +38,30 @@ class IncidentMetadata:
     clip: FileArtifact | None = None
     report_json: FileArtifact | None = None
     report_html: FileArtifact | None = None
+    report_model: str | None = None
+    report_generated_at: str | None = None
     transitions: list[dict[str, str]] = field(default_factory=list)
+    pre_seconds: float = 30.0
+    post_seconds: float = 15.0
 
     @classmethod
-    def new(cls, incident_id: str, wall_time: str, trigger_mono: float, post_seconds: float) -> "IncidentMetadata":
-        item = cls(incident_id, wall_time, trigger_mono, trigger_mono + post_seconds, IncidentState.COLLECTING_POST_TRIGGER)
+    def new(
+        cls,
+        incident_id: str,
+        wall_time: str,
+        trigger_mono: float,
+        post_seconds: float,
+        pre_seconds: float = 30.0,
+    ) -> "IncidentMetadata":
+        item = cls(
+            incident_id,
+            wall_time,
+            trigger_mono,
+            trigger_mono + post_seconds,
+            IncidentState.COLLECTING_POST_TRIGGER,
+            pre_seconds=pre_seconds,
+            post_seconds=post_seconds,
+        )
         item.transitions.append({"state": item.state.value, "at": wall_time})
         return item
 
@@ -50,4 +70,15 @@ class IncidentMetadata:
         self.transitions.append({"state": state.value, "at": at})
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        data = asdict(self)
+        for key in ("clip", "report_json", "report_html"):
+            artifact = getattr(self, key)
+            if artifact:
+                data[key] = {
+                    "filename": artifact.path.name,
+                    "path": str(artifact.path),
+                    "byte_length": artifact.byte_length,
+                    "sha256": artifact.sha256,
+                    "duration": artifact.duration,
+                }
+        return data

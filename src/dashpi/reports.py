@@ -1,9 +1,36 @@
 import base64
 import html
+import ipaddress
 import json
 import math
+import urllib.parse
 import urllib.request
 from pathlib import Path
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *_args, **_kwargs):
+        return None
+
+
+def _validated_loopback_origin(base_url: str) -> str:
+    parsed = urllib.parse.urlsplit(base_url)
+    try:
+        valid = (
+            parsed.scheme == "http"
+            and parsed.hostname is not None
+            and ipaddress.ip_address(parsed.hostname).is_loopback
+            and parsed.username is None
+            and parsed.password is None
+            and parsed.path in ("", "/")
+            and not parsed.query
+            and not parsed.fragment
+        )
+    except ValueError:
+        valid = False
+    if not valid:
+        raise ValueError("base_url must be a numeric loopback HTTP origin")
+    return base_url.rstrip("/")
 
 
 class OllamaClient:
@@ -14,9 +41,11 @@ class OllamaClient:
         timeout: float = 120.0,
     ):
         self.model = model
-        self.base_url = base_url.rstrip("/")
+        self.base_url = _validated_loopback_origin(base_url)
         self.timeout = timeout
-        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        self.opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}), _NoRedirect()
+        )
 
     def validate_model(self) -> None:
         with self.opener.open(self.base_url + "/api/tags", timeout=5.0) as response:
@@ -87,6 +116,10 @@ def render_report_html(report: dict) -> str:
     return (
         "<main><h1>DashPi incident report</h1>"
         f"<p>{html.escape(report['summary'])}</p>"
+        "<p>AI output is advisory and may be incomplete.</p>"
+        f"<p>Source clip SHA-256: {html.escape(str(report['source_clip_sha256']))}</p>"
+        f"<p>Model: {html.escape(str(report['model']))}</p>"
+        f"<p>Generated at: {html.escape(str(report['generated_at']))}</p>"
         f"<h2>Observations</h2><ul>{observations}</ul>"
         f"<h2>Limitations</h2><ul>{limitations}</ul></main>"
     )

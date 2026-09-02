@@ -16,11 +16,19 @@ class IncidentCoordinator:
         requested_start = trigger_mono - self.settings.pre_seconds
         requested_end = trigger_mono + self.settings.post_seconds
         for incident in self.active:
+            if incident.state is not IncidentState.COLLECTING_POST_TRIGGER:
+                continue
             existing_start = incident.trigger_mono - self.settings.pre_seconds
             if existing_start < requested_end and incident.post_deadline_mono > requested_start:
                 incident.post_deadline_mono = max(incident.post_deadline_mono, requested_end)
                 return incident
-        incident = IncidentMetadata.new(self.id_factory(), wall_time, trigger_mono, self.settings.post_seconds)
+        incident = IncidentMetadata.new(
+            self.id_factory(),
+            wall_time,
+            trigger_mono,
+            self.settings.post_seconds,
+            self.settings.pre_seconds,
+        )
         self.active.append(incident)
         return incident
 

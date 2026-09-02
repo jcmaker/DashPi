@@ -1,4 +1,5 @@
 import sys
+import json
 
 import pytest
 
@@ -35,3 +36,39 @@ def test_cli_validates_model_before_creating_media_artifacts(tmp_path, monkeypat
         main()
 
     assert not data_root.exists()
+
+
+def test_cli_records_configured_window_durations_in_metadata(tmp_path, monkeypatch, capsys):
+    video = make_video(tmp_path / "source.mp4", 6)
+    data_root = tmp_path / "data"
+
+    from dashpi.config import Settings
+
+    settings = Settings(data_root, "test-model", pre_seconds=2.0, post_seconds=2.0)
+    monkeypatch.setattr("dashpi.cli.Settings", lambda *_args: settings)
+    monkeypatch.setattr(OllamaClient, "validate_model", lambda _self: None)
+    monkeypatch.setattr(
+        OllamaClient,
+        "analyze",
+        lambda _self, _frames: {"summary": "Stopped", "observations": [], "limitations": []},
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "dashpi",
+            "simulate",
+            str(video),
+            "--trigger-seconds",
+            "3",
+            "--data-root",
+            str(data_root),
+            "--ollama-model",
+            "test-model",
+        ],
+    )
+
+    main()
+
+    output = json.loads(capsys.readouterr().out)
+    assert (output["pre_seconds"], output["post_seconds"]) == (2.0, 2.0)

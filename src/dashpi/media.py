@@ -99,9 +99,13 @@ def build_clip(
             str(manifest),
         ]
         if offset:
-            command.extend(["-ss", str(offset)])
-        command.extend(["-t", str(duration), "-c", "copy", "-f", "mp4", str(partial)])
+            command.extend(["-ss", str(offset), "-t", str(duration), "-c:v", "libx264"])
+        else:
+            command.extend(["-t", str(duration), "-c", "copy"])
+        command.extend(["-f", "mp4", str(partial)])
         subprocess.run(command, check=True)
+        if offset and probe_duration(partial) < duration - 0.1:
+            raise RuntimeError("clip did not preserve requested duration")
         with partial.open("rb") as completed:
             os.fsync(completed.fileno())
         digest, byte_length = sha256_file(partial), partial.stat().st_size

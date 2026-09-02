@@ -34,3 +34,24 @@ def test_ready_at_returns_due_collecting_incidents(tmp_path: Path):
     later = coordinator.trigger(100.0, "2026-09-02T00:01:00Z")
     later.transition(IncidentState.READY, "2026-09-02T00:02:00Z")
     assert coordinator.ready_at(55.0) == [due]
+
+
+def test_overlapping_trigger_after_terminal_incident_creates_new_incident(tmp_path: Path):
+    coordinator = IncidentCoordinator(Settings(tmp_path, "moondream"), id_factory=iter(["inc-1", "inc-2"]).__next__)
+    first = coordinator.trigger(40.0, "2026-09-02T00:00:00Z")
+    first.transition(IncidentState.READY, "2026-09-02T00:01:00Z")
+
+    second = coordinator.trigger(50.0, "2026-09-02T00:01:10Z")
+
+    assert second.incident_id == "inc-2"
+    assert second.state is IncidentState.COLLECTING_POST_TRIGGER
+
+
+def test_coordinator_records_configured_incident_window_durations(tmp_path: Path):
+    coordinator = IncidentCoordinator(
+        Settings(tmp_path, "moondream", pre_seconds=12.0, post_seconds=7.0), id_factory=lambda: "inc-1"
+    )
+
+    incident = coordinator.trigger(40.0, "2026-09-02T00:00:00Z")
+
+    assert (incident.pre_seconds, incident.post_seconds) == (12.0, 7.0)

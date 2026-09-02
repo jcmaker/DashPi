@@ -34,6 +34,7 @@ def main() -> None:
         datetime.now(UTC).isoformat(),
         args.trigger_seconds,
         settings.post_seconds,
+        settings.pre_seconds,
     )
     result = IncidentPipeline(settings, IncidentStore(settings.data_root)).process(
         incident, segments, client.analyze

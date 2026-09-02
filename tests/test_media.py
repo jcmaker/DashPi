@@ -13,6 +13,15 @@ def test_clip_and_twelve_samples(tmp_path):
     assert len(sample_frames(artifact.path, tmp_path / "frames", 12)) == 12
 
 
+def test_nonzero_clip_offset_preserves_requested_duration(tmp_path):
+    paths = [make_video(tmp_path / f"{n}.mp4", 2) for n in range(3)]
+    segments = [Segment(path, n * 2.0, n * 2.0 + 2.0) for n, path in enumerate(paths)]
+
+    artifact = build_clip(segments, tmp_path / "clip.mp4", window_start=1.0, duration=3.0)
+
+    assert 2.9 <= probe_duration(artifact.path) <= 3.1
+
+
 def test_segment_source_ignores_stale_output_files(tmp_path):
     output_dir = tmp_path / "segments"
     output_dir.mkdir()

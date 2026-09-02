@@ -1,7 +1,8 @@
 from datetime import UTC, datetime
+from dataclasses import replace
 import json
 
-from dashpi.media import build_clip, sample_frames
+from dashpi.media import build_clip, probe_duration, sample_frames
 from dashpi.models import IncidentMetadata, IncidentState, Segment
 from dashpi.reports import render_report_html, validate_report
 from dashpi.storage import IncidentStore, atomic_write
@@ -18,12 +19,13 @@ class IncidentPipeline:
             incident.transition(IncidentState.CLIPPING, datetime.now(UTC).isoformat())
             self.store.save(incident)
             window_start = incident.trigger_mono - self.settings.pre_seconds
-            incident.clip = build_clip(
+            clip = build_clip(
                 segments,
                 directory / "clip.mp4",
                 window_start,
                 incident.post_deadline_mono - window_start,
             )
+            incident.clip = replace(clip, duration=probe_duration(clip.path))
         except Exception as error:
             incident.transition(IncidentState.CLIP_FAILED, datetime.now(UTC).isoformat(), str(error))
             self.store.save(incident)
@@ -33,11 +35,12 @@ class IncidentPipeline:
             incident.transition(IncidentState.ANALYZING, datetime.now(UTC).isoformat())
             self.store.save(incident)
             frames = sample_frames(incident.clip.path, directory / "frames", self.settings.frame_sample_count)
+            generated_at = datetime.now(UTC).isoformat()
             report = validate_report(
                 analyze(frames),
                 incident.clip.sha256,
                 self.settings.ollama_model,
-                datetime.now(UTC).isoformat(),
+                generated_at,
             )
             incident.report_json = atomic_write(
                 directory / "report.json", json.dumps(report, sort_keys=True).encode()
@@ -45,6 +48,8 @@ class IncidentPipeline:
             incident.report_html = atomic_write(
                 directory / "report.html", render_report_html(report).encode()
             )
+            incident.report_model = self.settings.ollama_model
+            incident.report_generated_at = generated_at
             incident.transition(IncidentState.READY, datetime.now(UTC).isoformat())
         except Exception as error:
             incident.transition(IncidentState.ANALYSIS_FAILED, datetime.now(UTC).isoformat(), str(error))
