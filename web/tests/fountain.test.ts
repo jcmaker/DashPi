@@ -27,6 +27,28 @@ test('recovers carried equations without a shared PRNG', () => {
   assert.deepEqual(decoder.result(), Uint8Array.of(97, 98, 99, 100, 101, 102));
 });
 
+test('rejects another session before it can corrupt the result', () => {
+  const decoder = new FountainDecoder(2, 1, 2);
+  const firstSession = {
+    sessionId: 1,
+    sequence: 0,
+    blockCount: 2,
+    blockSize: 1,
+    totalLength: 2,
+    indices: [0],
+    symbol: Uint8Array.of(97),
+  };
+
+  decoder.add(firstSession);
+  assert.throws(
+    () => decoder.add({ ...firstSession, sessionId: 2, sequence: 0, indices: [1], symbol: Uint8Array.of(120) }),
+    /stream changed/,
+  );
+  decoder.add({ ...firstSession, sequence: 1, indices: [1], symbol: Uint8Array.of(98) });
+
+  assert.deepEqual(decoder.result(), Uint8Array.of(97, 98));
+});
+
 test('rejects a conflicting equation that reduces to a solved block', () => {
   const decoder = new FountainDecoder(1, 3, 3);
   const first = {

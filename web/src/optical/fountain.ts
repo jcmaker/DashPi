@@ -35,6 +35,7 @@ function isZero(bytes: Uint8Array): boolean {
 export class FountainDecoder {
   private readonly blocks = new Map<number, Uint8Array>();
   private equations: Equation[] = [];
+  private sessionId: number | undefined;
 
   constructor(
     private readonly blockCount: number,
@@ -70,6 +71,10 @@ export class FountainDecoder {
     ) {
       throw new Error('malformed frame');
     }
+    if (this.sessionId !== undefined && frame.sessionId !== this.sessionId) {
+      throw new Error('stream changed');
+    }
+    this.sessionId ??= frame.sessionId;
 
     const indices = new Set(frame.indices);
     const value = frame.symbol.slice();
