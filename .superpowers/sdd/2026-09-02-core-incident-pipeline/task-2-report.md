@@ -29,3 +29,18 @@ GREEN result: focused `5 passed`; full suite `8 passed`.
 - `git diff --check` passed; implementation is limited to the requested storage and tests.
 - Completed clips are not selected by retention when their paths are in `protected`.
 - No concerns identified within the requested scope. Directory fsync after rename is not added because the brief specifies the tested minimal implementation.
+
+## Hygiene follow-up
+
+- Added `__pycache__/`, `*.py[cod]`, and `.pytest_cache/` to the existing `.gitignore`.
+- Removed the generated untracked cache files under `src/dashpi/__pycache__/` and `tests/__pycache__/`.
+- No production or test behavior changed; tests were intentionally not rerun.
+
+Command output:
+
+    $ git status --short
+     M .gitignore
+     M .superpowers/sdd/2026-09-02-core-incident-pipeline/task-2-report.md
+
+    $ git diff --check
+    (no output; passed)
