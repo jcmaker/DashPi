@@ -132,6 +132,7 @@ Files are written with a `.partial` suffix, flushed, and atomically renamed only
 - Replace the live model with deterministic report output only in integration tests.
 - Exercise the real Ollama HTTP path when a local vision model is available.
 - Round-trip optical containers through deterministic frame loss and reordering.
+- Recover the same deterministic 1 MiB payload in Python and TypeScript after 15% frame loss, duplicates, and reordering.
 - Verify local API range download and SHA-256 integrity.
 - Run the complete test suite with outbound network access unavailable.
 
@@ -142,6 +143,7 @@ The Raspberry Pi, camera, and display are required only for final acceptance of:
 - Picamera2 capture stability and timestamp accuracy
 - Physical trigger wiring and debounce
 - Display brightness, QR scale, frame rate, and camera decode rate
+- End-to-end optical throughput with the physical display and phone camera
 - Hotspot startup and mobile captive-portal behavior
 - Ollama latency, memory, temperature, and power behavior
 - Safe shutdown and recovery after sudden power loss
