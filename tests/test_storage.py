@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from dashpi.models import FileArtifact, IncidentMetadata, IncidentState, Segment
 from dashpi.storage import IncidentStore, atomic_write, bytes_to_free, choose_prunable_segments
 
@@ -43,6 +45,16 @@ def test_store_loads_metadata_written_before_window_fields(tmp_path: Path):
     loaded = store.load("inc-1")
 
     assert (loaded.pre_seconds, loaded.post_seconds) == (30.0, 15.0)
+
+
+def test_store_normalizes_malformed_existing_metadata_to_value_error(tmp_path: Path):
+    store = IncidentStore(tmp_path)
+    directory = store.directory("inc-1")
+    directory.mkdir(parents=True)
+    (directory / "metadata.json").write_text('{"incident_id":"inc-1"}')
+
+    with pytest.raises(ValueError, match="metadata"):
+        store.load("inc-1")
 
 
 def test_retention_skips_protected_segments(tmp_path: Path):

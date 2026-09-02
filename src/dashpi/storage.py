@@ -74,18 +74,24 @@ class IncidentStore:
 
     @staticmethod
     def _metadata_from_raw(raw: dict) -> IncidentMetadata:
-        raw["state"] = IncidentState(raw["state"])
-        raw.setdefault("pre_seconds", 30.0)
-        raw.setdefault("post_seconds", raw["post_deadline_mono"] - raw["trigger_mono"])
-        for key in ("clip", "report_json", "report_html"):
-            if raw.get(key):
-                raw[key] = FileArtifact(
-                    Path(raw[key]["path"]),
-                    raw[key]["byte_length"],
-                    raw[key]["sha256"],
-                raw[key].get("duration"),
-            )
-        return IncidentMetadata(**raw)
+        try:
+            if type(raw) is not dict:
+                raise ValueError("metadata is not an object")
+            raw = raw.copy()
+            raw["state"] = IncidentState(raw["state"])
+            raw.setdefault("pre_seconds", 30.0)
+            raw.setdefault("post_seconds", raw["post_deadline_mono"] - raw["trigger_mono"])
+            for key in ("clip", "report_json", "report_html"):
+                if raw.get(key):
+                    raw[key] = FileArtifact(
+                        Path(raw[key]["path"]),
+                        raw[key]["byte_length"],
+                        raw[key]["sha256"],
+                    raw[key].get("duration"),
+                )
+            return IncidentMetadata(**raw)
+        except (AttributeError, KeyError, TypeError, ValueError) as error:
+            raise ValueError("invalid incident metadata") from error
 
     def list(self) -> list[IncidentMetadata]:
         parent = self.root / "incidents"

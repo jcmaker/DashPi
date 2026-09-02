@@ -1,16 +1,20 @@
 import hashlib
 import json
 import shutil
+from concurrent.futures import ThreadPoolExecutor
+import threading
 
 import pytest
 from fastapi.testclient import TestClient
 
+import dashpi.api as api_module
 import dashpi.ranges as ranges_module
 import dashpi.storage as storage_module
 from dashpi.api import create_app
 from dashpi.models import FileArtifact, IncidentMetadata, IncidentState
 from dashpi.optical.container import MAX_PAYLOAD, unpack_container
 from dashpi.optical.protocol import parse_frame
+from dashpi.optical.session import OpticalSession
 from dashpi.storage import IncidentStore, atomic_write
 
 
@@ -159,6 +163,67 @@ def test_optical_rejects_frame_identifiers_outside_protocol_domain(
 
     assert client.get(f"/api/optical/{value}").status_code == 404
     assert client.get(f"/api/optical/{session_id}/frames/{value}").status_code == 404
+
+
+def test_latest_optical_session_slot_keeps_one_current_session_under_concurrent_starts():
+    current = api_module.LatestOpticalSession()
+    first = OpticalSession.from_bytes("one.html", b"one", "text/html", 512, 1)
+    second = OpticalSession.from_bytes("two.html", b"two", "text/html", 512, 2)
+    start = threading.Barrier(3)
+
+    def replace(session):
+        start.wait()
+        current.replace(session)
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        first_write = workers.submit(replace, first)
+        second_write = workers.submit(replace, second)
+        start.wait()
+        first_write.result()
+        second_write.result()
+
+    assert sum(current.get(session_id) is not None for session_id in (1, 2)) == 1
+
+
+def test_existing_malformed_metadata_is_a_conflict_not_not_found(client_with_ready_incident):
+    client, _payload, _clip, store = client_with_ready_incident
+    (store.directory("inc-1") / "metadata.json").write_text('{"incident_id":"inc-1"}')
+
+    assert client.get("/api/incidents/inc-1/clip").status_code == 409
+    assert (
+        client.post(
+            "/api/incidents/inc-1/optical", json={"artifact": "clip", "block_size": 512}
+        ).status_code
+        == 409
+    )
+
+
+@pytest.mark.parametrize("change", ["mutate", "grow"])
+def test_optical_rechecks_exact_verified_bytes_after_in_place_artifact_change(
+    client_with_ready_incident, monkeypatch, change
+):
+    client, payload, clip, _store = client_with_ready_incident
+
+    def hash_then_change(source):
+        digest = hashlib.sha256()
+        source.seek(0)
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+        with clip.path.open("r+b") as target:
+            if change == "mutate":
+                target.write(b"x" * len(payload))
+            else:
+                target.seek(0, 2)
+                target.write(b"x")
+        return digest.hexdigest()
+
+    monkeypatch.setattr(ranges_module, "_sha256_descriptor", hash_then_change)
+
+    response = client.post(
+        "/api/incidents/inc-1/optical", json={"artifact": "clip", "block_size": 512}
+    )
+
+    assert response.status_code == 409
 
 
 def test_clip_supports_resume_and_hash(client_with_ready_incident):

@@ -1,6 +1,9 @@
 import json
+import hashlib
+import hmac
 from pathlib import Path
 import secrets
+from threading import Lock
 from typing import Literal
 
 from fastapi import FastAPI, Header, HTTPException, Response
@@ -19,9 +22,25 @@ class OpticalStart(BaseModel):
     block_size: int = Field(ge=512, le=2048)
 
 
+class LatestOpticalSession:
+    def __init__(self):
+        self._lock = Lock()
+        self._session: OpticalSession | None = None
+
+    def replace(self, session: OpticalSession) -> None:
+        with self._lock:
+            self._session = session
+
+    def get(self, session_id: int) -> OpticalSession | None:
+        with self._lock:
+            if self._session is not None and self._session.session_id == session_id:
+                return self._session
+        return None
+
+
 def create_app(store: IncidentStore) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None)
-    sessions: dict[int, OpticalSession] = {}
+    sessions = LatestOpticalSession()
 
     @app.get("/api/incidents")
     def list_incidents():
@@ -176,10 +195,14 @@ def create_app(store: IncidentStore) -> FastAPI:
                     artifact.sha256,
                 )
                 try:
-                    if artifact_size > MAX_PAYLOAD:
-                        raise HTTPException(413, "optical payload exceeds 16 MiB")
                     artifact_source.seek(0)
-                    payload = artifact_source.read()
+                    payload = artifact_source.read(MAX_PAYLOAD + 1)
+                    if len(payload) != artifact_size or not hmac.compare_digest(
+                        hashlib.sha256(payload).hexdigest(), artifact.sha256
+                    ):
+                        raise HTTPException(409)
+                    if len(payload) > MAX_PAYLOAD:
+                        raise HTTPException(413, "optical payload exceeds 16 MiB")
                 finally:
                     artifact_source.close()
                     artifact_source = None
@@ -196,8 +219,7 @@ def create_app(store: IncidentStore) -> FastAPI:
         session = OpticalSession.from_bytes(
             basename, payload, media_type, request.block_size, session_id
         )
-        sessions.clear()
-        sessions[session_id] = session
+        sessions.replace(session)
         return {
             "session_id": session_id,
             "block_count": session.encoder.block_count,

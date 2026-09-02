@@ -130,3 +130,98 @@ Output:
 
 - The host `python3` does not include pytest; all executable verification used the repository's `.venv` interpreter.
 - The session registry is intentionally process-local and only retains one session, as required; a server restart discards it.
+
+## Fix round 1
+
+### Fixes
+
+- Replaced the mutable session dictionary with one `LatestOpticalSession` slot guarded by `threading.Lock`. Reads and replacements are atomic, and only one current session can be visible.
+- Normalized malformed on-disk incident metadata to `ValueError` in `IncidentStore._metadata_from_raw`; invalid route IDs still fail before parsing as `KeyError` and remain 404.
+- Re-read at most `MAX_PAYLOAD + 1` bytes from the already verified descriptor, then compared the buffered length and SHA-256 to metadata before session construction. This rejects in-place mutation or growth after the initial descriptor hash.
+- Bounded `OpticalSession.from_file` reads at `MAX_PAYLOAD + 1`, and reject excessive packed block counts before constructing a `FountainEncoder`.
+
+### RED
+
+Command:
+
+```console
+.venv/bin/python -W error -m pytest tests/test_optical_session.py tests/test_storage.py tests/test_api.py -q -k 'payload_cap or excessive_block_count or malformed_existing_metadata or latest_optical_session_slot or exact_verified_bytes'
+```
+
+Output:
+
+```text
+FFFFFF                                                                   [100%]
+FAILED tests/test_optical_session.py::test_session_from_file_reads_at_most_the_payload_cap - assert [-1] == [16777217]
+FAILED tests/test_optical_session.py::test_session_rejects_excessive_block_count_before_creating_encoder - AssertionError: constructed fountain encoder before validating block count
+FAILED tests/test_storage.py::test_store_normalizes_malformed_existing_metadata_to_value_error - KeyError: 'state'
+FAILED tests/test_api.py::test_latest_optical_session_slot_keeps_one_current_session_under_concurrent_starts - AttributeError: module 'dashpi.api' has no attribute 'LatestOpticalSession'
+FAILED tests/test_api.py::test_optical_rechecks_exact_verified_bytes_after_in_place_artifact_change[mutate] - assert 200 == 409
+FAILED tests/test_api.py::test_optical_rechecks_exact_verified_bytes_after_in_place_artifact_change[grow] - assert 200 == 409
+6 failed, 62 deselected in 0.21s
+```
+
+### GREEN
+
+Focused regression command:
+
+```console
+.venv/bin/python -W error -m pytest tests/test_optical_session.py tests/test_storage.py tests/test_api.py -q -k 'payload_cap or excessive_block_count or malformed_existing_metadata or latest_optical_session_slot or exact_verified_bytes'
+```
+
+Output:
+
+```text
+......                                                                   [100%]
+6 passed, 62 deselected in 0.15s
+```
+
+Covering command:
+
+```console
+.venv/bin/python -W error -m pytest tests/test_optical_session.py tests/test_storage.py tests/test_api.py -q
+```
+
+Output:
+
+```text
+....................................................................     [100%]
+68 passed in 0.31s
+```
+
+Full-suite command:
+
+```console
+.venv/bin/python -W error -m pytest -q
+```
+
+Output:
+
+```text
+........................................................................ [ 32%]
+........................................................................ [ 65%]
+........................................................................ [ 97%]
+.....                                                                    [100%]
+221 passed in 6.31s
+```
+
+### Files
+
+- `src/dashpi/api.py`
+- `src/dashpi/storage.py`
+- `src/dashpi/optical/session.py`
+- `tests/test_api.py`
+- `tests/test_storage.py`
+- `tests/test_optical_session.py`
+
+### Self-review
+
+- Concurrent replacement tests use a barrier and real sessions to prove the registry leaves exactly one active session.
+- Public routes now return 409 for malformed existing metadata, while the existing invalid-incident-ID regression remains 404.
+- Public optical start tests mutate and grow the open artifact in place after the initial descriptor hash; both are rejected before container packing.
+- The previously tested descriptor path-replacement case remains covered and succeeds because its verified open descriptor still contains the original bytes.
+- `git diff --check` is run before commit.
+
+### Concerns
+
+- The registry is intentionally one in-memory slot. It is correct for the MVP requirement but is not durable across process restarts.

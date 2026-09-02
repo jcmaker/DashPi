@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from dashpi.optical.container import pack_container
+from dashpi.optical.container import MAX_PAYLOAD, pack_container
 from dashpi.optical.fountain import FountainEncoder
 from dashpi.optical.protocol import OpticalFrame, pack_frame
 
@@ -16,7 +16,9 @@ class OpticalSession:
     def from_file(
         cls, path: Path, media_type: str, block_size: int, session_id: int
     ) -> "OpticalSession":
-        return cls.from_bytes(path.name, path.read_bytes(), media_type, block_size, session_id)
+        with path.open("rb") as source:
+            payload = source.read(MAX_PAYLOAD + 1)
+        return cls.from_bytes(path.name, payload, media_type, block_size, session_id)
 
     @classmethod
     def from_bytes(
@@ -27,9 +29,10 @@ class OpticalSession:
         if type(block_size) is not int or not 1 <= block_size < 2**16:
             raise ValueError("invalid optical block size")
         packed = pack_container(name, media_type, payload)
-        encoder = FountainEncoder(packed, block_size, session_id)
-        if not 1 <= encoder.block_count < 2**16:
+        block_count = (len(packed) + block_size - 1) // block_size
+        if not 1 <= block_count < 2**16:
             raise ValueError("invalid optical block count")
+        encoder = FountainEncoder(packed, block_size, session_id)
         return cls(session_id, encoder, len(packed))
 
     def frame(self, sequence: int) -> bytes:
