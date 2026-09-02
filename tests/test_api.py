@@ -9,6 +9,8 @@ import dashpi.ranges as ranges_module
 import dashpi.storage as storage_module
 from dashpi.api import create_app
 from dashpi.models import FileArtifact, IncidentMetadata, IncidentState
+from dashpi.optical.container import MAX_PAYLOAD, unpack_container
+from dashpi.optical.protocol import parse_frame
 from dashpi.storage import IncidentStore, atomic_write
 
 
@@ -28,6 +30,135 @@ def client_with_ready_incident(tmp_path):
     )
     store.save(incident)
     return TestClient(create_app(store)), payload, incident.clip, store
+
+
+@pytest.fixture
+def client_with_oversized_incident(tmp_path):
+    store = IncidentStore(tmp_path)
+    item = IncidentMetadata.new("inc-big", "2026-09-02T00:00:00Z", 40.0, 15.0)
+    item.state = IncidentState.READY
+    item.clip = atomic_write(store.directory("inc-big") / "clip.mp4", b"x" * (MAX_PAYLOAD + 1))
+    store.save(item)
+    return TestClient(create_app(store))
+
+
+def test_api_refuses_oversized_clip(client_with_oversized_incident):
+    response = client_with_oversized_incident.post(
+        "/api/incidents/inc-big/optical", json={"artifact": "clip", "block_size": 512}
+    )
+
+    assert response.status_code == 413
+
+
+def test_optical_frame_is_binary_no_store_and_latest_session_replaces_prior(
+    client_with_ready_incident,
+):
+    client, _payload, _clip, _store = client_with_ready_incident
+
+    first = client.post(
+        "/api/incidents/inc-1/optical", json={"artifact": "report", "block_size": 512}
+    )
+    second = client.post(
+        "/api/incidents/inc-1/optical", json={"artifact": "clip", "block_size": 512}
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert client.get(f"/api/optical/{first.json()['session_id']}").status_code == 404
+    status = client.get(f"/api/optical/{second.json()['session_id']}")
+    frame = client.get(f"/api/optical/{second.json()['session_id']}/frames/0")
+    assert status.json() == second.json()
+    assert frame.headers["content-type"].startswith("application/octet-stream")
+    assert frame.headers["cache-control"] == "no-store"
+    assert parse_frame(frame.content).session_id == second.json()["session_id"]
+
+
+def test_optical_clip_allows_analysis_failure_but_report_requires_ready(client_with_ready_incident):
+    client, _payload, _clip, store = client_with_ready_incident
+    incident = store.load("inc-1")
+    incident.state = IncidentState.ANALYSIS_FAILED
+    store.save(incident)
+
+    clip = client.post(
+        "/api/incidents/inc-1/optical", json={"artifact": "clip", "block_size": 512}
+    )
+    report = client.post(
+        "/api/incidents/inc-1/optical", json={"artifact": "report", "block_size": 512}
+    )
+
+    assert clip.status_code == 200
+    assert report.status_code == 409
+
+
+@pytest.mark.parametrize("damage", ["integrity", "symlink"])
+def test_optical_rejects_unverified_clip_artifact(client_with_ready_incident, tmp_path, damage):
+    client, _payload, clip, _store = client_with_ready_incident
+    if damage == "integrity":
+        clip.path.write_bytes(b"tampered")
+    else:
+        target = atomic_write(tmp_path / "outside.mp4", clip.path.read_bytes())
+        clip.path.unlink()
+        clip.path.symlink_to(target.path)
+
+    response = client.post(
+        "/api/incidents/inc-1/optical", json={"artifact": "clip", "block_size": 512}
+    )
+
+    assert response.status_code == 409
+
+
+def test_optical_uses_verified_descriptor_when_artifact_path_is_replaced(
+    client_with_ready_incident, monkeypatch
+):
+    client, payload, clip, _store = client_with_ready_incident
+
+    def replace_after_hash(source):
+        digest = hashlib.sha256()
+        source.seek(0)
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+        atomic_write(clip.path, b"x" * len(payload))
+        return digest.hexdigest()
+
+    monkeypatch.setattr(ranges_module, "_sha256_descriptor", replace_after_hash)
+
+    started = client.post(
+        "/api/incidents/inc-1/optical", json={"artifact": "clip", "block_size": 512}
+    )
+
+    assert started.status_code == 200
+    frame = client.get(f"/api/optical/{started.json()['session_id']}/frames/0")
+    parsed = parse_frame(frame.content)
+    assert unpack_container(parsed.symbol[: parsed.total_length]).payload == payload
+
+
+def test_optical_does_not_reopen_metadata_artifact_path(client_with_ready_incident, monkeypatch):
+    client, _payload, _clip, _store = client_with_ready_incident
+
+    def fail_if_reopened(_path):
+        raise AssertionError("optical endpoint reopened the metadata path")
+
+    monkeypatch.setattr(type(_clip.path), "read_bytes", fail_if_reopened)
+
+    response = client.post(
+        "/api/incidents/inc-1/optical", json={"artifact": "clip", "block_size": 512}
+    )
+
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize("value", [-1, 2**32])
+def test_optical_rejects_frame_identifiers_outside_protocol_domain(
+    client_with_ready_incident, value
+):
+    client, _payload, _clip, _store = client_with_ready_incident
+    started = client.post(
+        "/api/incidents/inc-1/optical", json={"artifact": "clip", "block_size": 512}
+    )
+    session_id = started.json()["session_id"]
+
+    assert client.get(f"/api/optical/{value}").status_code == 404
+    assert client.get(f"/api/optical/{session_id}/frames/{value}").status_code == 404
 
 
 def test_clip_supports_resume_and_hash(client_with_ready_incident):

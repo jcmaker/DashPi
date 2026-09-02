@@ -1,16 +1,27 @@
 import json
 from pathlib import Path
+import secrets
+from typing import Literal
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 from dashpi.models import IncidentState
+from dashpi.optical.container import MAX_PAYLOAD
+from dashpi.optical.session import OpticalSession
 from dashpi.ranges import _open_verified_file, range_response
 from dashpi.storage import IncidentStore
 
 
+class OpticalStart(BaseModel):
+    artifact: Literal["clip", "report"]
+    block_size: int = Field(ge=512, le=2048)
+
+
 def create_app(store: IncidentStore) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None)
+    sessions: dict[int, OpticalSession] = {}
 
     @app.get("/api/incidents")
     def list_incidents():
@@ -135,6 +146,90 @@ def create_app(store: IncidentStore) -> FastAPI:
             range_header,
             "video/mp4",
             item.clip.sha256,
+        )
+
+    @app.post("/api/incidents/{incident_id}/optical")
+    def start_optical(incident_id: str, request: OpticalStart):
+        artifact_source = None
+        try:
+            with store.open_incident(incident_id) as (item, directory_descriptor, directory):
+                if item.incident_id != incident_id:
+                    raise HTTPException(409)
+                if request.artifact == "clip":
+                    if item.state not in {IncidentState.READY, IncidentState.ANALYSIS_FAILED}:
+                        raise HTTPException(409)
+                    artifact = item.clip
+                    basename, media_type = "clip.mp4", "video/mp4"
+                else:
+                    if item.state is not IncidentState.READY:
+                        raise HTTPException(409)
+                    artifact = item.report_html
+                    basename, media_type = "report.html", "text/html"
+                if artifact is None:
+                    raise HTTPException(404)
+                if artifact.path != directory / basename:
+                    raise HTTPException(409)
+                artifact_source, artifact_size = _open_verified_file(
+                    directory_descriptor,
+                    basename,
+                    artifact.byte_length,
+                    artifact.sha256,
+                )
+                try:
+                    if artifact_size > MAX_PAYLOAD:
+                        raise HTTPException(413, "optical payload exceeds 16 MiB")
+                    artifact_source.seek(0)
+                    payload = artifact_source.read()
+                finally:
+                    artifact_source.close()
+                    artifact_source = None
+        except (FileNotFoundError, KeyError):
+            if artifact_source is not None:
+                artifact_source.close()
+            raise HTTPException(404) from None
+        except (OSError, TypeError, ValueError, UnicodeDecodeError):
+            if artifact_source is not None:
+                artifact_source.close()
+            raise HTTPException(409) from None
+
+        session_id = secrets.randbits(32)
+        session = OpticalSession.from_bytes(
+            basename, payload, media_type, request.block_size, session_id
+        )
+        sessions.clear()
+        sessions[session_id] = session
+        return {
+            "session_id": session_id,
+            "block_count": session.encoder.block_count,
+            "block_size": session.encoder.block_size,
+            "total_length": session.total_length,
+        }
+
+    @app.get("/api/optical/{session_id}")
+    def optical_status(session_id: int):
+        if not 0 <= session_id < 2**32:
+            raise HTTPException(404)
+        session = sessions.get(session_id)
+        if session is None:
+            raise HTTPException(404)
+        return {
+            "session_id": session_id,
+            "block_count": session.encoder.block_count,
+            "block_size": session.encoder.block_size,
+            "total_length": session.total_length,
+        }
+
+    @app.get("/api/optical/{session_id}/frames/{sequence}")
+    def optical_frame(session_id: int, sequence: int):
+        if not 0 <= session_id < 2**32 or not 0 <= sequence < 2**32:
+            raise HTTPException(404)
+        session = sessions.get(session_id)
+        if session is None:
+            raise HTTPException(404)
+        return Response(
+            session.frame(sequence),
+            media_type="application/octet-stream",
+            headers={"Cache-Control": "no-store"},
         )
 
     app.mount("/", StaticFiles(directory=Path(__file__).parent / "web", html=True), name="web")
