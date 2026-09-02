@@ -1,6 +1,20 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException
 
-from dashpi.storage import IncidentStore
+from dashpi.models import FileArtifact, IncidentState
+from dashpi.ranges import range_response
+from dashpi.storage import IncidentStore, sha256_file
+
+
+def _is_valid_clip(clip: FileArtifact) -> bool:
+    try:
+        return (
+            clip.path.is_file()
+            and clip.byte_length > 0
+            and clip.path.stat().st_size == clip.byte_length
+            and sha256_file(clip.path) == clip.sha256
+        )
+    except OSError:
+        return False
 
 
 def create_app(store: IncidentStore) -> FastAPI:
@@ -19,5 +33,19 @@ def create_app(store: IncidentStore) -> FastAPI:
             }
             for item in store.list()
         ]
+
+    @app.get("/api/incidents/{incident_id}/clip")
+    def get_clip(incident_id: str, range_header: str | None = Header(None, alias="Range")):
+        try:
+            item = store.load(incident_id)
+        except (FileNotFoundError, KeyError):
+            raise HTTPException(404) from None
+        if (
+            item.state not in {IncidentState.READY, IncidentState.ANALYSIS_FAILED}
+            or item.clip is None
+            or not _is_valid_clip(item.clip)
+        ):
+            raise HTTPException(409)
+        return range_response(item.clip.path, range_header, "video/mp4", item.clip.sha256)
 
     return app
