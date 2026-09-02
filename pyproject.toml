@@ -13,6 +13,7 @@ dev = ["pytest>=8,<9", "httpx2>=2,<3"]
 
 [project.scripts]
 dashpi = "dashpi.cli:main"
+dashpi-server = "dashpi.server:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
