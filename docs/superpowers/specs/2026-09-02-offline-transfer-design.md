@@ -1,7 +1,7 @@
 # DashPi Offline Incident and Transfer Design
 
 **Date:** 2026-09-02
-**Status:** Pending written review
+**Status:** Approved for implementation planning
 **Scope:** Desktop-simulated incident pipeline, on-demand local transfer, and optical transfer proof of concept
 
 ## 1. Decision Summary
