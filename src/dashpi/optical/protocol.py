@@ -21,6 +21,17 @@ class OpticalFrame:
 
 
 def _validate(frame: OpticalFrame) -> None:
+    integer_fields = (
+        frame.session_id,
+        frame.sequence,
+        frame.block_count,
+        frame.block_size,
+        frame.total_length,
+    )
+    if any(type(value) is not int for value in integer_fields) or any(
+        type(index) is not int for index in frame.indices
+    ):
+        raise ValueError("integer fields and indices must be integers")
     if not 0 <= frame.session_id < 2**32 or not 0 <= frame.sequence < 2**32:
         raise ValueError("invalid frame identifier")
     if not 1 <= frame.block_count < 2**16 or not 1 <= frame.block_size < 2**16:

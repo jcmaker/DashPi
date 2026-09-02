@@ -69,6 +69,19 @@ def test_pack_rejects_out_of_domain_frames(changes):
         pack_frame(frame(**changes))
 
 
+@pytest.mark.parametrize("field", ["session_id", "sequence", "block_count", "block_size", "total_length"])
+@pytest.mark.parametrize("value", [1.5, "1", None, True, False])
+def test_pack_rejects_non_integer_or_bool_integer_fields(field, value):
+    with pytest.raises(ValueError):
+        pack_frame(frame(**{field: value}))
+
+
+@pytest.mark.parametrize("value", [1.5, "1", None, True, False])
+def test_pack_rejects_non_integer_or_bool_indices(value):
+    with pytest.raises(ValueError):
+        pack_frame(frame(indices=(0, value)))
+
+
 @pytest.mark.parametrize(
     "offset,value",
     [
