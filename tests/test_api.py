@@ -1,4 +1,5 @@
 import hashlib
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -250,3 +251,17 @@ def test_report_rejects_malformed_json(client_with_ready_incident):
 
     assert client.get("/api/incidents/inc-1").status_code == 409
     assert client.get("/api/incidents/inc-1/report.html").status_code == 409
+
+
+def test_metadata_incident_id_must_match_route_before_artifact_resolution(
+    client_with_ready_incident,
+):
+    client, _payload, _clip, store = client_with_ready_incident
+    metadata_path = store.directory("inc-1") / "metadata.json"
+    metadata = json.loads(metadata_path.read_text())
+    metadata["incident_id"] = "inc-2"
+    metadata_path.write_text(json.dumps(metadata))
+
+    assert client.get("/api/incidents/inc-1").status_code == 409
+    assert client.get("/api/incidents/inc-1/report.html").status_code == 409
+    assert client.get("/api/incidents/inc-1/clip").status_code == 409

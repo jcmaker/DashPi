@@ -34,11 +34,13 @@ def create_app(store: IncidentStore) -> FastAPI:
             item = store.load(incident_id)
         except (FileNotFoundError, KeyError):
             raise HTTPException(404) from None
+        if item.incident_id != incident_id:
+            raise HTTPException(409)
         if item.state is not IncidentState.READY:
             raise HTTPException(409)
         if item.report_json is None or item.report_html is None:
             raise HTTPException(404)
-        directory = store.directory(incident_id)
+        directory = store.directory(item.incident_id)
         if (
             item.report_json.path != directory / "report.json"
             or item.report_html.path != directory / "report.html"
@@ -89,9 +91,11 @@ def create_app(store: IncidentStore) -> FastAPI:
     def get_clip(incident_id: str, range_header: str | None = Header(None, alias="Range")):
         try:
             item = store.load(incident_id)
-            clip_path = store.directory(incident_id) / "clip.mp4"
         except (FileNotFoundError, KeyError):
             raise HTTPException(404) from None
+        if item.incident_id != incident_id:
+            raise HTTPException(409)
+        clip_path = store.directory(item.incident_id) / "clip.mp4"
         if (
             item.state not in {IncidentState.READY, IncidentState.ANALYSIS_FAILED}
             or item.clip is None
