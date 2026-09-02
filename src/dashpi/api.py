@@ -195,6 +195,8 @@ def create_app(store: IncidentStore) -> FastAPI:
                     artifact.sha256,
                 )
                 try:
+                    if artifact_size > MAX_PAYLOAD:
+                        raise HTTPException(413, "optical payload exceeds 16 MiB")
                     artifact_source.seek(0)
                     payload = artifact_source.read(MAX_PAYLOAD + 1)
                     if len(payload) != artifact_size or not hmac.compare_digest(

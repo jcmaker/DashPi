@@ -54,6 +54,22 @@ def test_api_refuses_oversized_clip(client_with_oversized_incident):
     assert response.status_code == 413
 
 
+def test_api_refuses_verified_clip_larger_than_bounded_reread(tmp_path):
+    store = IncidentStore(tmp_path)
+    item = IncidentMetadata.new("inc-bigger", "2026-09-02T00:00:00Z", 40.0, 15.0)
+    item.state = IncidentState.READY
+    item.clip = atomic_write(
+        store.directory("inc-bigger") / "clip.mp4", b"x" * (MAX_PAYLOAD + 4096)
+    )
+    store.save(item)
+
+    response = TestClient(create_app(store)).post(
+        "/api/incidents/inc-bigger/optical", json={"artifact": "clip", "block_size": 512}
+    )
+
+    assert response.status_code == 413
+
+
 def test_optical_frame_is_binary_no_store_and_latest_session_replaces_prior(
     client_with_ready_incident,
 ):

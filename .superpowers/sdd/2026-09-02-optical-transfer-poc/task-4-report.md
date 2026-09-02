@@ -225,3 +225,63 @@ Output:
 ### Concerns
 
 - The registry is intentionally one in-memory slot. It is correct for the MVP requirement but is not durable across process restarts.
+
+## Fix round 2
+
+### Fix
+
+- Restored the verified-size 413 policy check immediately after `_open_verified_file`. Artifacts within the cap still take the bounded reread plus exact length and SHA-256 recheck; a verified artifact over the cap is now rejected without being truncated into a false 409.
+
+### RED
+
+Command:
+
+```console
+.venv/bin/python -W error -m pytest tests/test_api.py::test_api_refuses_verified_clip_larger_than_bounded_reread -q
+```
+
+Output:
+
+```text
+F                                                                        [100%]
+FAILED tests/test_api.py::test_api_refuses_verified_clip_larger_than_bounded_reread - assert 409 == 413
+1 failed in 0.18s
+```
+
+### GREEN
+
+Regression command:
+
+```console
+.venv/bin/python -W error -m pytest tests/test_api.py::test_api_refuses_verified_clip_larger_than_bounded_reread -q
+```
+
+Output:
+
+```text
+.                                                                        [100%]
+1 passed in 0.17s
+```
+
+Covering API command:
+
+```console
+.venv/bin/python -W error -m pytest tests/test_api.py -q
+```
+
+Output:
+
+```text
+......................................................                   [100%]
+54 passed in 0.39s
+```
+
+### Files
+
+- `src/dashpi/api.py`
+- `tests/test_api.py`
+
+### Self-review
+
+- The new public API regression uses a fully stored-and-hashed artifact 4 KiB above the cap, so it crosses the bounded reread limit rather than duplicating the existing exactly-one-byte-over case.
+- `git diff --check` is run before commit.
