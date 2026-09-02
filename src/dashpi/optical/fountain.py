@@ -70,6 +70,10 @@ class FountainDecoder:
         for index in tuple(unknown & self.blocks.keys()):
             xor_into(value, self.blocks[index])
             unknown.remove(index)
+        if not unknown:
+            if any(value):
+                raise ValueError("conflicting fountain equation")
+            return
         if unknown and not self._has_equation(unknown, value):
             if len(self.equations) < MAX_UNRESOLVED_EQUATIONS:
                 self.equations.append((unknown, value))

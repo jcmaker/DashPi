@@ -106,3 +106,13 @@ def test_decoder_rejects_conflicting_reduced_equations():
 
     with pytest.raises(ValueError, match="conflicting"):
         decoder.add((0,), b"0000")
+
+
+def test_decoder_rejects_conflicting_fully_resolved_equation():
+    decoder = FountainDecoder(1, 4, 4)
+    decoder.add((0,), b"abcd")
+
+    with pytest.raises(ValueError, match="conflicting"):
+        decoder.add((0,), b"wxyz")
+
+    assert decoder.result() == b"abcd"
