@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 from dashpi.models import FileArtifact, Segment
@@ -29,33 +30,42 @@ def probe_duration(path: Path) -> float:
 def segment_source(source: Path, output_dir: Path, segment_seconds: float) -> list[Segment]:
     output_dir.mkdir(parents=True, exist_ok=True)
     pattern = output_dir / "%06d.mp4"
-    subprocess.run(
-        [
-            "ffmpeg",
-            "-loglevel",
-            "error",
-            "-y",
-            "-i",
-            str(source),
-            "-map",
-            "0:v:0",
-            "-an",
-            "-c:v",
-            "libx264",
-            "-force_key_frames",
-            f"expr:gte(t,n_forced*{segment_seconds})",
-            "-f",
-            "segment",
-            "-segment_time",
-            str(segment_seconds),
-            "-reset_timestamps",
-            "1",
-            str(pattern),
-        ],
-        check=True,
-    )
+    list_fd, list_name = tempfile.mkstemp(dir=output_dir, suffix=".segments.txt")
+    os.close(list_fd)
+    segment_list = Path(list_name)
+    try:
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                str(source),
+                "-map",
+                "0:v:0",
+                "-an",
+                "-c:v",
+                "libx264",
+                "-force_key_frames",
+                f"expr:gte(t,n_forced*{segment_seconds})",
+                "-f",
+                "segment",
+                "-segment_time",
+                str(segment_seconds),
+                "-reset_timestamps",
+                "1",
+                "-segment_list",
+                str(segment_list),
+                str(pattern),
+            ],
+            check=True,
+        )
+        paths = [output_dir / path for path in segment_list.read_text().splitlines()]
+    finally:
+        segment_list.unlink(missing_ok=True)
     start, segments = 0.0, []
-    for path in sorted(output_dir.glob("*.mp4")):
+    for path in paths:
         end = start + probe_duration(path)
         segments.append(Segment(path, start, end))
         start = end
