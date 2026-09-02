@@ -1,0 +1,11 @@
+{
+  "fields": {
+    "session_id": 16909060,
+    "sequence": 5,
+    "block_count": 3,
+    "block_size": 4,
+    "total_length": 10,
+    "indices": [0, 2]
+  },
+  "wire_hex": "4450513101000403020105000000030004000a00000002000002006162636439137b7c"
+}
