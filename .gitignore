@@ -1,4 +1,5 @@
 .worktrees/
+.superpowers/sdd/
 .venv/
 web/node_modules/
 __pycache__/
