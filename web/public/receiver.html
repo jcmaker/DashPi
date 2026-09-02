@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>DashPi 광학 수신</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/tokens.css">
+</head>
+<body>
+  <main class="receiver-workbench">
+    <header class="receiver-head">
+      <p class="product-name">DashPi · Optical Receiver</p>
+      <h1>카메라로 데이터 받기</h1>
+      <p>QR 프레임은 이 기기에서만 처리되며 네트워크로 업로드되지 않습니다.</p>
+    </header>
+
+    <section class="camera-stage" aria-labelledby="camera-heading">
+      <div class="camera-copy">
+        <h2 id="camera-heading">송신 화면을 프레임 안에 맞추세요</h2>
+        <p id="receiver-status" class="status" role="status" aria-live="polite">카메라를 시작할 준비가 됐습니다.</p>
+      </div>
+      <video id="camera" playsinline muted aria-label="광학 QR 스캐너 카메라"></video>
+    </section>
+
+    <div class="receiver-actions">
+      <button id="start-camera" type="button">카메라 시작 · Start camera</button>
+      <button id="stop-camera" type="button" disabled>카메라 중지 · Stop camera</button>
+      <a id="save" hidden>검증 파일 저장 · Save verified file</a>
+    </div>
+    <p class="privacy-note">파일은 전체 길이와 SHA-256 검증을 통과한 뒤에만 저장할 수 있습니다.</p>
+
+    <section id="verified-result" class="verified-result" aria-labelledby="verified-heading" hidden>
+      <p class="product-name">Verified file</p>
+      <h2 id="verified-heading">검증 완료</h2>
+      <p id="verified-name"></p>
+      <iframe id="preview-report" title="검증된 분석 리포트" sandbox hidden></iframe>
+      <video id="preview-video" controls preload="metadata" aria-label="검증된 이벤트 영상" hidden></video>
+    </section>
+  </main>
+  <script type="module" src="/assets/receiver.js"></script>
+  <script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');</script>
+</body>
+</html>

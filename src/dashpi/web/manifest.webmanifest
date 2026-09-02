@@ -1,0 +1,9 @@
+{
+  "name": "DashPi Optical Receiver",
+  "short_name": "DashPi",
+  "start_url": "/receiver.html",
+  "display": "standalone",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

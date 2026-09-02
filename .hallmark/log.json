@@ -1,6 +1,13 @@
 [
   {
     "date": "2026-09-02",
+    "macrostructure": "Marquee Hero",
+    "theme": "Cobalt",
+    "enrichment": "live camera viewport",
+    "brief": "Offline mobile optical receiver with verified preview and explicit save"
+  },
+  {
+    "date": "2026-09-02",
     "macrostructure": "Split Studio",
     "theme": "Cobalt",
     "enrichment": "functional QR output",

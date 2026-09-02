@@ -188,4 +188,86 @@ video { min-height: 2.75rem; }
   .sender-workbench { grid-template-columns: minmax(18rem, 0.8fr) minmax(0, 1.2fr); align-items: start; padding-block: var(--space-7); }
   .sender-controls { position: sticky; top: var(--space-5); }
 }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: 0ms; } }
+/* Hallmark · macrostructure: Marquee Hero · tone: utilitarian technical · anchor hue: amber
+ * genre: modern-minimal · theme: Cobalt · audience: DashPi mobile recipients
+ * use: scan, verify, preview, and explicitly save an optical file · enrichment: live camera viewport
+ * nav: none · footer: none · contrast: pass (40–41) · responsive: pass (34, 49, 50–57)
+ * honest: pass (46) · chrome: pass (47) · tokens: pass (48) · pre-emit critique: P5 H5 E4 S5 R5 V5
+ */
+.receiver-workbench {
+  width: min(100% - var(--space-5), 64rem);
+  min-height: 100dvh;
+  margin: 0 auto;
+  padding-block: var(--space-5) var(--space-7);
+}
+.receiver-head { max-width: 65ch; }
+.receiver-head > p:last-child { margin: var(--space-3) 0 0; color: var(--color-muted); }
+.camera-stage {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-4);
+  margin-top: var(--space-6);
+  border-radius: var(--radius-md);
+  background: var(--color-stage);
+  color: var(--color-stage-ink);
+  padding: var(--space-4);
+}
+.camera-copy { min-width: 0; }
+.camera-copy h2 { font-size: var(--text-lg); }
+.camera-stage .status { color: var(--color-stage-ink); opacity: 0.78; }
+.camera-stage .status[data-tone="error"] { color: var(--color-stage-ink); opacity: 1; text-decoration: underline; text-decoration-color: var(--color-error); }
+#camera {
+  width: 100%;
+  min-height: 16rem;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-color: var(--color-rule);
+  background: var(--color-ink);
+}
+.receiver-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+.receiver-actions button, .receiver-actions a {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  border: var(--rule-thin) solid var(--color-ink);
+  border-radius: var(--radius-sm);
+  padding-inline: var(--space-4);
+  background: var(--color-ink);
+  color: var(--color-paper-raised);
+  font: inherit;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+.receiver-actions #stop-camera { background: transparent; color: var(--color-ink); }
+.receiver-actions #save { border-color: var(--color-focus); background: var(--color-accent); color: var(--color-accent-ink); }
+.receiver-actions #save[hidden] { display: none; }
+.receiver-actions button:active, .receiver-actions a:active { transform: translateY(1px); }
+.receiver-actions button:disabled { cursor: not-allowed; opacity: 0.5; }
+.receiver-actions a:focus-visible { outline: 2px solid var(--color-paper-raised); outline-offset: 1px; box-shadow: 0 0 0 4px var(--color-focus); }
+.privacy-note { margin: var(--space-2) 0 0; color: var(--color-muted); font-size: var(--text-sm); }
+.verified-result {
+  margin-top: var(--space-6);
+  border-top: var(--rule-thin) solid var(--color-rule);
+  padding-top: var(--space-5);
+}
+.verified-result > p { overflow-wrap: anywhere; }
+.verified-result iframe, .verified-result video { margin-top: var(--space-3); }
+
+@media (hover: hover) and (pointer: fine) {
+  .receiver-actions button:not(:disabled):hover, .receiver-actions a:hover { background: var(--color-accent); color: var(--color-accent-ink); }
+}
+@media (min-width: 48rem) {
+  .receiver-workbench { padding-top: var(--space-7); }
+  .camera-stage { grid-template-columns: minmax(12rem, 0.45fr) minmax(0, 1fr); align-items: center; padding: var(--space-5); }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0ms !important; transition-duration: 0ms !important; }
+}
