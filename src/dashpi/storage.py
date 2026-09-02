@@ -47,7 +47,11 @@ class IncidentStore:
         )
 
     def load(self, incident_id: str) -> IncidentMetadata:
-        raw = json.loads((self.directory(incident_id) / "metadata.json").read_text())
+        return self.load_with_directory(incident_id)[0]
+
+    def load_with_directory(self, incident_id: str) -> tuple[IncidentMetadata, Path]:
+        directory = self.directory(incident_id)
+        raw = json.loads((directory / "metadata.json").read_text())
         raw["state"] = IncidentState(raw["state"])
         raw.setdefault("pre_seconds", 30.0)
         raw.setdefault("post_seconds", raw["post_deadline_mono"] - raw["trigger_mono"])
@@ -57,9 +61,9 @@ class IncidentStore:
                     Path(raw[key]["path"]),
                     raw[key]["byte_length"],
                     raw[key]["sha256"],
-                    raw[key].get("duration"),
-                )
-        return IncidentMetadata(**raw)
+                raw[key].get("duration"),
+            )
+        return IncidentMetadata(**raw), directory
 
     def list(self) -> list[IncidentMetadata]:
         parent = self.root / "incidents"

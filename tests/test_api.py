@@ -265,3 +265,28 @@ def test_metadata_incident_id_must_match_route_before_artifact_resolution(
     assert client.get("/api/incidents/inc-1").status_code == 409
     assert client.get("/api/incidents/inc-1/report.html").status_code == 409
     assert client.get("/api/incidents/inc-1/clip").status_code == 409
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/api/incidents/inc-1", "/api/incidents/inc-1/report.html", "/api/incidents/inc-1/clip"],
+)
+def test_artifact_routes_use_only_the_store_resolved_directory(
+    client_with_ready_incident, path
+):
+    _client, _payload, _clip, store = client_with_ready_incident
+
+    class OneResolutionStore(IncidentStore):
+        def __init__(self, root):
+            super().__init__(root)
+            self.resolutions = 0
+
+        def directory(self, incident_id):
+            self.resolutions += 1
+            if self.resolutions > 1:
+                raise AssertionError("API recomputed an incident directory")
+            return super().directory(incident_id)
+
+    client = TestClient(create_app(OneResolutionStore(store.root)), raise_server_exceptions=False)
+
+    assert client.get(path).status_code == 200
