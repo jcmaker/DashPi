@@ -79,6 +79,8 @@ def bytes_to_free(
 def choose_prunable_segments(
     segments: list[Segment], protected: set[Path], bytes_to_free: int, sizes: dict[Path, int]
 ) -> list[Segment]:
+    if bytes_to_free <= 0:
+        return []
     chosen, freed = [], 0
     for segment in sorted(segments, key=lambda value: value.start_mono):
         if segment.path in protected:

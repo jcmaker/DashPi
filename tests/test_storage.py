@@ -22,6 +22,11 @@ def test_retention_skips_protected_segments(tmp_path: Path):
     assert choose_prunable_segments(segments, {segments[0].path}, bytes_to_free=2, sizes={s.path: 2 for s in segments}) == [segments[1]]
 
 
+def test_retention_selects_nothing_without_pressure(tmp_path: Path):
+    segment = Segment(tmp_path / "0.mp4", 0, 2)
+    assert choose_prunable_segments([segment], set(), bytes_to_free=0, sizes={segment.path: 2}) == []
+
+
 def test_pressure_enforces_raw_and_free_space_limits():
     assert bytes_to_free(total=1000, used=950, raw_bytes=800, raw_max_fraction=.70, min_free_fraction=.10) == 100
 

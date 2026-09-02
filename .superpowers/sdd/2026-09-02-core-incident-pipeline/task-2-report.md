@@ -44,3 +44,14 @@ Command output:
 
     $ git diff --check
     (no output; passed)
+
+## Fix Round 1
+
+- Added `test_retention_selects_nothing_without_pressure` to `tests/test_storage.py`.
+- RED command: `/Users/justin/Documents/ChatGPT/DashPi/.worktrees/dashpi-mvp/.venv/bin/python -m pytest tests/test_storage.py::test_retention_selects_nothing_without_pressure -q`
+- RED result: `1 failed`; zero pressure incorrectly returned the unprotected segment.
+- Added the minimal `if bytes_to_free <= 0: return []` guard in `src/dashpi/storage.py`.
+- GREEN/focused command: `/Users/justin/Documents/ChatGPT/DashPi/.worktrees/dashpi-mvp/.venv/bin/python -m pytest tests/test_storage.py -q`
+- GREEN/focused result: `6 passed in 0.01s`.
+- Full command: `/Users/justin/Documents/ChatGPT/DashPi/.worktrees/dashpi-mvp/.venv/bin/python -m pytest -q`
+- Full result: `9 passed in 0.01s`.
