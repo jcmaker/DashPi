@@ -1,6 +1,7 @@
 import base64
 import html
 import json
+import math
 import urllib.request
 from pathlib import Path
 
@@ -15,9 +16,10 @@ class OllamaClient:
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
     def validate_model(self) -> None:
-        with urllib.request.urlopen(self.base_url + "/api/tags", timeout=5.0) as response:
+        with self.opener.open(self.base_url + "/api/tags", timeout=5.0) as response:
             names = {item["name"] for item in json.loads(response.read())["models"]}
         if self.model not in names:
             raise ValueError(f"Ollama model not installed: {self.model}")
@@ -38,28 +40,38 @@ class OllamaClient:
             data=body,
             headers={"Content-Type": "application/json"},
         )
-        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+        with self.opener.open(request, timeout=self.timeout) as response:
             return json.loads(json.loads(response.read())["response"])
 
 
-def validate_report(raw: dict, clip_sha256: str, model: str, generated_at: str) -> dict:
+def validate_report(raw: object, clip_sha256: str, model: str, generated_at: str) -> dict:
     if (
-        not isinstance(raw.get("summary"), str)
-        or not isinstance(raw.get("observations"), list)
-        or not isinstance(raw.get("limitations"), list)
+        not isinstance(raw, dict)
+        or set(raw) != {"summary", "observations", "limitations"}
+        or not isinstance(raw["summary"], str)
+        or not isinstance(raw["observations"], list)
+        or not isinstance(raw["limitations"], list)
     ):
         raise ValueError("invalid report shape")
     if any(
         not isinstance(item, dict)
-        or not isinstance(item.get("timestamp"), (int, float))
-        or not isinstance(item.get("description"), str)
+        or set(item) != {"timestamp", "description"}
+        or isinstance(item["timestamp"], bool)
+        or not isinstance(item["timestamp"], (int, float))
+        or not math.isfinite(item["timestamp"])
+        or not isinstance(item["description"], str)
         for item in raw["observations"]
     ):
         raise ValueError("invalid observation")
     if any(not isinstance(item, str) for item in raw["limitations"]):
         raise ValueError("invalid limitation")
     return {
-        **raw,
+        "summary": raw["summary"],
+        "observations": [
+            {"timestamp": item["timestamp"], "description": item["description"]}
+            for item in raw["observations"]
+        ],
+        "limitations": list(raw["limitations"]),
         "source_clip_sha256": clip_sha256,
         "model": model,
         "generated_at": generated_at,
