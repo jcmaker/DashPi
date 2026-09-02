@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import hashlib
 import json
 import os
@@ -58,6 +60,20 @@ class IncidentStore:
                     raw[key].get("duration"),
                 )
         return IncidentMetadata(**raw)
+
+    def list(self) -> list[IncidentMetadata]:
+        parent = self.root / "incidents"
+        if not parent.exists():
+            return []
+        return sorted(
+            (
+                self.load(path.name)
+                for path in parent.iterdir()
+                if (path / "metadata.json").is_file()
+            ),
+            key=lambda item: item.triggered_at,
+            reverse=True,
+        )
 
     def cleanup_stale_partials(self, active: set[Path]) -> list[Path]:
         removed = []
