@@ -26,3 +26,35 @@ def test_list_returns_metadata_not_filesystem_paths(tmp_path):
         }
     ]
     assert str(tmp_path) not in response.text
+
+
+def test_list_excludes_incidents_still_being_processed(tmp_path):
+    store = IncidentStore(tmp_path)
+    states = [
+        IncidentState.COLLECTING_POST_TRIGGER,
+        IncidentState.CLIPPING,
+        IncidentState.ANALYZING,
+        IncidentState.READY,
+        IncidentState.CLIP_FAILED,
+        IncidentState.ANALYSIS_FAILED,
+    ]
+    for index, state in enumerate(states):
+        incident = IncidentMetadata.new(
+            f"inc-{index}", f"2026-09-02T00:00:0{index}Z", 40.0, 15.0
+        )
+        incident.state = state
+        store.save(incident)
+
+    assert [item.state for item in store.list()] == [
+        IncidentState.ANALYSIS_FAILED,
+        IncidentState.CLIP_FAILED,
+        IncidentState.READY,
+    ]
+
+    response = TestClient(create_app(store)).get("/api/incidents")
+
+    assert [item["state"] for item in response.json()] == [
+        "analysis_failed",
+        "clip_failed",
+        "ready",
+    ]

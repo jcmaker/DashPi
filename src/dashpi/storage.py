@@ -65,11 +65,17 @@ class IncidentStore:
         parent = self.root / "incidents"
         if not parent.exists():
             return []
+        summary_states = {
+            IncidentState.READY,
+            IncidentState.CLIP_FAILED,
+            IncidentState.ANALYSIS_FAILED,
+        }
         return sorted(
             (
-                self.load(path.name)
+                item
                 for path in parent.iterdir()
                 if (path / "metadata.json").is_file()
+                and (item := self.load(path.name)).state in summary_states
             ),
             key=lambda item: item.triggered_at,
             reverse=True,
