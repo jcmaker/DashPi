@@ -2,12 +2,13 @@ from collections.abc import Iterator
 import hashlib
 import hmac
 import os
-from pathlib import Path
 import stat
 from typing import BinaryIO
 
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
+
+from dashpi.storage import open_regular_file_at
 
 
 def parse_range(header: str | None, size: int) -> tuple[int, int] | None:
@@ -29,9 +30,8 @@ def parse_range(header: str | None, size: int) -> tuple[int, int] | None:
 
 
 def range_response(
-    path: Path, header: str | None, media_type: str, digest: str, byte_length: int
+    source: BinaryIO, size: int, header: str | None, media_type: str, digest: str
 ) -> StreamingResponse:
-    source, size = _open_verified_file(path, byte_length, digest)
     try:
         selected = parse_range(header, size)
     except (TypeError, ValueError):
@@ -59,29 +59,26 @@ def range_response(
     }
     if selected:
         headers["Content-Range"] = f"bytes {start}-{end}/{size}"
-    return StreamingResponse(
-        body(), status_code=206 if selected else 200, media_type=media_type, headers=headers
-    )
-
-
-def _open_verified_file(path: Path, byte_length: int, digest: str) -> tuple[BinaryIO, int]:
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-    descriptor: int | None = None
     try:
-        expected = os.lstat(path)
-        if not stat.S_ISREG(expected.st_mode):
-            raise OSError("non-regular clip")
-        descriptor = os.open(path, flags)
-        source = os.fdopen(descriptor, "rb")
+        return StreamingResponse(
+            body(), status_code=206 if selected else 200, media_type=media_type, headers=headers
+        )
+    except BaseException:
+        source.close()
+        raise
+
+
+def _open_verified_file(
+    directory_descriptor: int, basename: str, byte_length: int, digest: str
+) -> tuple[BinaryIO, int]:
+    try:
+        source = open_regular_file_at(directory_descriptor, basename)
     except OSError:
-        if descriptor is not None:
-            os.close(descriptor)
         raise HTTPException(409) from None
     try:
         details = os.fstat(source.fileno())
         if (
             not stat.S_ISREG(details.st_mode)
-            or (details.st_dev, details.st_ino) != (expected.st_dev, expected.st_ino)
             or details.st_size <= 0
             or details.st_size != byte_length
             or not hmac.compare_digest(_sha256_descriptor(source), digest)

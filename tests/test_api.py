@@ -1,10 +1,12 @@
 import hashlib
 import json
+import shutil
 
 import pytest
 from fastapi.testclient import TestClient
 
 import dashpi.ranges as ranges_module
+import dashpi.storage as storage_module
 from dashpi.api import create_app
 from dashpi.models import FileArtifact, IncidentMetadata, IncidentState
 from dashpi.storage import IncidentStore, atomic_write
@@ -115,6 +117,55 @@ def test_clip_streams_opened_descriptor_after_path_replacement(
         return digest.hexdigest()
 
     monkeypatch.setattr(ranges_module, "_sha256_descriptor", replace_after_descriptor_hash)
+
+    response = client.get("/api/incidents/inc-1/clip", headers={"Range": "bytes=4-8"})
+
+    assert response.status_code == 206
+    assert response.content == payload[4:9]
+    assert response.headers["etag"] == f'"sha256:{clip.sha256}"'
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/api/incidents/inc-1", "/api/incidents/inc-1/report.html", "/api/incidents/inc-1/clip"],
+)
+def test_artifact_routes_reject_symlinked_incident_directory(
+    client_with_ready_incident, tmp_path, path
+):
+    client, _payload, _clip, store = client_with_ready_incident
+    incident_directory = store.directory("inc-1")
+    outside_directory = tmp_path / "outside-incident"
+    incident_directory.replace(outside_directory)
+    incident_directory.symlink_to(outside_directory, target_is_directory=True)
+
+    response = client.get(path)
+
+    assert response.status_code == 409
+    assert "etag" not in response.headers
+
+
+def test_clip_keeps_open_incident_directory_after_directory_replacement(
+    client_with_ready_incident, tmp_path, monkeypatch
+):
+    client, payload, clip, store = client_with_ready_incident
+    incident_directory = store.directory("inc-1")
+    replacement_directory = tmp_path / "replacement-incident"
+    retired_directory = tmp_path / "retired-incident"
+    shutil.copytree(incident_directory, replacement_directory)
+    (replacement_directory / "clip.mp4").write_bytes(b"x" * len(payload))
+    real_loads = storage_module.json.loads
+    replaced = False
+
+    def replace_directory_after_metadata_parse(value, *args, **kwargs):
+        nonlocal replaced
+        metadata = real_loads(value, *args, **kwargs)
+        if not replaced and isinstance(metadata, dict) and metadata.get("incident_id") == "inc-1":
+            replaced = True
+            incident_directory.replace(retired_directory)
+            replacement_directory.replace(incident_directory)
+        return metadata
+
+    monkeypatch.setattr(storage_module.json, "loads", replace_directory_after_metadata_parse)
 
     response = client.get("/api/incidents/inc-1/clip", headers={"Range": "bytes=4-8"})
 

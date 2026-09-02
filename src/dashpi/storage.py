@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 import hashlib
 import json
 import os
 from pathlib import Path
+import stat
+from typing import BinaryIO
 
 from dashpi.models import FileArtifact, IncidentMetadata, IncidentState, Segment
 
@@ -47,11 +51,29 @@ class IncidentStore:
         )
 
     def load(self, incident_id: str) -> IncidentMetadata:
-        return self.load_with_directory(incident_id)[0]
+        with self.open_incident(incident_id) as (item, _descriptor, _directory):
+            return item
 
-    def load_with_directory(self, incident_id: str) -> tuple[IncidentMetadata, Path]:
+    @contextmanager
+    def open_incident(
+        self, incident_id: str
+    ) -> Iterator[tuple[IncidentMetadata, int, Path]]:
         directory = self.directory(incident_id)
-        raw = json.loads((directory / "metadata.json").read_text())
+        incidents_descriptor = _open_directory(self.root / "incidents")
+        try:
+            incident_descriptor = _open_directory(incident_id, dir_fd=incidents_descriptor)
+        finally:
+            os.close(incidents_descriptor)
+        try:
+            with open_regular_file_at(incident_descriptor, "metadata.json") as metadata_source:
+                raw = json.loads(metadata_source.read())
+            item = self._metadata_from_raw(raw)
+            yield item, incident_descriptor, directory
+        finally:
+            os.close(incident_descriptor)
+
+    @staticmethod
+    def _metadata_from_raw(raw: dict) -> IncidentMetadata:
         raw["state"] = IncidentState(raw["state"])
         raw.setdefault("pre_seconds", 30.0)
         raw.setdefault("post_seconds", raw["post_deadline_mono"] - raw["trigger_mono"])
@@ -63,24 +85,35 @@ class IncidentStore:
                     raw[key]["sha256"],
                 raw[key].get("duration"),
             )
-        return IncidentMetadata(**raw), directory
+        return IncidentMetadata(**raw)
 
     def list(self) -> list[IncidentMetadata]:
         parent = self.root / "incidents"
-        if not parent.exists():
+        try:
+            parent_descriptor = _open_directory(parent)
+        except (FileNotFoundError, OSError):
             return []
+        try:
+            if os.listdir not in getattr(os, "supports_fd", ()):
+                return []
+            incident_ids = os.listdir(parent_descriptor)
+        finally:
+            os.close(parent_descriptor)
         summary_states = {
             IncidentState.READY,
             IncidentState.CLIP_FAILED,
             IncidentState.ANALYSIS_FAILED,
         }
+        items = []
+        for incident_id in incident_ids:
+            try:
+                item = self.load(incident_id)
+            except (FileNotFoundError, KeyError, OSError, TypeError, ValueError):
+                continue
+            if item.state in summary_states:
+                items.append(item)
         return sorted(
-            (
-                item
-                for path in parent.iterdir()
-                if (path / "metadata.json").is_file()
-                and (item := self.load(path.name)).state in summary_states
-            ),
+            items,
             key=lambda item: item.triggered_at,
             reverse=True,
         )
@@ -121,3 +154,57 @@ def choose_prunable_segments(
         if freed >= bytes_to_free:
             break
     return chosen
+
+
+def open_regular_file_at(directory_descriptor: int, basename: str) -> BinaryIO:
+    if not basename or basename in {".", ".."} or Path(basename).name != basename:
+        raise OSError("file must be a fixed basename")
+    flags = _secure_open_flags(directory=False)
+    if (
+        os.open not in getattr(os, "supports_dir_fd", ())
+        or os.stat not in getattr(os, "supports_dir_fd", ())
+        or os.stat not in getattr(os, "supports_follow_symlinks", ())
+    ):
+        raise OSError("descriptor-relative file access is unavailable")
+    expected = os.stat(
+        basename,
+        dir_fd=directory_descriptor,
+        follow_symlinks=False,
+    )
+    if not stat.S_ISREG(expected.st_mode):
+        raise OSError("artifact is not a regular file")
+    descriptor = os.open(basename, flags, dir_fd=directory_descriptor)
+    try:
+        source = os.fdopen(descriptor, "rb")
+    except BaseException:
+        os.close(descriptor)
+        raise
+    try:
+        details = os.fstat(source.fileno())
+        if (
+            not stat.S_ISREG(details.st_mode)
+            or (details.st_dev, details.st_ino) != (expected.st_dev, expected.st_ino)
+        ):
+            raise OSError("artifact changed during open")
+        return source
+    except BaseException:
+        source.close()
+        raise
+
+
+def _open_directory(path: Path | str, *, dir_fd: int | None = None) -> int:
+    flags = _secure_open_flags(directory=True)
+    if dir_fd is None:
+        return os.open(path, flags)
+    if os.open not in getattr(os, "supports_dir_fd", ()):
+        raise OSError("descriptor-relative directory access is unavailable")
+    return os.open(path, flags, dir_fd=dir_fd)
+
+
+def _secure_open_flags(*, directory: bool) -> int:
+    if not hasattr(os, "O_NOFOLLOW") or (directory and not hasattr(os, "O_DIRECTORY")):
+        raise OSError("secure descriptor flags are unavailable")
+    flags = os.O_RDONLY | os.O_NOFOLLOW
+    if directory:
+        flags |= os.O_DIRECTORY
+    return flags
