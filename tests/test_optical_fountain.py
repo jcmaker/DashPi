@@ -91,9 +91,18 @@ def test_decoder_prunes_equations_after_resolving_them():
 
 
 def test_decoder_caps_retained_unresolved_equations():
-    decoder = FountainDecoder(2, 4, 8)
+    decoder = FountainDecoder(1026, 4, 4104)
 
     for value in range(1025):
-        decoder.add((0, 1), value.to_bytes(4, "little"))
+        decoder.add((0, value + 1), value.to_bytes(4, "little"))
 
     assert len(decoder.equations) <= 1024
+
+
+def test_decoder_rejects_conflicting_reduced_equations():
+    decoder = FountainDecoder(3, 4, 12)
+    decoder.add((0, 1, 2), b"abcd")
+    decoder.add((1, 2), b"wxyz")
+
+    with pytest.raises(ValueError, match="conflicting"):
+        decoder.add((0,), b"0000")

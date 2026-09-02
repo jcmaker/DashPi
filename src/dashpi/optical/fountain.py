@@ -29,6 +29,7 @@ class FountainEncoder:
             indices = (sequence,)
         else:
             rng = random.Random((self.seed << 32) | sequence)
+            # ponytail: fixed repair degree favors reliable MVP recovery; use robust-soliton tuning when measured overhead matters.
             degree = min(self.block_count, 10)
             indices = tuple(sorted(rng.sample(range(self.block_count), degree)))
         symbol = bytearray(self.block_size)
@@ -75,10 +76,13 @@ class FountainDecoder:
         self._peel()
 
     def _has_equation(self, unknown: set[int], value: bytearray) -> bool:
-        return any(
-            unknown == equation_indices and value == equation_value
-            for equation_indices, equation_value in self.equations
-        )
+        for equation_indices, equation_value in self.equations:
+            if unknown != equation_indices:
+                continue
+            if value != equation_value:
+                raise ValueError("conflicting fountain equation")
+            return True
+        return False
 
     def _peel(self) -> None:
         while True:
@@ -96,17 +100,21 @@ class FountainDecoder:
             resolved = bytes(value)
             self.blocks[index] = resolved
             remaining: list[tuple[set[int], bytearray]] = []
-            seen: set[tuple[frozenset[int], bytes]] = set()
+            seen: dict[frozenset[int], bytes] = {}
             for indices, equation_value in self.equations:
                 if index in indices:
                     xor_into(equation_value, resolved)
                     indices.remove(index)
                 if not indices:
                     continue
-                key = frozenset(indices), bytes(equation_value)
-                if key not in seen:
-                    seen.add(key)
-                    remaining.append((indices, equation_value))
+                key = frozenset(indices)
+                value = bytes(equation_value)
+                if key in seen:
+                    if seen[key] != value:
+                        raise ValueError("conflicting fountain equation")
+                    continue
+                seen[key] = value
+                remaining.append((indices, equation_value))
             self.equations = remaining
 
     def result(self) -> bytes | None:
