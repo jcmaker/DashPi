@@ -26,6 +26,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = build_parser().parse_args()
     settings = Settings(args.data_root, args.ollama_model)
+    client = OllamaClient(settings.ollama_model)
+    client.validate_model()
     segments = segment_source(args.video, settings.data_root / "raw", settings.segment_seconds)
     incident = IncidentMetadata.new(
         uuid.uuid4().hex,
@@ -33,8 +35,6 @@ def main() -> None:
         args.trigger_seconds,
         settings.post_seconds,
     )
-    client = OllamaClient(settings.ollama_model)
-    client.validate_model()
     result = IncidentPipeline(settings, IncidentStore(settings.data_root)).process(
         incident, segments, client.analyze
     )

@@ -1,4 +1,4 @@
-import urllib.request
+import socket
 
 from tests.test_pipeline import pipeline_fixture
 
@@ -7,7 +7,7 @@ def test_injected_analysis_pipeline_never_opens_network(pipeline_fixture, monkey
     def blocked(*_args, **_kwargs):
         raise AssertionError("network attempted")
 
-    monkeypatch.setattr(urllib.request, "urlopen", blocked)
+    monkeypatch.setattr(socket, "create_connection", blocked)
     pipeline, incident, segments = pipeline_fixture
 
     result = pipeline.process(
