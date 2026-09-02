@@ -175,3 +175,78 @@ def test_list_excludes_incidents_still_being_processed(tmp_path):
         "clip_failed",
         "ready",
     ]
+
+
+def test_report_is_same_origin_html(client_with_ready_incident):
+    client, _payload, _clip, _store = client_with_ready_incident
+
+    response = client.get("/api/incidents/inc-1/report.html")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "DashPi incident report" in response.text
+
+
+def test_incident_detail_returns_report_without_paths(client_with_ready_incident):
+    client, _payload, _clip, store = client_with_ready_incident
+
+    response = client.get("/api/incidents/inc-1")
+
+    assert response.status_code == 200
+    assert response.json()["report"]["summary"] == "Stopped"
+    assert "report.html" not in response.text and "clip.mp4" not in response.text
+    assert str(store.root) not in response.text
+
+
+def test_report_detail_and_html_require_ready(client_with_ready_incident):
+    client, _payload, _clip, store = client_with_ready_incident
+    incident = store.load("inc-1")
+    incident.state = IncidentState.ANALYSIS_FAILED
+    store.save(incident)
+
+    assert client.get("/api/incidents/inc-1").status_code == 409
+    assert client.get("/api/incidents/inc-1/report.html").status_code == 409
+
+
+@pytest.mark.parametrize("artifact_name", ["report_json", "report_html"])
+@pytest.mark.parametrize("damage", ["outside", "symlink", "directory", "empty", "size", "digest"])
+def test_report_artifacts_must_be_canonical_regular_and_intact(
+    client_with_ready_incident, tmp_path, artifact_name, damage
+):
+    client, _payload, _clip, store = client_with_ready_incident
+    incident = store.load("inc-1")
+    artifact = getattr(incident, artifact_name)
+    assert artifact is not None
+    if damage == "outside":
+        suffix = "json" if artifact_name == "report_json" else "html"
+        replacement = atomic_write(tmp_path / f"outside.{suffix}", artifact.path.read_bytes())
+        setattr(incident, artifact_name, replacement)
+        store.save(incident)
+    elif damage == "symlink":
+        target = atomic_write(tmp_path / artifact.path.name, artifact.path.read_bytes())
+        artifact.path.unlink()
+        artifact.path.symlink_to(target.path)
+    elif damage == "directory":
+        artifact.path.unlink()
+        artifact.path.mkdir()
+    elif damage == "empty":
+        artifact.path.write_bytes(b"")
+    elif damage == "size":
+        artifact.path.write_bytes(b"too short")
+    else:
+        artifact.path.write_bytes(b"x" * artifact.byte_length)
+
+    assert client.get("/api/incidents/inc-1").status_code == 409
+    assert client.get("/api/incidents/inc-1/report.html").status_code == 409
+
+
+def test_report_rejects_malformed_json(client_with_ready_incident):
+    client, _payload, _clip, store = client_with_ready_incident
+    incident = store.load("inc-1")
+    incident.report_json = atomic_write(
+        store.directory("inc-1") / "report.json", b"not valid JSON"
+    )
+    store.save(incident)
+
+    assert client.get("/api/incidents/inc-1").status_code == 409
+    assert client.get("/api/incidents/inc-1/report.html").status_code == 409

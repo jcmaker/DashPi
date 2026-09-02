@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DashPi 인시던트</title>
+  <link rel="stylesheet" href="/tokens.css">
+</head>
+<body>
+  <main class="workbench">
+    <header class="masthead">
+      <p class="product-name">DashPi</p>
+      <h1>인시던트 작업대</h1>
+      <p id="status" class="status" role="status">인시던트를 불러오는 중…</p>
+    </header>
+
+    <section class="incident-panel" aria-labelledby="incident-heading">
+      <h2 id="incident-heading">최근 인시던트</h2>
+      <ul id="incidents" class="incident-list"></ul>
+    </section>
+
+    <section id="detail" class="detail" aria-labelledby="detail-heading" hidden>
+      <header class="detail-head">
+        <p class="product-name">선택한 인시던트</p>
+        <h2 id="detail-heading"></h2>
+        <p id="detail-status" class="status"></p>
+      </header>
+      <iframe id="report" title="Incident report" sandbox hidden></iframe>
+      <video controls preload="metadata" hidden></video>
+    </section>
+  </main>
+  <script>
+    const status = document.querySelector('#status');
+    const list = document.querySelector('#incidents');
+    const detail = document.querySelector('#detail');
+    const detailHeading = document.querySelector('#detail-heading');
+    const detailStatus = document.querySelector('#detail-status');
+    const report = document.querySelector('#report');
+    const video = document.querySelector('video');
+
+    function clearSource(element) {
+      element.removeAttribute('src');
+      element.hidden = true;
+    }
+
+    function showIncident(item) {
+      const incidentId = encodeURIComponent(item.incident_id);
+      detail.hidden = false;
+      detailHeading.textContent = item.triggered_at;
+      detailStatus.textContent = item.failure_reason || item.state;
+      if (item.has_report) {
+        report.src = `/api/incidents/${incidentId}/report.html`;
+        report.hidden = false;
+      } else {
+        clearSource(report);
+      }
+      if (item.has_clip) {
+        video.src = `/api/incidents/${incidentId}/clip`;
+        video.hidden = false;
+      } else {
+        clearSource(video);
+      }
+    }
+
+    fetch('/api/incidents')
+      .then((response) => {
+        if (!response.ok) throw new Error('list failed');
+        return response.json();
+      })
+      .then((items) => {
+        status.textContent = items.length ? `${items.length}개 인시던트` : '인시던트 없음';
+        items.forEach((item) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'incident-row';
+          button.textContent = `${item.triggered_at} — ${item.state}`;
+          button.addEventListener('click', () => showIncident(item));
+          const row = document.createElement('li');
+          row.append(button);
+          list.append(row);
+        });
+      })
+      .catch(() => { status.textContent = '인시던트를 불러올 수 없습니다'; });
+  </script>
+</body>
+</html>
