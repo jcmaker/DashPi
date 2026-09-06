@@ -1,11 +1,26 @@
 import sys
 import json
+from pathlib import Path
 
 import pytest
 
-from dashpi.cli import main
+from dashpi.cli import build_parser, main
 from dashpi.reports import OllamaClient
 from tests.media_factory import make_video
+
+
+def test_cli_accepts_detector_and_independent_overlay_flags(tmp_path):
+    args = build_parser().parse_args([
+        "simulate", "input.mp4", "--trigger-seconds", "40",
+        "--data-root", str(tmp_path), "--ollama-model", "m",
+        "--detector-model", "yolov8n.onnx", "--show-traffic-lights",
+        "--show-traffic-signs",
+    ])
+
+    assert args.detector_model == Path("yolov8n.onnx")
+    assert args.show_traffic_lights is True
+    assert args.show_lanes is False
+    assert args.show_traffic_signs is True
 
 
 def test_cli_validates_model_before_creating_media_artifacts(tmp_path, monkeypatch):
@@ -45,12 +60,12 @@ def test_cli_records_configured_window_durations_in_metadata(tmp_path, monkeypat
     from dashpi.config import Settings
 
     settings = Settings(data_root, "test-model", pre_seconds=2.0, post_seconds=2.0)
-    monkeypatch.setattr("dashpi.cli.Settings", lambda *_args: settings)
+    monkeypatch.setattr("dashpi.cli.Settings", lambda *_args, **_kwargs: settings)
     monkeypatch.setattr(OllamaClient, "validate_model", lambda _self: None)
     monkeypatch.setattr(
         OllamaClient,
         "analyze",
-        lambda _self, _frames: {"summary": "Stopped", "observations": [], "limitations": []},
+        lambda _self, _frames: {"incident_timestamp": 3.0, "summary": "Stopped", "observations": [], "limitations": []},
     )
     monkeypatch.setattr(
         sys,

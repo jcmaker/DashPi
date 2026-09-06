@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -45,6 +46,34 @@ def test_store_loads_metadata_written_before_window_fields(tmp_path: Path):
     loaded = store.load("inc-1")
 
     assert (loaded.pre_seconds, loaded.post_seconds) == (30.0, 15.0)
+
+
+def test_store_round_trips_derived_artifact_and_overlay_era_fields(tmp_path):
+    store = IncidentStore(tmp_path)
+    item = IncidentMetadata.new("inc-1", "2026-09-06T00:00:00Z", 40.0, 15.0)
+    item.annotated = atomic_write(store.directory("inc-1") / "annotated.mp4", b"mp4")
+    item.incident_offset_seconds = 30.0
+    store.save(item)
+
+    loaded = store.load("inc-1")
+
+    assert loaded.annotated == item.annotated
+    assert loaded.incident_offset_seconds == 30.0
+
+
+def test_store_loads_metadata_written_before_derived_fields(tmp_path):
+    store = IncidentStore(tmp_path)
+    item = IncidentMetadata.new("inc-old", "2026-09-02T00:00:00Z", 40.0, 15.0)
+    store.save(item)
+    path = store.directory("inc-old") / "metadata.json"
+    raw = json.loads(path.read_text())
+    raw.pop("annotated", None)
+    raw.pop("incident_offset_seconds", None)
+    path.write_text(json.dumps(raw))
+
+    loaded = store.load("inc-old")
+
+    assert loaded.annotated is None and loaded.incident_offset_seconds is None
 
 
 def test_store_normalizes_malformed_existing_metadata_to_value_error(tmp_path: Path):

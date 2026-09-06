@@ -25,8 +25,22 @@
         <h2 id="detail-heading"></h2>
         <p id="detail-status" class="status"></p>
       </header>
-      <iframe id="report" title="Incident report" sandbox hidden></iframe>
+      <iframe id="report" title="Incident report" sandbox="allow-scripts allow-downloads allow-modals" hidden></iframe>
       <video controls preload="metadata" hidden></video>
+      <form id="report-settings" class="report-controls" hidden>
+        <fieldset>
+          <legend>리포트 설정</legend>
+          <label><input type="checkbox" name="traffic_lights"> 신호등 표시</label>
+          <label><input type="checkbox" name="lanes"> 차선 표시</label>
+          <label><input type="checkbox" name="traffic_signs"> 교통 표지 표시</label>
+          <label>사고 시점(초)
+            <input type="number" name="incident_offset_seconds" min="0" step="0.1" inputmode="decimal" placeholder="비워 두면 AI가 다시 찾습니다">
+          </label>
+        </fieldset>
+        <button type="submit">리포트 다시 만들기</button>
+      </form>
+      <a id="sender" class="sender-link" hidden>정차 후 휴대폰으로 보내기</a>
+      <p id="optical-unavailable" class="status" hidden>16 MiB를 초과해 Local Wi-Fi에서 HTML을 다운로드하세요.</p>
     </section>
   </main>
   <script>
@@ -37,6 +51,12 @@
     const detailStatus = document.querySelector('#detail-status');
     const report = document.querySelector('#report');
     const video = document.querySelector('video');
+    const reportSettings = document.querySelector('#report-settings');
+    const offset = reportSettings.elements.incident_offset_seconds;
+    const sender = document.querySelector('#sender');
+    const opticalUnavailable = document.querySelector('#optical-unavailable');
+    let selectedIncident;
+    const pendingReports = new Set();
 
     function clearSource(element) {
       element.removeAttribute('src');
@@ -45,10 +65,13 @@
 
     function showIncident(item) {
       const incidentId = encodeURIComponent(item.incident_id);
+      if (selectedIncident?.incident_id !== item.incident_id) offset.value = '';
+      const pending = pendingReports.has(item.incident_id);
       detail.hidden = false;
+      selectedIncident = item;
       detailHeading.textContent = item.triggered_at;
-      detailStatus.textContent = item.failure_reason || item.state;
-      if (item.has_report) {
+      detailStatus.textContent = pending ? 'analyzing' : item.failure_reason || item.state;
+      if (item.has_report && !pending) {
         report.src = `/api/incidents/${incidentId}/report.html`;
         report.hidden = false;
       } else {
@@ -60,15 +83,24 @@
       } else {
         clearSource(video);
       }
+      reportSettings.hidden = !item.has_clip;
+      reportSettings.querySelector('button').disabled = pending;
+      reportSettings.querySelector('fieldset').disabled = pending;
+      offset.max = item.clip_duration == null ? '' : String(item.clip_duration);
+      sender.hidden = pending || !item.optical_report_available;
+      sender.href = `/sender.html?incident=${incidentId}`;
+      opticalUnavailable.hidden = pending || !item.has_report || item.optical_report_available;
     }
 
-    fetch('/api/incidents')
+    function loadIncidents(selectedId) {
+      return fetch('/api/incidents')
       .then((response) => {
         if (!response.ok) throw new Error('list failed');
         return response.json();
       })
       .then((items) => {
         status.textContent = items.length ? `${items.length}개 인시던트` : '인시던트 없음';
+        list.replaceChildren();
         items.forEach((item) => {
           const button = document.createElement('button');
           button.type = 'button';
@@ -79,8 +111,73 @@
           row.append(button);
           list.append(row);
         });
+        const selected = items.find((item) => item.incident_id === selectedId);
+        if (selected && selectedId === selectedIncident?.incident_id) showIncident(selected);
+        return items;
       })
       .catch(() => { status.textContent = '인시던트를 불러올 수 없습니다'; });
+    }
+
+    const pollDelay = () => new Promise(resolve => setTimeout(resolve, 500));
+
+    async function waitForReport(incidentId) {
+      for (;;) {
+        try {
+          const response = await fetch(`/api/incidents/${encodeURIComponent(incidentId)}/report/status`);
+          if (!response.ok) throw new Error('report status failed');
+          const result = await response.json();
+          if (result.state !== 'analyzing') return result;
+        } catch {
+          if (selectedIncident?.incident_id === incidentId) detailStatus.textContent = '리포트 상태를 다시 확인하는 중…';
+        }
+        await pollDelay();
+      }
+    }
+
+    reportSettings.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!selectedIncident) return;
+      const incidentId = selectedIncident.incident_id;
+      if (pendingReports.has(incidentId)) return;
+      const values = new FormData(reportSettings);
+      const rawOffset = String(values.get('incident_offset_seconds') || '').trim();
+      const body = {
+        traffic_lights: values.has('traffic_lights'),
+        lanes: values.has('lanes'),
+        traffic_signs: values.has('traffic_signs'),
+      };
+      if (rawOffset) body.incident_offset_seconds = Number(rawOffset);
+      pendingReports.add(incidentId);
+      showIncident(selectedIncident);
+      try {
+        const response = await fetch(`/api/incidents/${encodeURIComponent(incidentId)}/report`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!response.ok) throw new Error('report regeneration failed');
+        const result = response.status === 202 ? await waitForReport(incidentId) : await response.json();
+        pendingReports.delete(incidentId);
+        // A successful job is not visible until the refreshed list contains it.
+        for (;;) {
+          const items = await loadIncidents(selectedIncident?.incident_id);
+          if (result.state !== 'ready' || items?.some(item => item.incident_id === incidentId && item.state === 'ready')) break;
+          await pollDelay();
+        }
+        if (result.state === 'analysis_failed' && selectedIncident?.incident_id === incidentId) {
+          showIncident({ ...selectedIncident, state: result.state, failure_reason: result.failure_reason,
+            has_report: false, optical_report_available: false });
+        }
+      } catch {
+        pendingReports.delete(incidentId);
+        if (selectedIncident?.incident_id === incidentId) {
+          showIncident(selectedIncident);
+          detailStatus.textContent = '리포트를 다시 만들 수 없습니다';
+        }
+      }
+    });
+
+    loadIncidents();
   </script>
 </body>
 </html>

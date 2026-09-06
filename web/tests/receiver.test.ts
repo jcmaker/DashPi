@@ -12,6 +12,8 @@ test('receiver keeps camera start and verified save explicit', async () => {
   assert.ok(html.includes('Stop camera'));
   assert.ok(html.includes('Save verified file'));
   assert.ok(html.includes('id="save" hidden'));
+  assert.ok(html.includes('sandbox="allow-scripts allow-downloads allow-modals"'));
+  assert.equal(html.includes('allow-same-origin'), false);
 });
 
 test('keeps foreign QR errors silent and explains unsupported DashPi versions', () => {

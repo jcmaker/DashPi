@@ -26,9 +26,42 @@ class LocalServer:
         self.server.server_close()
 
 
+def complete_report_fixture():
+    return {
+        "incident_id": "inc-1",
+        "triggered_at": "2026-09-06T00:00:00Z",
+        "incident_timestamp": 22.5,
+        "transfer_window": {"start": 17.5, "end": 27.5},
+        "summary": "<script>alert(1)</script>",
+        "observations": [{"timestamp": 22.5, "description": "차량 접촉"}],
+        "object_observations": [
+            {
+                "timestamp": 22.5,
+                "track_id": 1,
+                "label": "car",
+                "confidence": 0.91,
+                "box": [1, 2, 30, 40],
+            }
+        ],
+        "limitations": ["단일 카메라"],
+        "warnings": [],
+        "overlays": {"traffic_lights": False, "lanes": False, "traffic_signs": False},
+        "digests": {
+            "clip.mp4": "abc",
+            "annotated.mp4": "def",
+            "before.jpg": "b",
+            "moment.jpg": "m",
+            "after.jpg": "a",
+        },
+        "model": "test-model",
+        "generated_at": "2026-09-06T00:01:00Z",
+    }
+
+
 def test_report_binds_model_and_source_digest():
     report = validate_report(
         {
+            "incident_timestamp": 2.5,
             "summary": "Vehicle stopped",
             "observations": [{"timestamp": 2.5, "description": "Brake lights"}],
             "limitations": ["Single camera"],
@@ -36,45 +69,100 @@ def test_report_binds_model_and_source_digest():
         "abc",
         "moondream",
         "2026-09-02T00:00:00Z",
+        clip_duration=6.0,
     )
     assert report["source_clip_sha256"] == "abc"
     assert report["model"] == "moondream"
 
 
-def test_html_escapes_model_output():
-    html = render_report_html(
-        {
-            "summary": "<script>alert(1)</script>",
-            "observations": [],
-            "limitations": [],
-            "source_clip_sha256": "abc",
-            "model": "m",
-            "generated_at": "now",
-        }
+def test_report_requires_finite_incident_offset_inside_clip():
+    report = validate_report(
+        {"incident_timestamp": 22.4, "summary": "충돌", "observations": [], "limitations": []},
+        "abc",
+        "model",
+        "now",
+        clip_duration=45.0,
     )
-    assert "<script>" not in html
+
+    assert report["incident_timestamp"] == 22.4
+
+
+@pytest.mark.parametrize("value", [-0.1, 45.1, True, float("nan")])
+def test_report_rejects_invalid_incident_offset(value):
+    with pytest.raises(ValueError, match="incident timestamp"):
+        validate_report(
+            {"incident_timestamp": value, "summary": "x", "observations": [], "limitations": []},
+            "abc",
+            "model",
+            "now",
+            clip_duration=45.0,
+        )
+
+
+def test_manual_offset_replaces_failed_localization_but_not_analysis_text():
+    report = validate_report(
+        {"summary": "충돌", "observations": [], "limitations": ["자동 시점 탐색 실패"]},
+        "abc",
+        "model",
+        "now",
+        clip_duration=45.0,
+        incident_offset_override=7.0,
+    )
+
+    assert report["incident_timestamp"] == 7.0
+
+
+def test_html_escapes_model_output():
+    report = complete_report_fixture()
+    report["observations"] = []
+    report["limitations"] = []
+    html = render_report_html(report, b"video", [b"before", b"moment", b"after"])
+    assert "<script>alert(1)</script>" not in html
     assert "&lt;script&gt;" in html
 
 
 def test_html_identifies_report_provenance_and_escapes_hostile_lists():
-    document = render_report_html(
+    report = complete_report_fixture()
+    report.update(
         {
             "summary": "x",
-            "observations": [{"timestamp": 1.0, "description": "<img src=x onerror=alert(1)>"}],
+            "observations": [
+                {"timestamp": 1.0, "description": "<img src=x onerror=alert(1)>"}
+            ],
             "limitations": ["<script>alert(1)</script>"],
-            "source_clip_sha256": "clip-digest",
+            "digests": {"clip.mp4": "clip-digest"},
             "model": "moondream",
             "generated_at": "2026-09-02T00:01:00Z",
         }
     )
+    document = render_report_html(report, b"video", [b"before", b"moment", b"after"])
 
-    assert "Source clip SHA-256: clip-digest" in document
+    assert "clip.mp4" in document and "clip-digest" in document
     assert "Model: moondream" in document
-    assert "Generated at: 2026-09-02T00:01:00Z" in document
+    assert "Generated: 2026-09-02T00:01:00Z" in document
     assert "AI output is advisory and may be incomplete." in document
-    assert "<img" not in document and "<script>" not in document
+    assert "<img src=x onerror=alert(1)>" not in document
+    assert "<script>alert(1)</script>" not in document
     assert "&lt;img src=x onerror=alert(1)&gt;" in document
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in document
+
+
+def test_html_embeds_video_three_frames_visual_stats_and_offline_controls():
+    report = complete_report_fixture()
+    document = render_report_html(report, b"video", [b"before", b"moment", b"after"])
+    assert 'src="data:video/mp4;base64,dmlkZW8="' in document
+    assert document.count('src="data:image/jpeg;base64,') == 3
+    assert "Download HTML" in document and "Save as PDF" in document
+    assert "object-chart" in document and "incident-timeline" in document
+    assert "@media print" in document
+    assert ".screen-only{display:none" in document
+    assert "AI output is advisory" in document
+    assert "<script>alert(1)</script>" not in document
+
+
+def test_html_requires_exactly_three_keyframes():
+    with pytest.raises(ValueError, match="three key frames"):
+        render_report_html(complete_report_fixture(), b"video", [b"only one"])
 
 
 def test_report_rejects_malformed_observation():
@@ -88,13 +176,14 @@ def test_report_rejects_malformed_observation():
             "abc",
             "m",
             "now",
+            clip_duration=6.0,
         )
 
 
 @pytest.mark.parametrize("raw", [[], "report", None])
 def test_report_rejects_non_object_root(raw):
     with pytest.raises(ValueError, match="report shape"):
-        validate_report(raw, "abc", "m", "now")
+        validate_report(raw, "abc", "m", "now", clip_duration=6.0)
 
 
 @pytest.mark.parametrize(
@@ -115,7 +204,7 @@ def test_report_rejects_non_object_root(raw):
 )
 def test_report_rejects_surplus_model_fields(raw):
     with pytest.raises(ValueError, match="report shape|observation"):
-        validate_report(raw, "abc", "m", "now")
+        validate_report(raw, "abc", "m", "now", clip_duration=6.0)
 
 
 @pytest.mark.parametrize("timestamp", [True, False, float("inf"), float("-inf"), float("nan")])
@@ -130,6 +219,7 @@ def test_report_rejects_boolean_and_non_finite_timestamps(timestamp):
             "abc",
             "m",
             "now",
+            clip_duration=6.0,
         )
 
 
@@ -176,7 +266,7 @@ def test_client_uses_proxy_disabled_opener_for_both_requests(monkeypatch, tmp_pa
             if isinstance(request, str):
                 return Response(b'{"models":[{"name":"moondream"}]}')
             return Response(
-                b'{"response":"{\\"summary\\": \\"Vehicle stopped\\", \\"observations\\": [], \\"limitations\\": []}"}'
+                b'{"response":"{\\"incident_timestamp\\": 3.0, \\"summary\\": \\"Vehicle stopped\\", \\"observations\\": [], \\"limitations\\": []}"}'
             )
 
     opener = Opener()
@@ -193,7 +283,7 @@ def test_client_uses_proxy_disabled_opener_for_both_requests(monkeypatch, tmp_pa
 
     client = OllamaClient("moondream")
     client.validate_model()
-    report = client.analyze([frame])
+    report = client.analyze([(frame, 1.875)])
 
     assert report["summary"] == "Vehicle stopped"
     assert [
@@ -201,6 +291,12 @@ def test_client_uses_proxy_disabled_opener_for_both_requests(monkeypatch, tmp_pa
         for request, _timeout in opener.requests
     ] == ["http://127.0.0.1:11434/api/tags", "http://127.0.0.1:11434/api/generate"]
     assert handlers[0].proxies == {}
+    payload = json.loads(opener.requests[1][0].data)
+    assert payload["prompt"] == (
+        "Return JSON with incident_timestamp (seconds from first frame), summary, observations, and limitations. Describe evidence only; do not determine legal fault."
+        "\nThe first frame means the evidence clip origin (0 seconds). Image timestamps in image order, in seconds from that origin: [1.875]. Use this clip-relative timebase for all timestamps."
+    )
+    assert payload["images"] == ["anBlZw=="]
 
 
 @pytest.mark.parametrize(
@@ -240,7 +336,7 @@ def test_client_sends_local_generate_request_with_expected_payload_and_timeouts(
             seen.append((self.path, payload))
             self.send_response(200)
             self.end_headers()
-            self.wfile.write(b'{"response":"{\\"summary\\": \\"Vehicle stopped\\", \\"observations\\": [], \\"limitations\\": []}"}')
+            self.wfile.write(b'{"response":"{\\"incident_timestamp\\": 3.0, \\"summary\\": \\"Vehicle stopped\\", \\"observations\\": [], \\"limitations\\": []}"}')
 
         def log_message(self, *_):
             return None
@@ -258,7 +354,7 @@ def test_client_sends_local_generate_request_with_expected_payload_and_timeouts(
 
         client.opener.open = record_open
         client.validate_model()
-        assert client.analyze([frame])["summary"] == "Vehicle stopped"
+        assert client.analyze([(frame, 1.875), (frame, 5.625)])["summary"] == "Vehicle stopped"
 
     assert [(request if isinstance(request, str) else request.full_url, timeout) for request, timeout in opened] == [
         (server.url + "/api/tags", 5.0),
@@ -270,8 +366,8 @@ def test_client_sends_local_generate_request_with_expected_payload_and_timeouts(
         "model": "moondream",
         "stream": False,
         "format": "json",
-        "prompt": "Describe visible events by timestamp. Return summary, observations, limitations.",
-        "images": ["anBlZw=="],
+        "prompt": "Return JSON with incident_timestamp (seconds from first frame), summary, observations, and limitations. Describe evidence only; do not determine legal fault.\nThe first frame means the evidence clip origin (0 seconds). Image timestamps in image order, in seconds from that origin: [1.875, 5.625]. Use this clip-relative timebase for all timestamps.",
+        "images": ["anBlZw==", "anBlZw=="],
     }
 
 
@@ -307,6 +403,6 @@ def test_client_rejects_redirect_without_requesting_redirect_target(tmp_path):
         frame.write_bytes(b"jpeg")
         with LocalServer(RedirectHandler) as redirector:
             with pytest.raises(HTTPError, match="302"):
-                OllamaClient("moondream", redirector.url).analyze([frame])
+                OllamaClient("moondream", redirector.url).analyze([(frame, 1.875)])
 
     assert target_hits == []
