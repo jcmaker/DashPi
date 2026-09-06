@@ -65,7 +65,7 @@ def test_cli_records_configured_window_durations_in_metadata(tmp_path, monkeypat
     monkeypatch.setattr(
         OllamaClient,
         "analyze",
-        lambda _self, _frames: {"summary": "Stopped", "observations": [], "limitations": []},
+        lambda _self, _frames: {"incident_timestamp": 3.0, "summary": "Stopped", "observations": [], "limitations": []},
     )
     monkeypatch.setattr(
         sys,

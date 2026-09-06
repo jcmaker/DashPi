@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import subprocess
 import tempfile
@@ -6,6 +7,14 @@ from pathlib import Path
 
 from dashpi.models import FileArtifact, Segment
 from dashpi.storage import sha256_file
+
+
+def transfer_window(incident_offset: float, evidence_duration: float) -> tuple[float, float]:
+    if not math.isfinite(incident_offset) or not 0.0 <= incident_offset <= evidence_duration:
+        raise ValueError("incident timestamp outside evidence clip")
+    duration = min(10.0, evidence_duration)
+    start = min(max(0.0, incident_offset - 5.0), evidence_duration - duration)
+    return start, start + duration
 
 
 def probe_duration(path: Path) -> float:
@@ -113,6 +122,84 @@ def build_clip(
         return FileArtifact(output, byte_length, digest)
     finally:
         manifest.unlink(missing_ok=True)
+
+
+def transcode_clip(
+    source: Path,
+    output: Path,
+    start: float,
+    duration: float,
+    height: int,
+    bitrate: str,
+) -> FileArtifact:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    partial = output.with_name(output.name + ".partial")
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-loglevel",
+            "error",
+            "-y",
+            "-ss",
+            str(start),
+            "-i",
+            str(source),
+            "-t",
+            str(duration),
+            "-an",
+            "-vf",
+            f"scale=-2:{height}",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-b:v",
+            bitrate,
+            "-movflags",
+            "+faststart",
+            "-f",
+            "mp4",
+            str(partial),
+        ],
+        check=True,
+    )
+    if probe_duration(partial) < duration - 0.1:
+        raise RuntimeError("clip did not preserve requested duration")
+    with partial.open("rb") as completed:
+        os.fsync(completed.fileno())
+    digest, byte_length = sha256_file(partial), partial.stat().st_size
+    partial.replace(output)
+    return FileArtifact(output, byte_length, digest)
+
+
+def extract_frame(source: Path, output: Path, timestamp: float) -> FileArtifact:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    partial = output.with_name(output.name + ".partial")
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-loglevel",
+            "error",
+            "-y",
+            "-ss",
+            str(timestamp),
+            "-i",
+            str(source),
+            "-frames:v",
+            "1",
+            "-q:v",
+            "2",
+            "-f",
+            "image2",
+            str(partial),
+        ],
+        check=True,
+    )
+    with partial.open("rb") as completed:
+        os.fsync(completed.fileno())
+    digest, byte_length = sha256_file(partial), partial.stat().st_size
+    partial.replace(output)
+    return FileArtifact(output, byte_length, digest)
 
 
 def sample_frames(clip: Path, output_dir: Path, count: int) -> list[Path]:

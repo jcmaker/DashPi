@@ -13,7 +13,7 @@ def test_injected_analysis_pipeline_never_opens_network(pipeline_fixture, monkey
     result = pipeline.process(
         incident,
         segments,
-        lambda _frames: {"summary": "Offline", "observations": [], "limitations": []},
+        lambda _frames: {"incident_timestamp": 3.0, "summary": "Offline", "observations": [], "limitations": []},
     )
 
     assert result.state.value == "ready"

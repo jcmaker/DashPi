@@ -60,7 +60,7 @@ class OllamaClient:
                 "model": self.model,
                 "stream": False,
                 "format": "json",
-                "prompt": "Describe visible events by timestamp. Return summary, observations, limitations.",
+                "prompt": "Return JSON with incident_timestamp (seconds from first frame), summary, observations, and limitations. Describe evidence only; do not determine legal fault.",
                 "images": images,
             }
         ).encode()
@@ -73,10 +73,18 @@ class OllamaClient:
             return json.loads(json.loads(response.read())["response"])
 
 
-def validate_report(raw: object, clip_sha256: str, model: str, generated_at: str) -> dict:
+def validate_report(
+    raw: object,
+    clip_sha256: str,
+    model: str,
+    generated_at: str,
+    clip_duration: float,
+    incident_offset_override: float | None = None,
+) -> dict:
     if (
         not isinstance(raw, dict)
-        or set(raw) != {"summary", "observations", "limitations"}
+        or not {"summary", "observations", "limitations"} <= set(raw)
+        or not set(raw) <= {"incident_timestamp", "summary", "observations", "limitations"}
         or not isinstance(raw["summary"], str)
         or not isinstance(raw["observations"], list)
         or not isinstance(raw["limitations"], list)
@@ -94,7 +102,20 @@ def validate_report(raw: object, clip_sha256: str, model: str, generated_at: str
         raise ValueError("invalid observation")
     if any(not isinstance(item, str) for item in raw["limitations"]):
         raise ValueError("invalid limitation")
+    incident_timestamp = (
+        raw.get("incident_timestamp")
+        if incident_offset_override is None
+        else incident_offset_override
+    )
+    if (
+        isinstance(incident_timestamp, bool)
+        or not isinstance(incident_timestamp, (int, float))
+        or not math.isfinite(incident_timestamp)
+        or not 0.0 <= incident_timestamp <= clip_duration
+    ):
+        raise ValueError("invalid incident timestamp")
     return {
+        "incident_timestamp": incident_timestamp,
         "summary": raw["summary"],
         "observations": [
             {"timestamp": item["timestamp"], "description": item["description"]}

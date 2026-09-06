@@ -29,6 +29,7 @@ class LocalServer:
 def test_report_binds_model_and_source_digest():
     report = validate_report(
         {
+            "incident_timestamp": 2.5,
             "summary": "Vehicle stopped",
             "observations": [{"timestamp": 2.5, "description": "Brake lights"}],
             "limitations": ["Single camera"],
@@ -36,9 +37,47 @@ def test_report_binds_model_and_source_digest():
         "abc",
         "moondream",
         "2026-09-02T00:00:00Z",
+        clip_duration=6.0,
     )
     assert report["source_clip_sha256"] == "abc"
     assert report["model"] == "moondream"
+
+
+def test_report_requires_finite_incident_offset_inside_clip():
+    report = validate_report(
+        {"incident_timestamp": 22.4, "summary": "충돌", "observations": [], "limitations": []},
+        "abc",
+        "model",
+        "now",
+        clip_duration=45.0,
+    )
+
+    assert report["incident_timestamp"] == 22.4
+
+
+@pytest.mark.parametrize("value", [-0.1, 45.1, True, float("nan")])
+def test_report_rejects_invalid_incident_offset(value):
+    with pytest.raises(ValueError, match="incident timestamp"):
+        validate_report(
+            {"incident_timestamp": value, "summary": "x", "observations": [], "limitations": []},
+            "abc",
+            "model",
+            "now",
+            clip_duration=45.0,
+        )
+
+
+def test_manual_offset_replaces_failed_localization_but_not_analysis_text():
+    report = validate_report(
+        {"summary": "충돌", "observations": [], "limitations": ["자동 시점 탐색 실패"]},
+        "abc",
+        "model",
+        "now",
+        clip_duration=45.0,
+        incident_offset_override=7.0,
+    )
+
+    assert report["incident_timestamp"] == 7.0
 
 
 def test_html_escapes_model_output():
@@ -88,13 +127,14 @@ def test_report_rejects_malformed_observation():
             "abc",
             "m",
             "now",
+            clip_duration=6.0,
         )
 
 
 @pytest.mark.parametrize("raw", [[], "report", None])
 def test_report_rejects_non_object_root(raw):
     with pytest.raises(ValueError, match="report shape"):
-        validate_report(raw, "abc", "m", "now")
+        validate_report(raw, "abc", "m", "now", clip_duration=6.0)
 
 
 @pytest.mark.parametrize(
@@ -115,7 +155,7 @@ def test_report_rejects_non_object_root(raw):
 )
 def test_report_rejects_surplus_model_fields(raw):
     with pytest.raises(ValueError, match="report shape|observation"):
-        validate_report(raw, "abc", "m", "now")
+        validate_report(raw, "abc", "m", "now", clip_duration=6.0)
 
 
 @pytest.mark.parametrize("timestamp", [True, False, float("inf"), float("-inf"), float("nan")])
@@ -130,6 +170,7 @@ def test_report_rejects_boolean_and_non_finite_timestamps(timestamp):
             "abc",
             "m",
             "now",
+            clip_duration=6.0,
         )
 
 
@@ -176,7 +217,7 @@ def test_client_uses_proxy_disabled_opener_for_both_requests(monkeypatch, tmp_pa
             if isinstance(request, str):
                 return Response(b'{"models":[{"name":"moondream"}]}')
             return Response(
-                b'{"response":"{\\"summary\\": \\"Vehicle stopped\\", \\"observations\\": [], \\"limitations\\": []}"}'
+                b'{"response":"{\\"incident_timestamp\\": 3.0, \\"summary\\": \\"Vehicle stopped\\", \\"observations\\": [], \\"limitations\\": []}"}'
             )
 
     opener = Opener()
@@ -240,7 +281,7 @@ def test_client_sends_local_generate_request_with_expected_payload_and_timeouts(
             seen.append((self.path, payload))
             self.send_response(200)
             self.end_headers()
-            self.wfile.write(b'{"response":"{\\"summary\\": \\"Vehicle stopped\\", \\"observations\\": [], \\"limitations\\": []}"}')
+            self.wfile.write(b'{"response":"{\\"incident_timestamp\\": 3.0, \\"summary\\": \\"Vehicle stopped\\", \\"observations\\": [], \\"limitations\\": []}"}')
 
         def log_message(self, *_):
             return None
@@ -270,7 +311,7 @@ def test_client_sends_local_generate_request_with_expected_payload_and_timeouts(
         "model": "moondream",
         "stream": False,
         "format": "json",
-        "prompt": "Describe visible events by timestamp. Return summary, observations, limitations.",
+        "prompt": "Return JSON with incident_timestamp (seconds from first frame), summary, observations, and limitations. Describe evidence only; do not determine legal fault.",
         "images": ["anBlZw=="],
     }
 

@@ -24,7 +24,7 @@ def test_pipeline_creates_clip_and_reports(pipeline_fixture):
     result = pipeline.process(
         incident,
         segments,
-        lambda frames: {"summary": "Stopped", "observations": [], "limitations": []},
+        lambda frames: {"incident_timestamp": 3.0, "summary": "Stopped", "observations": [], "limitations": []},
     )
 
     assert result.state.value == "ready"
@@ -55,7 +55,7 @@ def test_pipeline_records_clip_and_report_metadata_from_configured_window(tmp_pa
     result = IncidentPipeline(settings, IncidentStore(settings.data_root)).process(
         incident,
         segments,
-        lambda _frames: {"summary": "Stopped", "observations": [], "limitations": []},
+        lambda _frames: {"incident_timestamp": 3.0, "summary": "Stopped", "observations": [], "limitations": []},
     )
 
     assert (result.pre_seconds, result.post_seconds) == (2.0, 2.0)
@@ -107,7 +107,7 @@ def test_report_write_failure_persists_exposed_clip(pipeline_fixture, monkeypatc
     pipeline.process(
         incident,
         segments,
-        lambda _frames: {"summary": "Stopped", "observations": [], "limitations": []},
+        lambda _frames: {"incident_timestamp": 3.0, "summary": "Stopped", "observations": [], "limitations": []},
     )
     reloaded = pipeline.store.load(incident.incident_id)
 

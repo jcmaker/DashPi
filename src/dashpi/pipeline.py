@@ -41,6 +41,7 @@ class IncidentPipeline:
                 incident.clip.sha256,
                 self.settings.ollama_model,
                 generated_at,
+                incident.clip.duration,
             )
             incident.report_json = atomic_write(
                 directory / "report.json", json.dumps(report, sort_keys=True).encode()
