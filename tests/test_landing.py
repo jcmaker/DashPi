@@ -57,3 +57,8 @@ class LandingPageTests(unittest.TestCase):
         self.assertIn("dashpi", page)
         self.assertNotIn("signal, basel", page)
         self.assertNotIn("poster and graphic design festival", page)
+
+    def test_hero_art_has_a_korean_no_javascript_label(self) -> None:
+        self.assertIn(
+            'role="img" aria-label="DashPi QR 및 SHA-256 검증 표식"', self.page()
+        )
