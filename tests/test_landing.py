@@ -4,6 +4,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 import json
 import re
+import struct
 import subprocess
 import unittest
 
@@ -62,11 +63,29 @@ class LandingPageTests(unittest.TestCase):
         self.assertNotIn("signal, basel", page)
         self.assertNotIn("poster and graphic design festival", page)
 
-    def test_open_graph_image_has_an_absolute_deployed_asset_url(self) -> None:
-        self.assertEqual(
-            self.parser().open_graph_images,
-            ["https://jcmaker.github.io/DashPi/assets/dashpi-incidents.jpg"],
-        )
+    def test_social_preview_uses_the_dashpi_card(self) -> None:
+        page = self.page()
+        image_url = "https://jcmaker.github.io/DashPi/assets/dashpi-og.png"
+        self.assertEqual(self.parser().open_graph_images, [image_url])
+        for fragment in (
+            '<link rel="canonical" href="https://jcmaker.github.io/DashPi/">',
+            '<meta property="og:url" content="https://jcmaker.github.io/DashPi/">',
+            '<meta property="og:site_name" content="DashPi">',
+            '<meta property="og:image:type" content="image/png">',
+            '<meta property="og:image:width" content="1200">',
+            '<meta property="og:image:height" content="630">',
+            '<meta property="og:image:alt" content="DashPi — accident evidence, offline first">',
+            '<meta name="twitter:card" content="summary_large_image">',
+            '<meta name="twitter:title" content="DashPi — Offline-first smart dashcam">',
+            '<meta name="twitter:description" content="Understand and preserve an accident without depending on the cloud.">',
+            f'<meta name="twitter:image" content="{image_url}">',
+            '<meta name="twitter:image:alt" content="DashPi — accident evidence, offline first">',
+        ):
+            self.assertIn(fragment, page)
+
+        png = (LANDING / "assets" / "dashpi-og.png").read_bytes()
+        self.assertEqual(png[:8], b"\x89PNG\r\n\x1a\n")
+        self.assertEqual(struct.unpack(">II", png[16:24]), (1200, 630))
 
     def test_hero_art_has_a_korean_no_javascript_label(self) -> None:
         self.assertIn(

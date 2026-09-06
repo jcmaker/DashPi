@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title description">
+  <title id="title">DashPi — accident evidence, offline first</title>
+  <desc id="description">Dark social card with the DashPi wordmark, offline-first message, and red signal geometry.</desc>
+  <rect width="1200" height="630" fill="#111216"/>
+  <path d="M72 148H1128" stroke="#35363b" stroke-width="2"/>
+  <text x="72" y="112" fill="#fbfbfd" font-family="Arial, Helvetica, sans-serif" font-size="68" font-weight="800" letter-spacing="-5">dashpi</text>
+  <rect x="278" y="66" width="36" height="36" fill="#c9342d"/>
+  <circle cx="1092" cy="92" r="9" fill="#c9342d"/>
+  <text x="1114" y="99" fill="#c9342d" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="18" font-weight="700" letter-spacing="2">REC</text>
+  <text x="72" y="338" fill="#fbfbfd" font-family="Arial, Helvetica, sans-serif" font-size="86" font-weight="800" letter-spacing="-4">ACCIDENT EVIDENCE.</text>
+  <text x="72" y="438" fill="#fbfbfd" font-family="Arial, Helvetica, sans-serif" font-size="86" font-weight="800" letter-spacing="-4">OFFLINE FIRST.</text>
+  <text x="72" y="566" fill="#c9342d" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="20" font-weight="700" letter-spacing="3">LOCAL AI / SHA-256 / RASPBERRY PI</text>
+  <g transform="translate(1080 550) rotate(45)" opacity="0.9">
+    <rect x="-185" y="-185" width="370" height="370" fill="none" stroke="#c9342d" stroke-width="48"/>
+  </g>
+</svg>
