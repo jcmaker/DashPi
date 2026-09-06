@@ -25,6 +25,7 @@ def test_incident_metadata_includes_configured_windows_and_artifact_contract(tmp
         "trigger_mono": 40.0,
         "pre_seconds": 30.0,
         "post_seconds": 15.0,
+        "incident_offset_seconds": None,
         "post_deadline_mono": 55.0,
         "state": IncidentState.READY,
         "failure_reason": None,
@@ -35,6 +36,7 @@ def test_incident_metadata_includes_configured_windows_and_artifact_contract(tmp
             "sha256": "clip-digest",
             "duration": 44.9,
         },
+        "annotated": None,
         "report_json": {
             "filename": "report.json",
             "path": str(tmp_path / "report.json"),
@@ -56,3 +58,14 @@ def test_incident_metadata_includes_configured_windows_and_artifact_contract(tmp
             {"state": "ready", "at": "2026-09-02T00:01:01Z"},
         ],
     }
+
+
+def test_incident_metadata_serializes_derived_artifact_and_localized_time(tmp_path):
+    item = IncidentMetadata.new("inc-1", "2026-09-06T00:00:00Z", 40.0, 15.0)
+    item.annotated = FileArtifact(tmp_path / "annotated.mp4", 3, "abc", 10.0)
+    item.incident_offset_seconds = 29.5
+
+    raw = item.to_dict()
+
+    assert raw["annotated"]["filename"] == "annotated.mp4"
+    assert raw["incident_offset_seconds"] == 29.5

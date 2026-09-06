@@ -36,6 +36,7 @@ class IncidentMetadata:
     state: IncidentState
     failure_reason: str | None = None
     clip: FileArtifact | None = None
+    annotated: FileArtifact | None = None
     report_json: FileArtifact | None = None
     report_html: FileArtifact | None = None
     report_model: str | None = None
@@ -43,6 +44,7 @@ class IncidentMetadata:
     transitions: list[dict[str, str]] = field(default_factory=list)
     pre_seconds: float = 30.0
     post_seconds: float = 15.0
+    incident_offset_seconds: float | None = None
 
     @classmethod
     def new(
@@ -71,7 +73,7 @@ class IncidentMetadata:
 
     def to_dict(self) -> dict:
         data = asdict(self)
-        for key in ("clip", "report_json", "report_html"):
+        for key in ("clip", "annotated", "report_json", "report_html"):
             artifact = getattr(self, key)
             if artifact:
                 data[key] = {

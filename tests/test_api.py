@@ -1,7 +1,8 @@
 import hashlib
 import json
 import shutil
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import replace
 import threading
 
 import pytest
@@ -11,6 +12,7 @@ import dashpi.api as api_module
 import dashpi.ranges as ranges_module
 import dashpi.storage as storage_module
 from dashpi.api import create_app
+from dashpi.config import OverlaySettings
 from dashpi.models import FileArtifact, IncidentMetadata, IncidentState
 from dashpi.optical.container import MAX_PAYLOAD, unpack_container
 from dashpi.optical.protocol import parse_frame
@@ -34,6 +36,130 @@ def client_with_ready_incident(tmp_path):
     )
     store.save(incident)
     return TestClient(create_app(store)), payload, incident.clip, store
+
+
+def ready_store_with_clip(tmp_path, duration):
+    store = IncidentStore(tmp_path)
+    item = IncidentMetadata.new("inc-1", "2026-09-06T00:00:00Z", 40.0, 15.0)
+    item.state = IncidentState.READY
+    item.clip = replace(atomic_write(store.directory("inc-1") / "clip.mp4", b"clip"), duration=duration)
+    item.report_json = atomic_write(store.directory("inc-1") / "report.json", b'{"summary":"old"}')
+    item.report_html = atomic_write(store.directory("inc-1") / "report.html", b"<h1>old</h1>")
+    store.save(item)
+    return store, item
+
+
+def test_list_reports_optical_availability_from_verified_html_size(client_with_ready_incident):
+    client, _payload, _clip, _store = client_with_ready_incident
+
+    item = client.get("/api/incidents").json()[0]
+
+    assert item["optical_report_available"] is True
+    assert item["clip_duration"] is None
+
+
+def test_report_regeneration_passes_manual_time_and_overlay_settings(tmp_path):
+    store, item = ready_store_with_clip(tmp_path, duration=45.0)
+    calls = []
+
+    def regenerate(incident, offset, overlays):
+        calls.append((incident.incident_id, offset, overlays))
+        return incident
+
+    client = TestClient(create_app(store, regenerate_report=regenerate))
+    assert client.get("/api/incidents").json()[0]["clip_duration"] == 45.0
+
+    response = client.post("/api/incidents/inc-1/report", json={
+        "incident_offset_seconds": 4.0,
+        "traffic_lights": True,
+        "lanes": False,
+        "traffic_signs": True,
+    })
+
+    assert response.status_code == 200
+    assert response.json() == {"state": "ready"}
+    assert calls == [("inc-1", 4.0, OverlaySettings(True, False, True))]
+
+
+def test_report_regeneration_rejects_time_outside_evidence(tmp_path):
+    store, _item = ready_store_with_clip(tmp_path, duration=45.0)
+    client = TestClient(create_app(store, regenerate_report=lambda *_: pytest.fail()))
+
+    assert client.post("/api/incidents/inc-1/report", json={"incident_offset_seconds": 46.0}).status_code == 422
+
+
+def test_report_regeneration_returns_analyzing_when_worker_queues_report(tmp_path):
+    store, _item = ready_store_with_clip(tmp_path, duration=45.0)
+    queued = Future()
+
+    response = TestClient(create_app(store, regenerate_report=lambda *_: queued)).post(
+        "/api/incidents/inc-1/report", json={}
+    )
+
+    assert response.status_code == 202
+    assert response.json() == {"state": "analyzing"}
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_report_regeneration_rejects_boolean_offsets(tmp_path, value):
+    store, item = ready_store_with_clip(tmp_path, duration=45.0)
+    calls = []
+    client = TestClient(create_app(store, regenerate_report=lambda *args: calls.append(args) or item))
+
+    response = client.post("/api/incidents/inc-1/report", json={"incident_offset_seconds": value})
+
+    assert response.status_code == 422
+    assert calls == []
+
+
+@pytest.mark.parametrize("damage", ["outside", "symlink", "directory", "empty", "size", "digest", "incident_symlink"])
+def test_regeneration_enforces_the_clip_download_trust_boundary(tmp_path, damage):
+    store, item = ready_store_with_clip(tmp_path, duration=45.0)
+    clip = item.clip.path
+    if damage == "outside":
+        item.clip = replace(atomic_write(tmp_path / "outside.mp4", b"clip"), duration=45.0)
+        store.save(item)
+    elif damage == "incident_symlink":
+        directory = store.directory(item.incident_id)
+        directory.rename(tmp_path / "outside")
+        directory.symlink_to(tmp_path / "outside", target_is_directory=True)
+    else:
+        clip.unlink()
+        if damage == "symlink":
+            outside = atomic_write(tmp_path / "outside.mp4", b"clip")
+            clip.symlink_to(outside.path)
+        elif damage == "directory":
+            clip.mkdir()
+        else:
+            clip.write_bytes({"empty": b"", "size": b"longer", "digest": b"evil"}[damage])
+    calls = []
+    client = TestClient(create_app(store, regenerate_report=lambda *args: calls.append(args) or item))
+
+    assert client.get("/api/incidents/inc-1/clip").status_code == 409
+    assert client.post("/api/incidents/inc-1/report", json={}).status_code == 409
+    assert calls == []
+
+
+@pytest.mark.parametrize("outcome", ["ready", "analysis_failed", "exception"])
+def test_regeneration_status_tracks_queued_work_through_terminal_result(tmp_path, outcome):
+    store, item = ready_store_with_clip(tmp_path, duration=45.0)
+    queued = Future()
+    client = TestClient(create_app(store, regenerate_report=lambda *_: queued))
+    assert client.post("/api/incidents/inc-1/report", json={}).status_code == 202
+    status_url = "/api/incidents/inc-1/report/status"
+
+    assert client.get(status_url).json()["state"] == "analyzing"
+    assert client.post("/api/incidents/inc-1/report", json={}).status_code == 409
+    if outcome == "exception":
+        queued.set_exception(ValueError("clip changed while queued"))
+    else:
+        item.transition(IncidentState(outcome), "now", "model failed" if outcome == "analysis_failed" else None)
+        store.save(item)
+        queued.set_result(item)
+
+    status = client.get(status_url).json()
+    assert status["state"] == ("analysis_failed" if outcome == "exception" else outcome)
+    assert status["failure_reason"] == {"ready": None, "analysis_failed": "model failed", "exception": "clip changed while queued"}[outcome]
 
 
 @pytest.fixture
@@ -404,6 +530,8 @@ def test_list_returns_metadata_not_filesystem_paths(tmp_path):
             "failure_reason": "model timeout",
             "has_clip": False,
             "has_report": False,
+            "clip_duration": None,
+            "optical_report_available": False,
         }
     ]
     assert str(tmp_path) not in response.text

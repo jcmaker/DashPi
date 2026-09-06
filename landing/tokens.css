@@ -1,0 +1,34 @@
+/* Hallmark · macrostructure: poster-index · theme: Grid · genre: editorial · tone: rational-institutional */
+/* Hallmark · pre-emit critique: P4 H5 E4 S5 R4 V4 */
+:root {
+  --color-paper: oklch(99% 0.003 255);
+  --color-paper-2: oklch(97.2% 0.003 255);
+  --color-paper-3: oklch(94.5% 0.004 255);
+  --color-ink: oklch(16% 0.010 255);
+  --color-muted: oklch(43% 0.012 255);
+  --color-rule: oklch(88% 0.006 255);
+  --color-accent: oklch(55% 0.21 28);
+  --color-accent-ink: var(--color-paper);
+  --color-focus: var(--color-accent);
+  --font-display: "Archivo", "Noto Sans KR", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "Archivo", "Noto Sans KR", "Helvetica Neue", Arial, sans-serif;
+  --display-weight: 800;
+  --tracking-display: -0.045em;
+  --tracking-label: 0.09em;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --space-5: 32px;
+  --space-6: 48px;
+  --space-7: 64px;
+  --space-8: 96px;
+  --space-band: clamp(96px, 12vw, 152px);
+  --gutter: clamp(16px, 2.5vw, 32px);
+  --shell-max: 1280px;
+  --dur-fast: 0.19s;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --rule-hairline: 1px;
+  --rule-section: 2px;
+  --radius-none: 0;
+}
