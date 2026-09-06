@@ -1,5 +1,6 @@
 .worktrees/
 .superpowers/sdd/
+.superpowers/brainstorm/
 .venv/
 web/node_modules/
 web/dist/
