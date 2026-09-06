@@ -2,7 +2,7 @@ import pytest
 import json
 
 from dashpi.config import Settings
-from dashpi.media import probe_duration, segment_source
+from dashpi.media import extract_frame, probe_duration, segment_source, transcode_clip
 from dashpi.models import IncidentMetadata, IncidentState, Segment
 from dashpi.pipeline import IncidentPipeline
 from dashpi.storage import IncidentStore, sha256_file
@@ -77,6 +77,31 @@ def test_tracker_failure_creates_unannotated_ten_second_report_with_warning(
     assert 9.9 <= probe_duration(result.annotated.path) <= 10.1
     report = json.loads(result.report_json.path.read_text())
     assert report["object_observations"] == []
+    assert "Object tracking failed; the transfer video has no boxes." in report["warnings"]
+
+
+def test_short_successful_annotation_uses_ten_second_tracking_fallback(
+    long_pipeline_fixture, monkeypatch
+):
+    pipeline, incident, segments, _detector = long_pipeline_fixture
+
+    def short_annotation(
+        source, output, start, duration, _incident_offset, _detector, _overlays, keyframe_dir, height, bitrate
+    ):
+        annotated = transcode_clip(source, output, start, duration / 2, height, bitrate)
+        keyframes = [
+            extract_frame(annotated.path, keyframe_dir / name, 1.0)
+            for name in ("before.jpg", "moment.jpg", "after.jpg")
+        ]
+        return annotated, [], keyframes
+
+    monkeypatch.setattr("dashpi.pipeline.annotate_clip", short_annotation)
+
+    result = pipeline.process(incident, segments, lambda _frames: localized_analysis(22.5))
+
+    assert result.state is IncidentState.READY
+    assert 9.9 <= probe_duration(result.annotated.path) <= 10.1
+    report = json.loads(result.report_json.path.read_text())
     assert "Object tracking failed; the transfer video has no boxes." in report["warnings"]
 
 

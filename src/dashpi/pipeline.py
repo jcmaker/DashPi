@@ -95,6 +95,8 @@ class IncidentPipeline:
                     480,
                     "900k",
                 )
+                if probe_duration(annotated.path) < end - start - 0.1:
+                    raise RuntimeError("annotated clip did not preserve requested duration")
                 warnings = []
             except Exception:
                 annotated = transcode_clip(
