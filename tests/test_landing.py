@@ -111,3 +111,12 @@ class LandingPageTests(unittest.TestCase):
 
     def test_script_is_linked(self) -> None:
         self.assertIn("script.js", self.parser().assets)
+
+    def test_pages_workflow_publishes_landing_directory(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "pages.yml").read_text(encoding="utf-8")
+        self.assertIn("actions/configure-pages@v5", workflow)
+        self.assertIn("actions/upload-pages-artifact@v3", workflow)
+        self.assertIn("actions/deploy-pages@v4", workflow)
+        self.assertIn("path: landing", workflow)
+        self.assertIn("pages: write", workflow)
+        self.assertIn("id-token: write", workflow)
