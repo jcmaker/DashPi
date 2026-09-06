@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from dataclasses import replace
 import json
+from collections.abc import Callable
 
 from dashpi.config import OverlaySettings, Settings
 from dashpi.media import (
@@ -19,10 +20,17 @@ from dashpi.vision import annotate_clip
 
 
 class IncidentPipeline:
-    def __init__(self, settings: Settings, store: IncidentStore, detector=None):
+    def __init__(
+        self,
+        settings: Settings,
+        store: IncidentStore,
+        detector=None,
+        wait_for_capacity: Callable[[], None] = lambda: None,
+    ):
         self.settings = settings
         self.store = store
         self.detector = detector
+        self.wait_for_capacity = wait_for_capacity
 
     def process(
         self,
@@ -67,8 +75,10 @@ class IncidentPipeline:
                 raise ValueError("clip digest changed")
             incident.transition(IncidentState.ANALYZING, datetime.now(UTC).isoformat())
             self.store.save(incident)
+            self.wait_for_capacity()
             frames = sample_frames(incident.clip.path, directory / "frames", self.settings.frame_sample_count)
             generated_at = datetime.now(UTC).isoformat()
+            self.wait_for_capacity()
             report = validate_report(
                 analyze(frames),
                 incident.clip.sha256,
@@ -84,6 +94,7 @@ class IncidentPipeline:
             try:
                 if self.detector is None:
                     raise RuntimeError("detector unavailable")
+                self.wait_for_capacity()
                 annotated, observations, keyframes = annotate_clip(
                     incident.clip.path,
                     directory / "annotated.mp4",
@@ -100,6 +111,7 @@ class IncidentPipeline:
                     raise RuntimeError("annotated clip did not preserve requested duration")
                 warnings = []
             except Exception:
+                self.wait_for_capacity()
                 annotated = transcode_clip(
                     incident.clip.path,
                     directory / "annotated.mp4",
@@ -139,6 +151,7 @@ class IncidentPipeline:
                 [frame.path.read_bytes() for frame in keyframes],
             ).encode()
             if len(report_html) > MAX_PAYLOAD:
+                self.wait_for_capacity()
                 annotated = transcode_clip(
                     annotated.path,
                     annotated.path,

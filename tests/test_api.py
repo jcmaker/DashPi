@@ -1,7 +1,7 @@
 import hashlib
 import json
 import shutil
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import replace
 import threading
 
@@ -77,6 +77,7 @@ def test_report_regeneration_passes_manual_time_and_overlay_settings(tmp_path):
     })
 
     assert response.status_code == 200
+    assert response.json() == {"state": "ready"}
     assert calls == [("inc-1", 4.0, OverlaySettings(True, False, True))]
 
 
@@ -85,6 +86,18 @@ def test_report_regeneration_rejects_time_outside_evidence(tmp_path):
     client = TestClient(create_app(store, regenerate_report=lambda *_: pytest.fail()))
 
     assert client.post("/api/incidents/inc-1/report", json={"incident_offset_seconds": 46.0}).status_code == 422
+
+
+def test_report_regeneration_returns_analyzing_when_worker_queues_report(tmp_path):
+    store, _item = ready_store_with_clip(tmp_path, duration=45.0)
+    queued = Future()
+
+    response = TestClient(create_app(store, regenerate_report=lambda *_: queued)).post(
+        "/api/incidents/inc-1/report", json={}
+    )
+
+    assert response.status_code == 202
+    assert response.json() == {"state": "analyzing"}
 
 
 @pytest.fixture

@@ -3,10 +3,12 @@ import hashlib
 import hmac
 from pathlib import Path
 import secrets
+from concurrent.futures import Future
 from threading import Lock
 from typing import Callable, Literal
 
 from fastapi import FastAPI, Header, HTTPException, Response
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -52,7 +54,7 @@ class LatestOpticalSession:
 def create_app(
     store: IncidentStore,
     regenerate_report: Callable[
-        [IncidentMetadata, float | None, OverlaySettings], IncidentMetadata
+        [IncidentMetadata, float | None, OverlaySettings], IncidentMetadata | Future[IncidentMetadata]
     ] | None = None,
 ) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None)
@@ -99,7 +101,9 @@ def create_app(
         if regenerate_report is None:
             raise HTTPException(503, "report regeneration is unavailable")
         result = regenerate_report(item, request.incident_offset_seconds, request.overlays())
-        return {"incident_id": result.incident_id, "state": result.state}
+        if isinstance(result, Future):
+            return JSONResponse({"state": "analyzing"}, status_code=202)
+        return {"state": result.state}
 
     def load_report(incident_id: str):
         report_html_source = None

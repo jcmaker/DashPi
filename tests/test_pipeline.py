@@ -211,6 +211,16 @@ def test_sampling_failure_persists_exposed_clip(pipeline_fixture, monkeypatch):
     assert reloaded.clip.path.exists()
 
 
+def test_pipeline_checks_recording_capacity_before_expensive_stages(long_pipeline_fixture):
+    calls = []
+    pipeline, incident, segments, _detector = long_pipeline_fixture
+    pipeline.wait_for_capacity = lambda: calls.append("capacity")
+
+    pipeline.process(incident, segments, lambda _frames: localized_analysis(22.5))
+
+    assert len(calls) >= 3
+
+
 def test_invalid_report_persists_exposed_clip(pipeline_fixture):
     pipeline, incident, segments = pipeline_fixture
 
