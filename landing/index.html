@@ -83,8 +83,8 @@
         <li class="flow__row">
           <a href="#evidence">
             <span class="flow__index" aria-hidden="true">03</span>
-            <span class="flow__name" data-i18n="flow.analyse.name">로컬 Ollama 분석</span>
-            <span class="flow__detail index__meta" data-i18n="flow.analyse.detail">12개 프레임 기반 · AI 실패 시에도 clip 보존</span>
+            <span class="flow__name" data-i18n="flow.analyse.name">사고 시점 탐지와 로컬 분석</span>
+            <span class="flow__detail index__meta" data-i18n="flow.analyse.detail">12개 프레임으로 사고 시점을 찾고, 앞뒤 5초 영상을 생성</span>
             <span class="flow__mark flow__mark--analyse" aria-hidden="true"></span>
           </a>
         </li>
@@ -185,7 +185,7 @@
             </tbody>
           </table>
         </div>
-        <p class="transfer__note" data-i18n="transfer.note">Optical QR은 일반 카메라 앱만으로 복원할 수 없습니다. 오프라인 수신 전, Receiver PWA를 설치해야 합니다.</p>
+        <p class="transfer__note" data-i18n="transfer.note">Optical QR은 일반 카메라 앱만으로 복원할 수 없습니다. 오프라인 수신 전 Receiver PWA를 설치해야 합니다. 리포트가 16 MiB를 넘으면 파생 영상만 낮은 품질로 재인코딩하고, 그래도 크면 Local Wi-Fi를 사용합니다.</p>
       </div>
     </section>
     <section class="verification" id="verification" aria-labelledby="verification-title">
@@ -199,11 +199,11 @@
             <p class="eyebrow" data-i18n="verification.software.eyebrow">완료</p>
             <h3 id="software-title" data-i18n="verification.software.title">소프트웨어 구현 및 자동 검증</h3>
             <ul>
-              <li data-i18n="verification.software.incident">incident pipeline과 로컬 분석</li>
+              <li data-i18n="verification.software.incident">사고 시점 탐지와 10초 파생 영상</li>
               <li data-i18n="verification.software.storage">atomic storage와 SHA-256</li>
-              <li data-i18n="verification.software.video">ranged video와 로컬 웹 UI</li>
-              <li data-i18n="verification.software.optical">optical protocol과 offline Receiver PWA</li>
-              <li data-i18n="verification.software.tests">자동 테스트와 고정 golden vector 검증</li>
+              <li data-i18n="verification.software.video">선택형 오버레이와 자급형 HTML·PDF 리포트</li>
+              <li data-i18n="verification.software.regeneration">비동기 리포트 재생성과 로컬 웹 UI</li>
+              <li data-i18n="verification.software.optical">optical protocol·용량 fallback·offline Receiver PWA</li>
             </ul>
           </section>
           <section class="verification__cell verification__pending" aria-labelledby="hardware-title">
@@ -257,8 +257,8 @@
     "flow.capture.detail": "기본 30초 전, 15초 후",
     "flow.preserve.name": "원자적 저장과 SHA-256 검증",
     "flow.preserve.detail": "완료 전에는 결과를 노출하지 않음",
-    "flow.analyse.name": "로컬 Ollama 분석",
-    "flow.analyse.detail": "12개 프레임 기반 · AI 실패 시에도 clip 보존",
+    "flow.analyse.name": "사고 시점 탐지와 로컬 분석",
+    "flow.analyse.detail": "12개 프레임으로 사고 시점을 찾고, 앞뒤 5초 영상을 생성",
     "flow.transfer.name": "두 가지 오프라인 전송",
     "flow.transfer.detail": "Local Wi-Fi 또는 Optical QR",
     "plate.title": "AI가 실패해도, 증거는 남습니다.",
@@ -294,16 +294,16 @@
     "transfer.table.confidentiality": "기밀성 한계",
     "transfer.wifi.confidentiality": "WPA2 핫스팟 운영을 전제로 설계",
     "transfer.optical.confidentiality": "암호화되지 않음 — 호환 디코더가 있는 주변 카메라가 캡처 가능",
-    "transfer.note": "Optical QR은 일반 카메라 앱만으로 복원할 수 없습니다. 오프라인 수신 전, Receiver PWA를 설치해야 합니다.",
+    "transfer.note": "Optical QR은 일반 카메라 앱만으로 복원할 수 없습니다. 오프라인 수신 전 Receiver PWA를 설치해야 합니다. 리포트가 16 MiB를 넘으면 파생 영상만 낮은 품질로 재인코딩하고, 그래도 크면 Local Wi-Fi를 사용합니다.",
     "verification.eyebrow": "04 — 검증",
     "verification.title": "완료된 소프트웨어와 남은 하드웨어 수락 시험.",
     "verification.software.eyebrow": "완료",
     "verification.software.title": "소프트웨어 구현 및 자동 검증",
-    "verification.software.incident": "incident pipeline과 로컬 분석",
+    "verification.software.incident": "사고 시점 탐지와 10초 파생 영상",
     "verification.software.storage": "atomic storage와 SHA-256",
-    "verification.software.video": "ranged video와 로컬 웹 UI",
-    "verification.software.optical": "optical protocol과 offline Receiver PWA",
-    "verification.software.tests": "자동 테스트와 고정 golden vector 검증",
+    "verification.software.video": "선택형 오버레이와 자급형 HTML·PDF 리포트",
+    "verification.software.regeneration": "비동기 리포트 재생성과 로컬 웹 UI",
+    "verification.software.optical": "optical protocol·용량 fallback·offline Receiver PWA",
     "verification.hardware.eyebrow": "필요",
     "verification.hardware.title": "Raspberry Pi 하드웨어 수락 시험",
     "verification.hardware.camera": "Picamera2 장시간 녹화와 timestamp 정확도",
@@ -338,8 +338,8 @@
     "flow.capture.detail": "By default, 30 seconds before and 15 seconds after",
     "flow.preserve.name": "Atomic save and SHA-256 check",
     "flow.preserve.detail": "Results stay hidden until storage is complete",
-    "flow.analyse.name": "Local Ollama analysis",
-    "flow.analyse.detail": "Based on 12 frames · Clip preserved even if AI fails",
+    "flow.analyse.name": "Accident moment detection and local analysis",
+    "flow.analyse.detail": "Finds the accident moment from 12 frames and creates a video spanning 5 seconds before and after",
     "flow.transfer.name": "Two offline transfer options",
     "flow.transfer.detail": "Local Wi-Fi or Optical QR",
     "plate.title": "Evidence survives even when analysis fails.",
@@ -375,16 +375,16 @@
     "transfer.table.confidentiality": "Confidentiality limits",
     "transfer.wifi.confidentiality": "Designed for operation over a WPA2 hotspot",
     "transfer.optical.confidentiality": "Not encrypted — nearby cameras with a compatible decoder can capture it",
-    "transfer.note": "Optical QR cannot be reconstructed with a standard camera app alone. Install the Receiver PWA before receiving offline.",
+    "transfer.note": "Optical QR cannot be reconstructed with a standard camera app alone. Install the Receiver PWA before receiving offline. If a report exceeds 16 MiB, only the derived video is re-encoded at lower quality; if it is still too large, use Local Wi-Fi.",
     "verification.eyebrow": "04 — Verification",
     "verification.title": "Software complete. Hardware acceptance tests still ahead.",
     "verification.software.eyebrow": "Complete",
     "verification.software.title": "Software implementation and automated verification",
-    "verification.software.incident": "Incident pipeline and local analysis",
+    "verification.software.incident": "Accident moment detection and a 10-second derived video",
     "verification.software.storage": "Atomic storage and SHA-256",
-    "verification.software.video": "Ranged video and local web UI",
-    "verification.software.optical": "Optical protocol and offline Receiver PWA",
-    "verification.software.tests": "Automated tests and fixed golden vector verification",
+    "verification.software.video": "Optional overlays and self-contained HTML/PDF reports",
+    "verification.software.regeneration": "Asynchronous report regeneration and local web UI",
+    "verification.software.optical": "Optical protocol, size fallback, and offline Receiver PWA",
     "verification.hardware.eyebrow": "Required",
     "verification.hardware.title": "Raspberry Pi hardware acceptance tests",
     "verification.hardware.camera": "Long-duration Picamera2 recording and timestamp accuracy",

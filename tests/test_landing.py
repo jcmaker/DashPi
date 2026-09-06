@@ -112,6 +112,17 @@ class LandingPageTests(unittest.TestCase):
         self.assertLessEqual(referenced, set(translations["ko"]))
         self.assertTrue(all(translations[lang][key].strip() for lang in translations for key in translations[lang]))
 
+    def test_copy_covers_the_current_analysis_report_flow(self) -> None:
+        translations = self.translations()
+        expected = {
+            "ko": ("사고 시점", "앞뒤 5초", "오버레이", "PDF", "재생성", "낮은 품질"),
+            "en": ("accident moment", "5 seconds", "overlay", "PDF", "regeneration", "lower quality"),
+        }
+        for language, phrases in expected.items():
+            copy = " ".join(translations[language].values())
+            for phrase in phrases:
+                self.assertIn(phrase, copy)
+
     def test_script_has_safe_korean_fallback(self) -> None:
         script = (LANDING / "script.js").read_text(encoding="utf-8")
         self.assertIn('const DEFAULT_LANGUAGE = "ko";', script)
