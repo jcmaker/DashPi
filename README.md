@@ -281,9 +281,11 @@ DashPi/
 - [Product Requirements Document](docs/PRD.md)
 - [Technical Requirements Document](docs/TRD.md)
 - [Offline Incident and Transfer Design](docs/superpowers/specs/2026-09-02-offline-transfer-design.md)
+- [Incident Analysis Report Design](docs/superpowers/specs/2026-09-06-incident-analysis-report-design.md)
 
 ## 설계 및 문서화 레퍼런스
 
+- [Decimen Optical Transfer](https://github.com/bashalarmistalt/decimen-optical-transfer): Animated QR, LT fountain coding, frame-loss tolerance와 SHA-256 검증을 참고한 화면→카메라 전송 프로젝트. DashPi는 소스나 wire format을 복사하지 않은 독자 규격입니다.
 - [GitHub Docs — About READMEs](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-readmes): README의 목적·시작 방법·유지보수 정보 구성과 상대 경로 권장사항
 - [GitHub Docs — Creating diagrams](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/creating-diagrams): GitHub-native Mermaid 작성 방식
 - [GitHub Open Source Guides — Starting a Project](https://opensource.guide/starting-a-project/): 처음 방문한 사용자가 목적과 사용법을 이해할 수 있는 공개 프로젝트 문서 구성
