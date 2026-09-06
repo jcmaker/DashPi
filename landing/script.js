@@ -2,6 +2,48 @@ const DEFAULT_LANGUAGE = "ko";
 const STORAGE_KEY = "dashpi-language";
 const toggle = document.querySelector(".language-toggle");
 const dictionaryNode = document.querySelector("#translations");
+const CLEARBOX_FRAMES = [
+  String.raw`        +----------+
+       /          /|
+      +----------+ |
+      |          | |
+      |          | +
+      |          |/
+      +----------+`,
+  String.raw`          +-------+
+        //       /|
+       ++-------+ |
+       ||       | |
+       ||       | +
+       ||       |/
+       ++-------+`,
+  String.raw`             +--+
+            /  /|
+           +--+ |
+           |  | |
+           |  | +
+           |  |/
+           +--+`,
+  String.raw`       +-------+
+       |\       \\
+       | +-------++
+       | |       ||
+       + |       ||
+        \|       ||
+         +-------++`,
+  String.raw`      +----------+
+      |\          \\
+      | +----------+
+      | |          |
+      + |          |
+       \|          |
+        +----------+`,
+];
+const CLEARBOX_ORDER = [0, 1, 2, 3, 4, 3, 2, 1];
+const cube = document.querySelector("[data-clearbox-cube]");
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+let cubeFrame = 0;
+let previousFrameTime = 0;
 
 function storedLanguage() {
   try {
@@ -43,6 +85,15 @@ function applyLanguage(language) {
   requestAnimationFrame(() => { toggle.dataset.state = "success"; });
 }
 
+function animateClearboxCube(time) {
+  if (time - previousFrameTime >= 420) {
+    cubeFrame = (cubeFrame + 1) % CLEARBOX_ORDER.length;
+    cube.textContent = CLEARBOX_FRAMES[CLEARBOX_ORDER[cubeFrame]];
+    previousFrameTime = time;
+  }
+  requestAnimationFrame(animateClearboxCube);
+}
+
 let translations;
 try {
   translations = JSON.parse(dictionaryNode.textContent);
@@ -52,3 +103,5 @@ try {
   toggle.dataset.state = "error";
   toggle.disabled = true;
 }
+
+if (cube && !reducedMotion.matches) requestAnimationFrame(animateClearboxCube);

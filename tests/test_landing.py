@@ -102,6 +102,23 @@ class LandingPageTests(unittest.TestCase):
         self.assertNotIn("AI가 실패해도, 증거는 남습니다.", page)
         self.assertNotIn('class="numeral" aria-hidden="true">45</span>', page)
 
+    def test_footer_honors_clearbox_with_a_reduced_motion_ascii_cube(self) -> None:
+        page = self.page()
+        styles = (LANDING / "styles.css").read_text(encoding="utf-8")
+        script = (LANDING / "script.js").read_text(encoding="utf-8")
+        translations = self.translations()
+
+        self.assertIn('data-i18n="footer.origin.title"', page)
+        self.assertIn('data-clearbox-cube aria-hidden="true"', page)
+        self.assertEqual(translations["ko"]["footer.origin.title"], "DashPi는 Clearbox에서 시작되었습니다.")
+        self.assertEqual(translations["en"]["footer.origin.title"], "DashPi began as Clearbox.")
+        self.assertIn("--font-mono:", (LANDING / "tokens.css").read_text(encoding="utf-8"))
+        self.assertIn(".footer__origin", styles)
+        self.assertIn("const CLEARBOX_FRAMES", script)
+        self.assertIn('matchMedia("(prefers-reduced-motion: reduce)")', script)
+        self.assertIn("requestAnimationFrame(animateClearboxCube)", script)
+        self.assertNotIn("setInterval", script)
+
     def test_grid_theme_contract(self) -> None:
         tokens = (LANDING / "tokens.css").read_text(encoding="utf-8")
         styles = (LANDING / "styles.css").read_text(encoding="utf-8")
