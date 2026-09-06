@@ -1,15 +1,15 @@
-# Clearbox ASCII footer
+# Clearbox solid ASCII footer
 
 ## Goal
 
-Honor DashPi's original name, Clearbox, with a restrained origin panel inspired by the GitHub Shop footer's rotating ASCII cube without copying its implementation or full visual system.
+Honor DashPi's original name, Clearbox, with a solid, character-shaded rotating cube. The rendering approach follows the supplied `interactive-artwork` reference's idea of sampling a 3D surface and mapping light to glyphs, but uses a cube and the existing dependency-free landing stack.
 
 ## Layout
 
-- Expand the footer with a dark, full-width origin panel above the existing document-link strip.
+- Treat the entire footer as one dark, full-width closing panel.
 - Place `ORIGIN / CLEARBOX`, the origin statement, and its supporting sentence on the left.
-- Place a large monospace ASCII cube on the right.
-- Keep the existing copyright and README, PRD, TRD, and notice links in their current light lower strip.
+- Place a large solid monospace cube on the right, filled with different glyphs for the visible faces rather than drawn as an outline.
+- Keep the existing copyright and README, PRD, TRD, and notice links in the lower strip, but make that strip part of the same dark footer with a subdued separating rule.
 - Collapse the origin copy and cube into one column on narrow screens without horizontal overflow.
 
 ## Copy
@@ -30,18 +30,18 @@ DashPi began as Clearbox.
 It was our first name for turning the confusion after a crash into a clearer record and handoff.
 ```
 
-## ASCII cube motion
+## Solid cube rendering and motion
 
-- Render one `<pre>` element with a readable static cube as the no-JavaScript fallback.
-- Cycle through a small fixed array of hand-authored ASCII frames with the existing `landing/script.js`; do not add a canvas, WebGL, dependency, control, or keyboard interaction.
-- Advance slowly with `requestAnimationFrame`, changing only text content at fixed intervals.
-- Stop on a stable first frame when `prefers-reduced-motion: reduce` is active.
+- Render one `<pre>` element with a filled, character-shaded static cube as the no-JavaScript fallback.
+- Generate each frame by casting a small fixed grid of rays at a rotated cube, selecting the nearest face, and mapping that face's light value to a short ASCII shade ramp.
+- Use the existing `requestAnimationFrame` loop with a low frame rate and time-based rotation. Do not add canvas, WebGL, dependencies, controls, or keyboard interaction.
+- Render one stable solid frame when `prefers-reduced-motion: reduce` is active.
 - Mark the cube decorative with `aria-hidden="true"`; the adjacent origin copy carries the meaning.
 
 ## Visual system
 
 - Preserve the existing Grid theme, Archivo/Noto Sans KR typography, spacing tokens, and red accent.
-- Use existing paper and ink tokens for the dark panel and its foreground; add no new colour values.
+- Use existing paper and ink tokens for the full dark footer and its foreground; add no new colour values.
 - Add one `--font-mono` token using the system monospace fallback stack; do not load another font.
 - Keep animation subordinate to the origin statement.
 
@@ -59,7 +59,7 @@ No files are deleted and no unrelated section changes.
 
 ## Verification
 
-- Add focused regression coverage for the origin copy, semantic footer structure, ASCII fallback, and reduced-motion guard.
+- Add focused regression coverage for the origin copy, semantic footer structure, solid renderer output, static fallback, and reduced-motion guard.
 - Verify Korean and English content in the browser.
 - Verify no horizontal overflow at 320, 375, 414, 768, and desktop widths.
 - Run the full Python and web test suites, web build, and `git diff --check`.
