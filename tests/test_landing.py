@@ -19,10 +19,13 @@ class PageParser(HTMLParser):
         self.assets: set[str] = set()
         self.i18n_keys: set[str] = set()
         self.i18n_attr_keys: set[str] = set()
+        self.open_graph_images: list[str | None] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         values = dict(attrs)
         self.tags.append(tag)
+        if tag == "meta" and values.get("property") == "og:image":
+            self.open_graph_images.append(values.get("content"))
         if element_id := values.get("id"):
             self.ids.add(element_id)
         for name in ("src", "href"):
@@ -57,6 +60,12 @@ class LandingPageTests(unittest.TestCase):
         self.assertIn("dashpi", page)
         self.assertNotIn("signal, basel", page)
         self.assertNotIn("poster and graphic design festival", page)
+
+    def test_open_graph_image_has_an_absolute_deployed_asset_url(self) -> None:
+        self.assertEqual(
+            self.parser().open_graph_images,
+            ["https://jcmaker.github.io/DashPi/assets/dashpi-incidents.jpg"],
+        )
 
     def test_hero_art_has_a_korean_no_javascript_label(self) -> None:
         self.assertIn(
