@@ -84,6 +84,10 @@ class LandingPageTests(unittest.TestCase):
         }
         for name, value in expected_tokens.items():
             self.assertIn(f"{name}: {value};", tokens)
+        self.assertIn("--color-rail: oklch(95.5% 0.003 255);", tokens)
+        self.assertIn("var(--color-rail) 0", styles)
+        self.assertIn("body > header, body > main, body > footer { position: relative; z-index: 1; }", styles)
+        self.assertIn(".topbar__controls { grid-column: 6 / 13; grid-row: 1; }", styles)
         self.assertIn("repeat(12, minmax(0, 1fr))", styles)
         self.assertIn("overflow-x: clip", styles)
         self.assertIn("prefers-reduced-motion: reduce", styles)
@@ -111,6 +115,17 @@ class LandingPageTests(unittest.TestCase):
         referenced = parser.i18n_keys | parser.i18n_attr_keys
         self.assertLessEqual(referenced, set(translations["ko"]))
         self.assertTrue(all(translations[lang][key].strip() for lang in translations for key in translations[lang]))
+
+    def test_copy_covers_the_current_analysis_report_flow(self) -> None:
+        translations = self.translations()
+        expected = {
+            "ko": ("사고 시점", "앞뒤 5초", "오버레이", "PDF", "재생성", "낮은 품질"),
+            "en": ("accident moment", "5 seconds", "overlay", "PDF", "regeneration", "lower quality"),
+        }
+        for language, phrases in expected.items():
+            copy = " ".join(translations[language].values())
+            for phrase in phrases:
+                self.assertIn(phrase, copy)
 
     def test_script_has_safe_korean_fallback(self) -> None:
         script = (LANDING / "script.js").read_text(encoding="utf-8")

@@ -7,6 +7,7 @@
   --color-ink: oklch(16% 0.010 255);
   --color-muted: oklch(43% 0.012 255);
   --color-rule: oklch(88% 0.006 255);
+  --color-rail: oklch(95.5% 0.003 255);
   --color-accent: oklch(55% 0.21 28);
   --color-accent-ink: var(--color-paper);
   --color-focus: var(--color-accent);

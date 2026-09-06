@@ -10,6 +10,7 @@ body {
   font-size: 16px;
   line-height: 1.5;
 }
+body > header, body > main, body > footer { position: relative; z-index: 1; }
 .rails {
   position: fixed;
   inset: 0;
@@ -19,8 +20,8 @@ body {
   padding-inline: var(--gutter);
   background-clip: content-box;
   background-image: repeating-linear-gradient(to right,
-    var(--color-rule) 0,
-    var(--color-rule) var(--rule-hairline),
+    var(--color-rail) 0,
+    var(--color-rail) var(--rule-hairline),
     transparent var(--rule-hairline),
     transparent calc(100% / 12));
   pointer-events: none;
@@ -183,7 +184,7 @@ tbody th { color: var(--color-muted); font-size: 12px; font-weight: 600; }
   .evidence__text, .evidence__figures,
   .transfer__text, .transfer__table,
   .verification__complete, .verification__pending { grid-column: 1 / 13; }
-  .topbar__controls { grid-column: 5 / 13; }
+  .topbar__controls { grid-column: 6 / 13; grid-row: 1; }
   .topbar__nav, .topbar__controls { gap: var(--space-3); }
   .hero__composition { grid-row: 2; width: min(100%, 480px); justify-self: end; }
   .section-heading { grid-column: 1 / 13; }
