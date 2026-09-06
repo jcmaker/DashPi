@@ -4,6 +4,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 import json
 import re
+import subprocess
 import unittest
 
 
@@ -102,10 +103,9 @@ class LandingPageTests(unittest.TestCase):
         self.assertNotIn("AI가 실패해도, 증거는 남습니다.", page)
         self.assertNotIn('class="numeral" aria-hidden="true">45</span>', page)
 
-    def test_footer_honors_clearbox_with_a_reduced_motion_ascii_cube(self) -> None:
+    def test_footer_uses_a_solid_cube_and_one_dark_surface(self) -> None:
         page = self.page()
         styles = (LANDING / "styles.css").read_text(encoding="utf-8")
-        script = (LANDING / "script.js").read_text(encoding="utf-8")
         translations = self.translations()
 
         self.assertIn('data-i18n="footer.origin.title"', page)
@@ -113,11 +113,58 @@ class LandingPageTests(unittest.TestCase):
         self.assertEqual(translations["ko"]["footer.origin.title"], "DashPi는 Clearbox에서 시작되었습니다.")
         self.assertEqual(translations["en"]["footer.origin.title"], "DashPi began as Clearbox.")
         self.assertIn("--font-mono:", (LANDING / "tokens.css").read_text(encoding="utf-8"))
-        self.assertIn(".footer__origin", styles)
-        self.assertIn("const CLEARBOX_FRAMES", script)
-        self.assertIn('matchMedia("(prefers-reduced-motion: reduce)")', script)
-        self.assertIn("requestAnimationFrame(animateClearboxCube)", script)
-        self.assertNotIn("setInterval", script)
+
+        fallback = re.search(r'<pre class="footer__cube"[^>]*>(.*?)</pre>', page, re.DOTALL)
+        self.assertIsNotNone(fallback)
+        self.assertGreater(len(re.sub(r"\s", "", fallback.group(1))), 120)
+
+        footer_rule = re.search(r"\.footer\s*\{([^}]*)\}", styles)
+        self.assertIsNotNone(footer_rule)
+        self.assertIn("background: var(--color-ink)", footer_rule.group(1))
+        self.assertRegex(styles, r"\.footer__grid\s*\{[^}]*border-top:")
+
+        harness = r"""
+const fs = require("node:fs");
+const vm = require("node:vm");
+const source = fs.readFileSync("landing/script.js", "utf8");
+const scheduled = [];
+const toggle = { dataset: {}, addEventListener() {}, setAttribute() {}, disabled: false, textContent: "" };
+const cube = { textContent: "" };
+const dictionary = { textContent: JSON.stringify({ ko: {}, en: {} }) };
+const context = {
+  scheduled,
+  window: { matchMedia: () => ({ matches: true }) },
+  document: {
+    documentElement: { lang: "ko" },
+    querySelector: (selector) => selector === ".language-toggle" ? toggle : selector === "#translations" ? dictionary : cube,
+    querySelectorAll: () => [],
+  },
+  localStorage: { getItem: () => null, setItem() {} },
+  requestAnimationFrame: (callback) => scheduled.push(callback.name),
+};
+vm.runInNewContext(source + `
+  globalThis.result = {
+    first: renderClearboxCube(0),
+    rotated: renderClearboxCube(0.7),
+    scheduled,
+  };
+`, context);
+process.stdout.write(JSON.stringify(context.result));
+"""
+        result = subprocess.run(
+            ["node", "-e", harness],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        rendered = json.loads(result.stdout)
+        self.assertEqual(len(rendered["first"].splitlines()), 20)
+        visible = rendered["first"].replace("\n", "").replace(" ", "")
+        self.assertGreater(len(visible), 120)
+        self.assertGreaterEqual(len(set(visible)), 3)
+        self.assertNotEqual(rendered["first"], rendered["rotated"])
+        self.assertNotIn("animateClearboxCube", rendered["scheduled"])
 
     def test_grid_theme_contract(self) -> None:
         tokens = (LANDING / "tokens.css").read_text(encoding="utf-8")

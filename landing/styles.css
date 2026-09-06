@@ -164,15 +164,16 @@ tbody th { color: var(--color-muted); font-size: 12px; font-weight: 600; }
 .source h2 { grid-column: 1 / 13; color: var(--color-muted); font-size: 16px; font-weight: 400; letter-spacing: normal; margin-block-end: var(--space-4); }
 .source a { grid-column: 1 / 13; justify-self: start; min-height: 44px; display: flex; align-items: center; font-size: clamp(20px, 4.2vw, 56px); font-weight: 800; letter-spacing: var(--tracking-display); white-space: nowrap; }
 .source a { text-decoration: underline; text-decoration-thickness: var(--rule-hairline); text-underline-offset: 2px; }
-.footer { border-top: var(--rule-hairline) solid var(--color-ink); }
-.footer__origin { display: grid; align-items: center; min-height: clamp(480px, 55vh, 640px); overflow: clip; background: var(--color-ink); color: var(--color-paper); }
+.footer { border-top: var(--rule-hairline) solid var(--color-ink); background: var(--color-ink); color: var(--color-paper); }
+.footer__origin { display: grid; align-items: center; min-height: clamp(520px, 62vh, 720px); overflow: clip; }
 .footer__origin-grid { align-items: center; padding-block: var(--space-8); }
 .footer__origin-copy { grid-column: 1 / 7; }
 .footer__origin-copy .eyebrow { margin-block-end: var(--space-4); color: var(--color-paper-3); }
 .footer__origin-copy h2 { font-size: clamp(36px, 5vw, 64px); }
 .footer__origin-copy > p:last-child { max-width: 46ch; margin-block-start: var(--space-5); color: var(--color-paper-2); font-size: 18px; line-height: 1.7; word-break: keep-all; }
-.footer__cube { grid-column: 7 / 13; justify-self: end; width: 24ch; min-height: 7.35em; overflow: hidden; color: var(--color-accent); font-family: var(--font-mono); font-size: clamp(14px, 2.2vw, 28px); line-height: 1.05; white-space: pre; user-select: none; }
-.footer__grid { align-items: center; row-gap: var(--space-2); padding-block: var(--space-4); }
+.footer__cube { grid-column: 7 / 13; justify-self: end; width: 40ch; min-height: 20em; overflow: hidden; color: var(--color-accent); font-family: var(--font-mono); font-size: clamp(10px, 1.25vw, 16px); line-height: 1; white-space: pre; user-select: none; }
+.footer__grid { align-items: center; row-gap: var(--space-2); padding-block: var(--space-4); border-top: var(--rule-hairline) solid var(--color-muted); }
+.footer__grid .label { color: var(--color-paper-2); line-height: 1; }
 .footer p { grid-column: 1 / 6; }
 .footer a { grid-column: span 1; justify-self: start; }
 .footer a:last-child { grid-column: 9 / 13; justify-self: end; }
