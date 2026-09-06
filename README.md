@@ -93,9 +93,9 @@ stateDiagram-v2
 1. 짧은 영상 세그먼트를 계속 생성합니다.
 2. 사고 trigger가 들어오면 앞·뒤 구간과 겹치는 세그먼트를 선택합니다.
 3. `clip.mp4.partial`을 완성하고 flush·hash 후 원자적으로 이름을 바꿉니다.
-4. 12개 프레임을 균등 추출해 로컬 Ollama에 전달합니다.
-5. 모델 출력을 검증한 뒤 JSON과 사람이 읽을 수 있는 HTML 리포트를 저장합니다.
-6. 사용자가 Local Wi-Fi 또는 Optical QR 전송 방식을 선택합니다.
+4. 12개 프레임과 clip 기준 timestamp를 로컬 Ollama에 전달해 사고 시점을 찾습니다.
+5. 사고 시점 앞뒤 5초를 10초 파생 영상으로 만들고, 선택한 항목만 detection·tracking overlay로 표시합니다.
+6. 검증된 JSON과 자급형 HTML 리포트를 저장한 뒤 Local Wi-Fi 또는 Optical QR 전송 방식을 제공합니다.
 
 ## 두 가지 전송 방식
 
@@ -116,6 +116,10 @@ Optical QR은 일반 카메라 앱만으로 복원할 수 없으므로, 수신 P
 
 - 샘플 MP4 기반 세그먼트 생성, 사고 구간 선택 및 clip 생성
 - 로컬 Ollama model 확인·분석 요청·출력 schema 검증
+- clip 기준 timestamp를 이용한 사고 시점 localization과 앞뒤 5초 annotated video 생성
+- 신호등·차선·표지판 독립 overlay 설정, object tracking 및 tracking 실패 fallback
+- 영상·핵심 장면·통계가 포함된 자급형 HTML 리포트와 브라우저 PDF 저장
+- 비동기 리포트 재생성, 진행 상태 polling 및 16 MiB Optical 크기 fallback
 - `.partial` → flush → SHA-256 → atomic rename 저장 순서
 - AI 실패 시 `analysis_failed` 상태와 clip 보존
 - incident 목록, 리포트 조회, ranged video 응답을 제공하는 FastAPI
@@ -234,7 +238,7 @@ npm test --prefix web
 npm run build --prefix web
 ```
 
-2026-09-06 기준 새 환경에서 **Python 266개**, **TypeScript 21개** 테스트를 통과했습니다. 검증 범위에는 다음이 포함됩니다.
+2026-09-06 기준 병합 결과에서 **Python 306개**, **TypeScript 27개** 테스트를 통과했습니다. 검증 범위에는 다음이 포함됩니다.
 
 - 사고 clip의 pre/post 경계와 중첩 trigger 병합
 - AI 실패 후 clip 보존 및 상태 전이
@@ -281,6 +285,8 @@ AI 리포트는 화면에 보이는 정황을 정리하는 **보조 자료**입�
 | `GET` | `/api/incidents/{incident_id}` | incident metadata와 JSON report |
 | `GET` | `/api/incidents/{incident_id}/report.html` | 사람이 읽는 HTML report |
 | `GET` | `/api/incidents/{incident_id}/clip` | Range를 지원하는 사고 영상 |
+| `POST` | `/api/incidents/{incident_id}/report` | 수동 사고 시점과 overlay 설정으로 report 재생성 |
+| `GET` | `/api/incidents/{incident_id}/report/status` | 비동기 report 재생성 진행·완료·실패 상태 |
 | `POST` | `/api/incidents/{incident_id}/optical` | Optical transfer session 생성 |
 | `GET` | `/api/optical/{session_id}` | Optical session 정보 |
 | `GET` | `/api/optical/{session_id}/frames/{sequence}` | 전송할 binary frame |
