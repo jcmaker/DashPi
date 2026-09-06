@@ -103,6 +103,14 @@ class LandingPageTests(unittest.TestCase):
         self.assertNotIn("AI가 실패해도, 증거는 남습니다.", page)
         self.assertNotIn('class="numeral" aria-hidden="true">45</span>', page)
 
+    def test_footer_cube_cycles_between_white_and_red(self) -> None:
+        styles = (LANDING / "styles.css").read_text(encoding="utf-8")
+
+        self.assertRegex(styles, r"@keyframes clearbox-color\s*\{")
+        self.assertRegex(styles, r"0%,\s*100%\s*\{\s*color:\s*var\(--color-paper\)")
+        self.assertRegex(styles, r"50%\s*\{\s*color:\s*var\(--color-accent\)")
+        self.assertRegex(styles, r"\.footer__cube\s*\{[^}]*animation:\s*clearbox-color")
+
     def test_footer_uses_a_solid_cube_and_one_dark_surface(self) -> None:
         page = self.page()
         styles = (LANDING / "styles.css").read_text(encoding="utf-8")
@@ -143,10 +151,19 @@ const context = {
   requestAnimationFrame: (callback) => scheduled.push(callback.name),
 };
 vm.runInNewContext(source + `
+  const renderedAngles = [];
+  const render = renderClearboxCube;
+  renderClearboxCube = (angle) => {
+    renderedAngles.push(angle);
+    return render(angle);
+  };
+  const scheduledBeforeManualAnimation = [...scheduled];
+  animateClearboxCube(15000);
   globalThis.result = {
-    first: renderClearboxCube(0),
-    rotated: renderClearboxCube(0.7),
-    scheduled,
+    first: render(0),
+    rotated: render(0.7),
+    scheduledBeforeManualAnimation,
+    animatedAngle: renderedAngles.at(-1),
   };
 `, context);
 process.stdout.write(JSON.stringify(context.result));
@@ -162,9 +179,10 @@ process.stdout.write(JSON.stringify(context.result));
         self.assertEqual(len(rendered["first"].splitlines()), 20)
         visible = rendered["first"].replace("\n", "").replace(" ", "")
         self.assertGreater(len(visible), 120)
-        self.assertGreaterEqual(len(set(visible)), 3)
+        self.assertGreaterEqual(len(set(visible)), 6)
         self.assertNotEqual(rendered["first"], rendered["rotated"])
-        self.assertNotIn("animateClearboxCube", rendered["scheduled"])
+        self.assertAlmostEqual(rendered["animatedAngle"], 3.141592653589793)
+        self.assertNotIn("animateClearboxCube", rendered["scheduledBeforeManualAnimation"])
 
     def test_grid_theme_contract(self) -> None:
         tokens = (LANDING / "tokens.css").read_text(encoding="utf-8")

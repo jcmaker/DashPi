@@ -4,7 +4,8 @@ const toggle = document.querySelector(".language-toggle");
 const dictionaryNode = document.querySelector("#translations");
 const CUBE_COLUMNS = 40;
 const CUBE_ROWS = 20;
-const CUBE_SHADES = " .:-=+*#%@";
+const CUBE_SHADES = " .,:;irsXA253hMHGS#9B&@";
+const CUBE_ROTATION_PERIOD = 30000;
 const cube = document.querySelector("[data-clearbox-cube]");
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 let previousFrameTime = 0;
@@ -91,8 +92,10 @@ function renderClearboxCube(angle) {
       const worldNormal = rotateClearboxVector(normal, xAngle, yAngle);
       const luminance = Math.max(0,
         worldNormal.x * light.x + worldNormal.y * light.y + worldNormal.z * light.z);
-      const shade = Math.min(CUBE_SHADES.length - 1,
-        Math.floor((0.22 + 0.78 * luminance) * (CUBE_SHADES.length - 1)));
+      const variation = ((column * 17 + row * 11) % 9 - 4) * 0.012;
+      const lightLevel = Math.max(0, Math.min(1, 0.18 + 0.72 * luminance
+        + 0.1 * (1 - row / CUBE_ROWS) + variation));
+      const shade = Math.floor(lightLevel * (CUBE_SHADES.length - 1));
       line += CUBE_SHADES[shade];
     }
     lines.push(line);
@@ -143,7 +146,7 @@ function applyLanguage(language) {
 
 function animateClearboxCube(time) {
   if (time - previousFrameTime >= 120) {
-    cube.textContent = renderClearboxCube(time * 0.00015);
+    cube.textContent = renderClearboxCube(time * Math.PI * 2 / CUBE_ROTATION_PERIOD);
     previousFrameTime = time;
   }
   requestAnimationFrame(animateClearboxCube);

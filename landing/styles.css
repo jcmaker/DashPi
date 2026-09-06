@@ -107,6 +107,10 @@ button:focus-visible,
 .ticker__run { flex: none; white-space: nowrap; font-size: 12px; font-weight: 600; letter-spacing: var(--tracking-label); padding-inline-end: var(--space-3); animation: ticker 46s linear infinite; }
 .ticker:hover .ticker__run, .ticker:focus .ticker__run, .ticker:focus-within .ticker__run { animation-play-state: paused; }
 @keyframes ticker { to { transform: translateX(-100%); } }
+@keyframes clearbox-color {
+  0%, 100% { color: var(--color-paper); }
+  50% { color: var(--color-accent); }
+}
 .flow { padding-block: var(--space-band); }
 .section-heading { grid-column: 1 / 8; display: grid; align-content: start; gap: var(--space-3); margin-block-end: var(--space-6); }
 /* Preserve translation hooks without repeating numbered visual kickers. */
@@ -171,7 +175,7 @@ tbody th { color: var(--color-muted); font-size: 12px; font-weight: 600; }
 .footer__origin-copy .eyebrow { margin-block-end: var(--space-4); color: var(--color-paper-3); }
 .footer__origin-copy h2 { font-size: clamp(36px, 5vw, 64px); }
 .footer__origin-copy > p:last-child { max-width: 46ch; margin-block-start: var(--space-5); color: var(--color-paper-2); font-size: 18px; line-height: 1.7; word-break: keep-all; }
-.footer__cube { grid-column: 7 / 13; justify-self: end; width: 40ch; min-height: 20em; overflow: hidden; color: var(--color-accent); font-family: var(--font-mono); font-size: clamp(10px, 1.25vw, 16px); line-height: 1; white-space: pre; user-select: none; }
+.footer__cube { grid-column: 7 / 13; justify-self: end; width: 40ch; min-height: 20em; overflow: hidden; color: var(--color-paper); font-family: var(--font-mono); font-size: clamp(10px, 1.25vw, 16px); line-height: 1; white-space: pre; user-select: none; animation: clearbox-color 8s ease-in-out infinite; }
 .footer__grid { align-items: center; row-gap: var(--space-2); padding-block: var(--space-4); border-top: var(--rule-hairline) solid var(--color-muted); }
 .footer__grid .label { color: var(--color-paper-2); line-height: 1; }
 .footer p { grid-column: 1 / 6; }
