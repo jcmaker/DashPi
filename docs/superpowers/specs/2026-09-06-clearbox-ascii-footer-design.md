@@ -42,7 +42,7 @@ It was our first name for turning the confusion after a crash into a clearer rec
 
 - Preserve the existing Grid theme, Archivo/Noto Sans KR typography, spacing tokens, and red accent.
 - Use existing paper and ink tokens for the dark panel and its foreground; add no new colour values.
-- Use the existing monospace fallback stack for the ASCII drawing.
+- Add one `--font-mono` token using the system monospace fallback stack; do not load another font.
 - Keep animation subordinate to the origin statement.
 
 ## Scope
@@ -50,6 +50,7 @@ It was our first name for turning the confusion after a crash into a clearer rec
 Modify only:
 
 - `landing/index.html`
+- `landing/tokens.css`
 - `landing/styles.css`
 - `landing/script.js`
 - `tests/test_landing.py`
