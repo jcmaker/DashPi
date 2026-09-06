@@ -90,6 +90,18 @@ class LandingPageTests(unittest.TestCase):
             page,
         )
 
+    def test_statement_explains_post_incident_guidance(self) -> None:
+        page = self.page()
+        self.assertIn("사고 직후에는, 무엇을 해야 할지 판단하기 어렵습니다.", page)
+        self.assertIn("경찰·보험사 등 제3자에게 빠뜨리지 않고 상황을 전달할 수 있습니다.", page)
+        self.assertIn('class="numeral" aria-hidden="true">NEXT</span>', page)
+        self.assertIn(
+            '"plate.description": "DashPi organizes the recorded situation and next steps.',
+            page,
+        )
+        self.assertNotIn("AI가 실패해도, 증거는 남습니다.", page)
+        self.assertNotIn('class="numeral" aria-hidden="true">45</span>', page)
+
     def test_grid_theme_contract(self) -> None:
         tokens = (LANDING / "tokens.css").read_text(encoding="utf-8")
         styles = (LANDING / "styles.css").read_text(encoding="utf-8")
