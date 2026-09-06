@@ -26,6 +26,38 @@ class LocalServer:
         self.server.server_close()
 
 
+def complete_report_fixture():
+    return {
+        "incident_id": "inc-1",
+        "triggered_at": "2026-09-06T00:00:00Z",
+        "incident_timestamp": 22.5,
+        "transfer_window": {"start": 17.5, "end": 27.5},
+        "summary": "<script>alert(1)</script>",
+        "observations": [{"timestamp": 22.5, "description": "차량 접촉"}],
+        "object_observations": [
+            {
+                "timestamp": 22.5,
+                "track_id": 1,
+                "label": "car",
+                "confidence": 0.91,
+                "box": [1, 2, 30, 40],
+            }
+        ],
+        "limitations": ["단일 카메라"],
+        "warnings": [],
+        "overlays": {"traffic_lights": False, "lanes": False, "traffic_signs": False},
+        "digests": {
+            "clip.mp4": "abc",
+            "annotated.mp4": "def",
+            "before.jpg": "b",
+            "moment.jpg": "m",
+            "after.jpg": "a",
+        },
+        "model": "test-model",
+        "generated_at": "2026-09-06T00:01:00Z",
+    }
+
+
 def test_report_binds_model_and_source_digest():
     report = validate_report(
         {
@@ -81,39 +113,56 @@ def test_manual_offset_replaces_failed_localization_but_not_analysis_text():
 
 
 def test_html_escapes_model_output():
-    html = render_report_html(
-        {
-            "summary": "<script>alert(1)</script>",
-            "observations": [],
-            "limitations": [],
-            "source_clip_sha256": "abc",
-            "model": "m",
-            "generated_at": "now",
-        }
-    )
-    assert "<script>" not in html
+    report = complete_report_fixture()
+    report["observations"] = []
+    report["limitations"] = []
+    html = render_report_html(report, b"video", [b"before", b"moment", b"after"])
+    assert "<script>alert(1)</script>" not in html
     assert "&lt;script&gt;" in html
 
 
 def test_html_identifies_report_provenance_and_escapes_hostile_lists():
-    document = render_report_html(
+    report = complete_report_fixture()
+    report.update(
         {
             "summary": "x",
-            "observations": [{"timestamp": 1.0, "description": "<img src=x onerror=alert(1)>"}],
+            "observations": [
+                {"timestamp": 1.0, "description": "<img src=x onerror=alert(1)>"}
+            ],
             "limitations": ["<script>alert(1)</script>"],
-            "source_clip_sha256": "clip-digest",
+            "digests": {"clip.mp4": "clip-digest"},
             "model": "moondream",
             "generated_at": "2026-09-02T00:01:00Z",
         }
     )
+    document = render_report_html(report, b"video", [b"before", b"moment", b"after"])
 
-    assert "Source clip SHA-256: clip-digest" in document
+    assert "clip.mp4" in document and "clip-digest" in document
     assert "Model: moondream" in document
-    assert "Generated at: 2026-09-02T00:01:00Z" in document
+    assert "Generated: 2026-09-02T00:01:00Z" in document
     assert "AI output is advisory and may be incomplete." in document
-    assert "<img" not in document and "<script>" not in document
+    assert "<img src=x onerror=alert(1)>" not in document
+    assert "<script>alert(1)</script>" not in document
     assert "&lt;img src=x onerror=alert(1)&gt;" in document
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in document
+
+
+def test_html_embeds_video_three_frames_visual_stats_and_offline_controls():
+    report = complete_report_fixture()
+    document = render_report_html(report, b"video", [b"before", b"moment", b"after"])
+    assert 'src="data:video/mp4;base64,dmlkZW8="' in document
+    assert document.count('src="data:image/jpeg;base64,') == 3
+    assert "Download HTML" in document and "Save as PDF" in document
+    assert "object-chart" in document and "incident-timeline" in document
+    assert "@media print" in document
+    assert ".screen-only{display:none" in document
+    assert "AI output is advisory" in document
+    assert "<script>alert(1)</script>" not in document
+
+
+def test_html_requires_exactly_three_keyframes():
+    with pytest.raises(ValueError, match="three key frames"):
+        render_report_html(complete_report_fixture(), b"video", [b"only one"])
 
 
 def test_report_rejects_malformed_observation():
