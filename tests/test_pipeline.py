@@ -231,16 +231,38 @@ def test_invalid_report_persists_exposed_clip(pipeline_fixture):
     assert reloaded.clip.path.exists()
 
 
-def test_report_write_failure_persists_exposed_clip(pipeline_fixture, monkeypatch):
+@pytest.mark.parametrize("previous", [False, True])
+@pytest.mark.parametrize("failure", ["report.json", "report.html", "keyframe", "quality_probe"])
+def test_report_write_failure_persists_exposed_clip(pipeline_fixture, monkeypatch, previous, failure):
     pipeline, incident, segments = pipeline_fixture
     from dashpi.storage import atomic_write as real_atomic_write
 
+    if previous:
+        pipeline.process(incident, segments, lambda _frames: localized_analysis())
+        incident.annotated = real_atomic_write(incident.annotated.path, b"predecessor")
+        pipeline.store.save(incident)
+
     def fail_report_json(path, data):
-        if path.name == "report.json":
+        if path.name == failure:
             raise OSError("report disk failure")
         return real_atomic_write(path, data)
 
     monkeypatch.setattr("dashpi.pipeline.atomic_write", fail_report_json)
+    if failure == "keyframe":
+        monkeypatch.setattr("dashpi.pipeline.extract_frame", lambda *_a: (_ for _ in ()).throw(OSError("keyframe disk failure")))
+    if failure == "quality_probe":
+        monkeypatch.setattr("dashpi.pipeline.render_report_html", lambda *_a: "x" * (MAX_PAYLOAD + 1))
+        real_probe = pipeline_module.probe_duration
+        probes = []
+
+        def fail_quality_probe(path):
+            if path.name == "annotated.mp4":
+                probes.append(path)
+                if len(probes) == 2:
+                    raise OSError("quality probe failed")
+            return real_probe(path)
+
+        monkeypatch.setattr("dashpi.pipeline.probe_duration", fail_quality_probe)
 
     pipeline.process(
         incident,
@@ -251,3 +273,9 @@ def test_report_write_failure_persists_exposed_clip(pipeline_fixture, monkeypatc
 
     assert reloaded.state.value == "analysis_failed"
     assert reloaded.clip.path.exists()
+    assert reloaded.annotated is not None
+    assert reloaded.annotated.sha256 == sha256_file(reloaded.annotated.path)
+    assert reloaded.annotated.byte_length == reloaded.annotated.path.stat().st_size
+    for artifact in (reloaded.report_json, reloaded.report_html):
+        if artifact is not None:
+            assert artifact.sha256 == sha256_file(artifact.path)

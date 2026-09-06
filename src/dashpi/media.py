@@ -202,7 +202,7 @@ def extract_frame(source: Path, output: Path, timestamp: float) -> FileArtifact:
     return FileArtifact(output, byte_length, digest)
 
 
-def sample_frames(clip: Path, output_dir: Path, count: int) -> list[Path]:
+def sample_frames(clip: Path, output_dir: Path, count: int) -> list[tuple[Path, float]]:
     output_dir.mkdir(parents=True, exist_ok=True)
     duration = probe_duration(clip)
     paths = []
@@ -225,5 +225,5 @@ def sample_frames(clip: Path, output_dir: Path, count: int) -> list[Path]:
             ],
             check=True,
         )
-        paths.append(target)
+        paths.append((target, timestamp))
     return paths

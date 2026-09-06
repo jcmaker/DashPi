@@ -47,8 +47,9 @@ def main() -> None:
         pipeline = IncidentPipeline(settings, store, detector, wait_for_capacity=worker.wait_for_capacity)
 
         def regenerate_report(item, offset, overlays):
+            incident_id = item.incident_id
             return worker.submit(
-                lambda: pipeline.generate_report(item, client.analyze, offset, overlays)
+                lambda: pipeline.regenerate_report(incident_id, client.analyze, offset, overlays)
             )
 
     app = create_app(store, regenerate_report=regenerate_report)

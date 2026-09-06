@@ -53,14 +53,17 @@ class OllamaClient:
         if self.model not in names:
             raise ValueError(f"Ollama model not installed: {self.model}")
 
-    def analyze(self, frames: list[Path]) -> dict:
-        images = [base64.b64encode(path.read_bytes()).decode() for path in frames]
+    def analyze(self, frames: list[tuple[Path, float]]) -> dict:
+        images = [base64.b64encode(path.read_bytes()).decode() for path, _timestamp in frames]
         body = json.dumps(
             {
                 "model": self.model,
                 "stream": False,
                 "format": "json",
-                "prompt": "Return JSON with incident_timestamp (seconds from first frame), summary, observations, and limitations. Describe evidence only; do not determine legal fault.",
+                "prompt": "Return JSON with incident_timestamp (seconds from first frame), summary, observations, and limitations. Describe evidence only; do not determine legal fault."
+                "\nThe first frame means the evidence clip origin (0 seconds). Image timestamps in image order, in seconds from that origin: "
+                + json.dumps([timestamp for _path, timestamp in frames])
+                + ". Use this clip-relative timebase for all timestamps.",
                 "images": images,
             }
         ).encode()

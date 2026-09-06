@@ -1,4 +1,5 @@
 from argparse import Namespace
+from types import SimpleNamespace
 
 from dashpi.config import OverlaySettings
 from dashpi.server import build_parser
@@ -51,7 +52,7 @@ def test_server_wires_regeneration_through_the_single_analysis_worker(monkeypatc
             captured["detector"] = detector
             captured["wait_for_capacity"] = wait_for_capacity
 
-        def generate_report(self, item, analyze, offset, overlays):
+        def regenerate_report(self, item, analyze, offset, overlays):
             captured["report"] = (item, analyze, offset, overlays)
             return "report"
 
@@ -66,9 +67,11 @@ def test_server_wires_regeneration_through_the_single_analysis_worker(monkeypatc
             return register
 
     def run(_app, **_kwargs):
-        future = captured["regenerate"]("incident", 4.0, OverlaySettings(True, False, True))
-        assert future.result(timeout=2) == "report"
-        captured["shutdown"]()
+        try:
+            future = captured["regenerate"](SimpleNamespace(incident_id="incident"), 4.0, OverlaySettings(True, False, True))
+            assert future.result(timeout=2) == "report"
+        finally:
+            captured["shutdown"]()
 
     monkeypatch.setattr(server_module, "build_parser", lambda: type("Parser", (), {"parse_args": lambda self: args})())
     monkeypatch.setattr(server_module, "OllamaClient", Client)

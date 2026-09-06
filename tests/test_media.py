@@ -36,6 +36,18 @@ def test_clip_and_twelve_samples(tmp_path):
     assert len(sample_frames(artifact.path, tmp_path / "frames", 12)) == 12
 
 
+def test_samples_carry_the_exact_clip_relative_seek_times(tmp_path, monkeypatch):
+    seeks = []
+    monkeypatch.setattr("dashpi.media.probe_duration", lambda _path: 45.0)
+    monkeypatch.setattr("dashpi.media.subprocess.run", lambda args, **_kw: seeks.append(float(args[args.index("-ss") + 1])))
+
+    frames = sample_frames(tmp_path / "clip.mp4", tmp_path / "frames", 12)
+
+    assert [frame[1] for frame in frames] == [1.875, 5.625, 9.375, 13.125, 16.875, 20.625, 24.375, 28.125, 31.875, 35.625, 39.375, 43.125]
+    assert seeks == [frame[1] for frame in frames]
+    assert frames[0][0] == tmp_path / "frames" / "00.jpg"
+
+
 def test_nonzero_clip_offset_preserves_requested_duration(tmp_path):
     paths = [make_video(tmp_path / f"{n}.mp4", 2) for n in range(3)]
     segments = [Segment(path, n * 2.0, n * 2.0 + 2.0) for n, path in enumerate(paths)]

@@ -283,7 +283,7 @@ def test_client_uses_proxy_disabled_opener_for_both_requests(monkeypatch, tmp_pa
 
     client = OllamaClient("moondream")
     client.validate_model()
-    report = client.analyze([frame])
+    report = client.analyze([(frame, 1.875)])
 
     assert report["summary"] == "Vehicle stopped"
     assert [
@@ -291,6 +291,12 @@ def test_client_uses_proxy_disabled_opener_for_both_requests(monkeypatch, tmp_pa
         for request, _timeout in opener.requests
     ] == ["http://127.0.0.1:11434/api/tags", "http://127.0.0.1:11434/api/generate"]
     assert handlers[0].proxies == {}
+    payload = json.loads(opener.requests[1][0].data)
+    assert payload["prompt"] == (
+        "Return JSON with incident_timestamp (seconds from first frame), summary, observations, and limitations. Describe evidence only; do not determine legal fault."
+        "\nThe first frame means the evidence clip origin (0 seconds). Image timestamps in image order, in seconds from that origin: [1.875]. Use this clip-relative timebase for all timestamps."
+    )
+    assert payload["images"] == ["anBlZw=="]
 
 
 @pytest.mark.parametrize(
@@ -348,7 +354,7 @@ def test_client_sends_local_generate_request_with_expected_payload_and_timeouts(
 
         client.opener.open = record_open
         client.validate_model()
-        assert client.analyze([frame])["summary"] == "Vehicle stopped"
+        assert client.analyze([(frame, 1.875), (frame, 5.625)])["summary"] == "Vehicle stopped"
 
     assert [(request if isinstance(request, str) else request.full_url, timeout) for request, timeout in opened] == [
         (server.url + "/api/tags", 5.0),
@@ -360,8 +366,8 @@ def test_client_sends_local_generate_request_with_expected_payload_and_timeouts(
         "model": "moondream",
         "stream": False,
         "format": "json",
-        "prompt": "Return JSON with incident_timestamp (seconds from first frame), summary, observations, and limitations. Describe evidence only; do not determine legal fault.",
-        "images": ["anBlZw=="],
+        "prompt": "Return JSON with incident_timestamp (seconds from first frame), summary, observations, and limitations. Describe evidence only; do not determine legal fault.\nThe first frame means the evidence clip origin (0 seconds). Image timestamps in image order, in seconds from that origin: [1.875, 5.625]. Use this clip-relative timebase for all timestamps.",
+        "images": ["anBlZw==", "anBlZw=="],
     }
 
 
@@ -397,6 +403,6 @@ def test_client_rejects_redirect_without_requesting_redirect_target(tmp_path):
         frame.write_bytes(b"jpeg")
         with LocalServer(RedirectHandler) as redirector:
             with pytest.raises(HTTPError, match="302"):
-                OllamaClient("moondream", redirector.url).analyze([frame])
+                OllamaClient("moondream", redirector.url).analyze([(frame, 1.875)])
 
     assert target_hits == []

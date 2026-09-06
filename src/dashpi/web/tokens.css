@@ -71,6 +71,7 @@ h2 { margin: 0; font-size: var(--text-lg); line-height: 1.2; }
 }
 .incident-row:active { background: var(--color-accent); color: var(--color-accent-ink); }
 .detail { display: grid; gap: var(--space-4); }
+.detail[hidden], .report-controls[hidden], .sender-link[hidden] { display: none; }
 iframe, video { width: 100%; border: var(--rule-thin) solid var(--color-rule); border-radius: var(--radius-md); background: var(--color-paper-raised); }
 iframe { min-height: 20rem; }
 video { min-height: 2.75rem; }

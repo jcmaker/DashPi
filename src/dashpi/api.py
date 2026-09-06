@@ -10,7 +10,7 @@ from typing import Callable, Literal
 from fastapi import FastAPI, Header, HTTPException, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from dashpi.config import OverlaySettings
 from dashpi.models import IncidentMetadata, IncidentState
@@ -30,6 +30,13 @@ class ReportBuildRequest(BaseModel):
     traffic_lights: bool = False
     lanes: bool = False
     traffic_signs: bool = False
+
+    @field_validator("incident_offset_seconds", mode="before")
+    @classmethod
+    def reject_boolean_offset(cls, value):
+        if isinstance(value, bool):
+            raise ValueError("incident timestamp must be a number")
+        return value
 
     def overlays(self) -> OverlaySettings:
         return OverlaySettings(self.traffic_lights, self.lanes, self.traffic_signs)
@@ -59,6 +66,22 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None)
     sessions = LatestOpticalSession()
+    report_jobs: dict[str, Future[IncidentMetadata]] = {}
+    report_jobs_lock = Lock()
+
+    @app.get("/api/incidents/{incident_id}/report/status")
+    def report_status(incident_id: str):
+        with report_jobs_lock:
+            job = report_jobs.get(incident_id)
+        if job is None:
+            raise HTTPException(404)
+        if not job.done():
+            return {"state": "analyzing", "failure_reason": None}
+        try:
+            result = job.result()
+        except Exception as error:
+            return {"state": "analysis_failed", "failure_reason": str(error)}
+        return {"state": result.state, "failure_reason": result.failure_reason}
 
     @app.get("/api/incidents")
     def list_incidents():
@@ -84,11 +107,17 @@ def create_app(
     @app.post("/api/incidents/{incident_id}/report")
     def regenerate_incident_report(incident_id: str, request: ReportBuildRequest):
         try:
-            with store.open_incident(incident_id) as (item, _directory_descriptor, _directory):
+            with store.open_incident(incident_id) as (item, directory_descriptor, directory):
                 if item.incident_id != incident_id:
                     raise HTTPException(409)
                 if item.clip is None or item.clip.duration is None:
                     raise HTTPException(409)
+                if item.clip.path != directory / "clip.mp4":
+                    raise HTTPException(409)
+                clip_source, _ = _open_verified_file(
+                    directory_descriptor, "clip.mp4", item.clip.byte_length, item.clip.sha256
+                )
+                clip_source.close()
                 if (
                     request.incident_offset_seconds is not None
                     and request.incident_offset_seconds > item.clip.duration
@@ -100,7 +129,13 @@ def create_app(
             raise HTTPException(409) from None
         if regenerate_report is None:
             raise HTTPException(503, "report regeneration is unavailable")
-        result = regenerate_report(item, request.incident_offset_seconds, request.overlays())
+        with report_jobs_lock:
+            pending = report_jobs.get(incident_id)
+            if pending is not None and not pending.done():
+                raise HTTPException(409, "report regeneration is already pending")
+            result = regenerate_report(item, request.incident_offset_seconds, request.overlays())
+            if isinstance(result, Future):
+                report_jobs[incident_id] = result
         if isinstance(result, Future):
             return JSONResponse({"state": "analyzing"}, status_code=202)
         return {"state": result.state}

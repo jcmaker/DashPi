@@ -100,6 +100,68 @@ def test_report_regeneration_returns_analyzing_when_worker_queues_report(tmp_pat
     assert response.json() == {"state": "analyzing"}
 
 
+@pytest.mark.parametrize("value", [True, False])
+def test_report_regeneration_rejects_boolean_offsets(tmp_path, value):
+    store, item = ready_store_with_clip(tmp_path, duration=45.0)
+    calls = []
+    client = TestClient(create_app(store, regenerate_report=lambda *args: calls.append(args) or item))
+
+    response = client.post("/api/incidents/inc-1/report", json={"incident_offset_seconds": value})
+
+    assert response.status_code == 422
+    assert calls == []
+
+
+@pytest.mark.parametrize("damage", ["outside", "symlink", "directory", "empty", "size", "digest", "incident_symlink"])
+def test_regeneration_enforces_the_clip_download_trust_boundary(tmp_path, damage):
+    store, item = ready_store_with_clip(tmp_path, duration=45.0)
+    clip = item.clip.path
+    if damage == "outside":
+        item.clip = replace(atomic_write(tmp_path / "outside.mp4", b"clip"), duration=45.0)
+        store.save(item)
+    elif damage == "incident_symlink":
+        directory = store.directory(item.incident_id)
+        directory.rename(tmp_path / "outside")
+        directory.symlink_to(tmp_path / "outside", target_is_directory=True)
+    else:
+        clip.unlink()
+        if damage == "symlink":
+            outside = atomic_write(tmp_path / "outside.mp4", b"clip")
+            clip.symlink_to(outside.path)
+        elif damage == "directory":
+            clip.mkdir()
+        else:
+            clip.write_bytes({"empty": b"", "size": b"longer", "digest": b"evil"}[damage])
+    calls = []
+    client = TestClient(create_app(store, regenerate_report=lambda *args: calls.append(args) or item))
+
+    assert client.get("/api/incidents/inc-1/clip").status_code == 409
+    assert client.post("/api/incidents/inc-1/report", json={}).status_code == 409
+    assert calls == []
+
+
+@pytest.mark.parametrize("outcome", ["ready", "analysis_failed", "exception"])
+def test_regeneration_status_tracks_queued_work_through_terminal_result(tmp_path, outcome):
+    store, item = ready_store_with_clip(tmp_path, duration=45.0)
+    queued = Future()
+    client = TestClient(create_app(store, regenerate_report=lambda *_: queued))
+    assert client.post("/api/incidents/inc-1/report", json={}).status_code == 202
+    status_url = "/api/incidents/inc-1/report/status"
+
+    assert client.get(status_url).json()["state"] == "analyzing"
+    assert client.post("/api/incidents/inc-1/report", json={}).status_code == 409
+    if outcome == "exception":
+        queued.set_exception(ValueError("clip changed while queued"))
+    else:
+        item.transition(IncidentState(outcome), "now", "model failed" if outcome == "analysis_failed" else None)
+        store.save(item)
+        queued.set_result(item)
+
+    status = client.get(status_url).json()
+    assert status["state"] == ("analysis_failed" if outcome == "exception" else outcome)
+    assert status["failure_reason"] == {"ready": None, "analysis_failed": "model failed", "exception": "clip changed while queued"}[outcome]
+
+
 @pytest.fixture
 def client_with_oversized_incident(tmp_path):
     store = IncidentStore(tmp_path)

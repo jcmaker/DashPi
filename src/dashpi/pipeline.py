@@ -2,6 +2,9 @@ from datetime import UTC, datetime
 from dataclasses import replace
 import json
 from collections.abc import Callable
+from pathlib import Path
+import shutil
+from tempfile import TemporaryDirectory
 
 from dashpi.config import OverlaySettings, Settings
 from dashpi.media import (
@@ -15,6 +18,7 @@ from dashpi.media import (
 from dashpi.models import IncidentMetadata, IncidentState, Segment
 from dashpi.optical.container import MAX_PAYLOAD
 from dashpi.reports import render_report_html, validate_report
+from dashpi.ranges import _open_verified_file, _sha256_descriptor
 from dashpi.storage import IncidentStore, atomic_write, sha256_file
 from dashpi.vision import annotate_clip
 
@@ -59,24 +63,59 @@ class IncidentPipeline:
 
         return self.generate_report(incident, analyze, incident_offset_override, overlays)
 
+    def regenerate_report(
+        self,
+        incident_id: str,
+        analyze,
+        incident_offset_override: float | None = None,
+        overlays: OverlaySettings | None = None,
+    ) -> IncidentMetadata:
+        self.wait_for_capacity()
+        with self.store.open_incident(incident_id) as (incident, descriptor, directory):
+            if (
+                incident.incident_id != incident_id
+                or incident.clip is None
+                or incident.clip.duration is None
+                or incident.clip.path != directory / "clip.mp4"
+            ):
+                raise ValueError("invalid evidence clip")
+            source, _ = _open_verified_file(
+                descriptor, "clip.mp4", incident.clip.byte_length, incident.clip.sha256
+            )
+            with source, TemporaryDirectory(prefix="dashpi-evidence-") as temporary:
+                # Native media tools reopen paths. Give them only a private copy of
+                # the verified descriptor, never the metadata-supplied pathname.
+                evidence = Path(temporary) / "clip.mp4"
+                source.seek(0)
+                with evidence.open("wb") as output:
+                    shutil.copyfileobj(source, output)
+                return self.generate_report(
+                    incident, analyze, incident_offset_override, overlays,
+                    evidence_path=evidence, evidence_digest=lambda: _sha256_descriptor(source),
+                )
+
     def generate_report(
         self,
         incident: IncidentMetadata,
         analyze,
         incident_offset_override: float | None = None,
         overlays: OverlaySettings | None = None,
+        *,
+        evidence_path: Path | None = None,
+        evidence_digest: Callable[[], str] | None = None,
     ) -> IncidentMetadata:
         directory = self.store.directory(incident.incident_id)
         try:
             if incident.clip is None:
                 raise ValueError("missing clip")
-            clip_before = sha256_file(incident.clip.path)
+            evidence_path = evidence_path or incident.clip.path
+            clip_before = sha256_file(evidence_path)
             if clip_before != incident.clip.sha256:
                 raise ValueError("clip digest changed")
             incident.transition(IncidentState.ANALYZING, datetime.now(UTC).isoformat())
             self.store.save(incident)
             self.wait_for_capacity()
-            frames = sample_frames(incident.clip.path, directory / "frames", self.settings.frame_sample_count)
+            frames = sample_frames(evidence_path, directory / "frames", self.settings.frame_sample_count)
             generated_at = datetime.now(UTC).isoformat()
             self.wait_for_capacity()
             report = validate_report(
@@ -96,7 +135,7 @@ class IncidentPipeline:
                     raise RuntimeError("detector unavailable")
                 self.wait_for_capacity()
                 annotated, observations, keyframes = annotate_clip(
-                    incident.clip.path,
+                    evidence_path,
                     directory / "annotated.mp4",
                     start,
                     end - start,
@@ -107,19 +146,21 @@ class IncidentPipeline:
                     480,
                     "900k",
                 )
+                incident.annotated = annotated
                 if probe_duration(annotated.path) < end - start - 0.1:
                     raise RuntimeError("annotated clip did not preserve requested duration")
                 warnings = []
             except Exception:
                 self.wait_for_capacity()
                 annotated = transcode_clip(
-                    incident.clip.path,
+                    evidence_path,
                     directory / "annotated.mp4",
                     start,
                     end - start,
                     480,
                     "900k",
                 )
+                incident.annotated = annotated
                 last_frame = max(0.0, end - start - 0.1)
                 moment = min(incident_offset - start, last_frame)
                 keyframes = [
@@ -130,6 +171,7 @@ class IncidentPipeline:
                 observations = []
                 warnings = ["Object tracking failed; the transfer video has no boxes."]
             annotated = replace(annotated, duration=probe_duration(annotated.path))
+            incident.annotated = annotated
             report.update(
                 {
                     "incident_id": incident.incident_id,
@@ -160,7 +202,9 @@ class IncidentPipeline:
                     360,
                     "450k",
                 )
+                incident.annotated = annotated
                 annotated = replace(annotated, duration=probe_duration(annotated.path))
+                incident.annotated = annotated
                 report["digests"]["annotated.mp4"] = annotated.sha256
                 report_html = render_report_html(
                     report,
@@ -178,7 +222,11 @@ class IncidentPipeline:
                 directory / "report.json", json.dumps(report, sort_keys=True).encode()
             )
             incident.report_html = atomic_write(directory / "report.html", report_html)
-            if sha256_file(incident.clip.path) != clip_before or clip_before != incident.clip.sha256:
+            if (
+                sha256_file(evidence_path) != clip_before
+                or clip_before != incident.clip.sha256
+                or (evidence_digest is not None and evidence_digest() != clip_before)
+            ):
                 raise ValueError("clip digest changed")
             incident.annotated = annotated
             incident.incident_offset_seconds = incident_offset
