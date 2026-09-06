@@ -10,6 +10,7 @@ from dashpi.models import IncidentMetadata
 from dashpi.pipeline import IncidentPipeline
 from dashpi.reports import OllamaClient
 from dashpi.storage import IncidentStore
+from dashpi.vision import YoloDetector
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -51,7 +52,12 @@ def main() -> None:
         settings.post_seconds,
         settings.pre_seconds,
     )
-    result = IncidentPipeline(settings, IncidentStore(settings.data_root)).process(
+    detector = (
+        YoloDetector(settings.detector_model, settings.detection_confidence)
+        if settings.detector_model
+        else None
+    )
+    result = IncidentPipeline(settings, IncidentStore(settings.data_root), detector).process(
         incident, segments, client.analyze
     )
     print(json.dumps(result.to_dict(), default=str))
