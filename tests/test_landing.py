@@ -69,18 +69,26 @@ class LandingPageTests(unittest.TestCase):
 
     def test_hero_art_has_a_korean_no_javascript_label(self) -> None:
         self.assertIn(
-            'role="img" aria-label="사고 전후 영상 보존과 광학 전송을 표현한 기하학 구성"', self.page()
+            'role="img" aria-label="영상 녹화와 사고 시점 포착을 표현한 카메라 뷰파인더"',
+            self.page(),
         )
 
-    def test_hero_art_uses_a_responsive_incident_motif(self) -> None:
+    def test_hero_art_uses_a_responsive_recording_viewfinder(self) -> None:
         page = self.page()
         styles = (LANDING / "styles.css").read_text(encoding="utf-8")
-        self.assertNotIn("SHA<br>256", page)
-        self.assertNotIn("verification-square", page + styles)
-        self.assertIn('class="incident-window"', page)
-        self.assertIn('class="clip-strip"', page)
-        self.assertIn(".incident-window", styles)
-        self.assertIn(".clip-strip", styles)
+        for legacy in ("finder", "incident-window", "clip-strip"):
+            self.assertNotIn(f'class="{legacy}"', page)
+            self.assertNotIn(f".{legacy}", styles)
+        self.assertIn('class="hero__composition viewfinder"', page)
+        self.assertIn('class="recording-indicator"', page)
+        self.assertIn('class="focus-window"', page)
+        self.assertIn(".viewfinder", styles)
+        self.assertIn(".recording-indicator", styles)
+        self.assertIn(".focus-window", styles)
+        self.assertIn(
+            '"hero.artLabel": "Camera viewfinder representing video recording and incident capture"',
+            page,
+        )
 
     def test_grid_theme_contract(self) -> None:
         tokens = (LANDING / "tokens.css").read_text(encoding="utf-8")

@@ -1,5 +1,5 @@
 /* Hallmark · macrostructure: poster-index · theme: Grid · genre: editorial · tone: rational-institutional */
-/* Hallmark · pre-emit critique: P4 H5 E4 S5 R4 V4 */
+/* Hallmark · pre-emit critique: P4 H5 E5 S5 R5 V4 */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { overflow-x: clip; }
 html { scroll-behavior: smooth; }
@@ -99,17 +99,10 @@ button:focus-visible,
 .hero__type .label { max-width: 44ch; margin-block-start: var(--space-3); padding-inline-end: var(--space-4); font-size: 16px; font-weight: 400; letter-spacing: 0; text-transform: none; word-break: keep-all; overflow-wrap: anywhere; }
 .hero__type [data-i18n="hero.description"] { max-width: 25em; font-size: 24px; font-weight: 500; color: var(--color-ink); }
 .hero__composition { grid-column: 8 / 13; grid-row: 1; position: relative; aspect-ratio: 5 / 3; }
-.finder { position: absolute; inset-block-start: 0; inset-inline-start: 0; width: 28%; aspect-ratio: 1; background: var(--color-ink); }
-.finder::before, .finder::after { content: ""; position: absolute; }
-.finder::before { inset: 13%; background: var(--color-paper); }
-.finder::after { inset: 34%; background: var(--color-ink); }
-.incident-window { position: absolute; inset-block: 0; inset-inline-end: 0; width: 32%; border: var(--rule-hairline) solid var(--color-ink); background: linear-gradient(var(--color-ink), var(--color-ink)) center / var(--rule-hairline) 64% no-repeat, linear-gradient(90deg, var(--color-ink), var(--color-ink)) center / 64% var(--rule-hairline) no-repeat; }
-.incident-window::after { content: ""; position: absolute; inset-block-start: 39%; inset-inline-start: 39%; width: 22%; aspect-ratio: 1; background: var(--color-accent); }
-.clip-strip { position: absolute; inset-block-end: 0; inset-inline-start: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; gap: 5%; width: 58%; aspect-ratio: 3 / 1; }
-.clip-strip span { position: relative; aspect-ratio: 1; border: var(--rule-hairline) solid var(--color-ink); }
-.clip-strip span::after { content: ""; position: absolute; inset: 28%; background: var(--color-ink); }
-.clip-strip span:nth-child(2) { border-color: var(--color-accent); background: var(--color-accent); }
-.clip-strip span:nth-child(2)::after { background: var(--color-paper); }
+.viewfinder { background: linear-gradient(var(--color-ink) 0 0) left top / 24% var(--rule-section) no-repeat, linear-gradient(var(--color-ink) 0 0) left top / var(--rule-section) 36% no-repeat, linear-gradient(var(--color-ink) 0 0) right top / 24% var(--rule-section) no-repeat, linear-gradient(var(--color-ink) 0 0) right top / var(--rule-section) 36% no-repeat, linear-gradient(var(--color-ink) 0 0) left bottom / 24% var(--rule-section) no-repeat, linear-gradient(var(--color-ink) 0 0) left bottom / var(--rule-section) 36% no-repeat, linear-gradient(var(--color-ink) 0 0) right bottom / 24% var(--rule-section) no-repeat, linear-gradient(var(--color-ink) 0 0) right bottom / var(--rule-section) 36% no-repeat; }
+.recording-indicator { position: absolute; inset-block-start: 12%; inset-inline-start: 10%; width: 7%; aspect-ratio: 1; border-radius: 50%; background: var(--color-accent); }
+.focus-window { position: absolute; inset-block-start: 32.5%; inset-inline-start: 36%; width: 28%; aspect-ratio: 4 / 3; border: var(--rule-hairline) solid var(--color-ink); }
+.focus-window::after { content: ""; position: absolute; inset-block-start: 39%; inset-inline-start: 39%; width: 22%; aspect-ratio: 1; background: var(--color-accent); }
 .ticker { position: relative; z-index: 1; display: flex; overflow: clip; border-block: var(--rule-hairline) solid var(--color-ink); padding-block: var(--space-3); }
 .ticker__run { flex: none; white-space: nowrap; font-size: 12px; font-weight: 600; letter-spacing: var(--tracking-label); padding-inline-end: var(--space-3); animation: ticker 46s linear infinite; }
 .ticker:hover .ticker__run, .ticker:focus .ticker__run, .ticker:focus-within .ticker__run { animation-play-state: paused; }
