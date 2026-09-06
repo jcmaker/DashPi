@@ -69,8 +69,18 @@ class LandingPageTests(unittest.TestCase):
 
     def test_hero_art_has_a_korean_no_javascript_label(self) -> None:
         self.assertIn(
-            'role="img" aria-label="DashPi QR 및 SHA-256 검증 표식"', self.page()
+            'role="img" aria-label="사고 전후 영상 보존과 광학 전송을 표현한 기하학 구성"', self.page()
         )
+
+    def test_hero_art_uses_a_responsive_incident_motif(self) -> None:
+        page = self.page()
+        styles = (LANDING / "styles.css").read_text(encoding="utf-8")
+        self.assertNotIn("SHA<br>256", page)
+        self.assertNotIn("verification-square", page + styles)
+        self.assertIn('class="incident-window"', page)
+        self.assertIn('class="clip-strip"', page)
+        self.assertIn(".incident-window", styles)
+        self.assertIn(".clip-strip", styles)
 
     def test_grid_theme_contract(self) -> None:
         tokens = (LANDING / "tokens.css").read_text(encoding="utf-8")
