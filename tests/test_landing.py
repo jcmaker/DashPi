@@ -62,3 +62,25 @@ class LandingPageTests(unittest.TestCase):
         self.assertIn(
             'role="img" aria-label="DashPi QR 및 SHA-256 검증 표식"', self.page()
         )
+
+    def test_grid_theme_contract(self) -> None:
+        tokens = (LANDING / "tokens.css").read_text(encoding="utf-8")
+        styles = (LANDING / "styles.css").read_text(encoding="utf-8")
+        expected_tokens = {
+            "--color-paper": "oklch(99% 0.003 255)",
+            "--color-ink": "oklch(16% 0.010 255)",
+            "--color-rule": "oklch(88% 0.006 255)",
+            "--color-accent": "oklch(55% 0.21 28)",
+            "--font-display": '"Archivo", "Noto Sans KR", "Helvetica Neue", Arial, sans-serif',
+        }
+        for name, value in expected_tokens.items():
+            self.assertIn(f"{name}: {value};", tokens)
+        self.assertIn("repeat(12, minmax(0, 1fr))", styles)
+        self.assertIn("overflow-x: clip", styles)
+        self.assertIn("prefers-reduced-motion: reduce", styles)
+        self.assertNotIn("box-shadow:", styles)
+        self.assertNotIn("linear-gradient(135deg", styles)
+
+    def test_stylesheets_are_linked(self) -> None:
+        parser = self.parser()
+        self.assertTrue({"tokens.css", "styles.css"} <= parser.assets)
