@@ -10,6 +10,8 @@ test('requires confidentiality acknowledgement and calibration controls', async 
     assert.ok(html.includes(text), `missing sender copy: ${text}`);
   }
   assert.ok(html.includes('type="checkbox"'));
+  assert.ok(html.includes('안전한 장소에 정차했고'));
+  assert.ok(html.indexOf('<option value="report">') < html.indexOf('<option value="clip">'));
   assert.ok(html.includes('<button id="start" type="button" disabled>'));
 });
 

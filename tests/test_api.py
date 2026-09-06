@@ -2,6 +2,7 @@ import hashlib
 import json
 import shutil
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 import threading
 
 import pytest
@@ -11,6 +12,7 @@ import dashpi.api as api_module
 import dashpi.ranges as ranges_module
 import dashpi.storage as storage_module
 from dashpi.api import create_app
+from dashpi.config import OverlaySettings
 from dashpi.models import FileArtifact, IncidentMetadata, IncidentState
 from dashpi.optical.container import MAX_PAYLOAD, unpack_container
 from dashpi.optical.protocol import parse_frame
@@ -34,6 +36,55 @@ def client_with_ready_incident(tmp_path):
     )
     store.save(incident)
     return TestClient(create_app(store)), payload, incident.clip, store
+
+
+def ready_store_with_clip(tmp_path, duration):
+    store = IncidentStore(tmp_path)
+    item = IncidentMetadata.new("inc-1", "2026-09-06T00:00:00Z", 40.0, 15.0)
+    item.state = IncidentState.READY
+    item.clip = replace(atomic_write(store.directory("inc-1") / "clip.mp4", b"clip"), duration=duration)
+    item.report_json = atomic_write(store.directory("inc-1") / "report.json", b'{"summary":"old"}')
+    item.report_html = atomic_write(store.directory("inc-1") / "report.html", b"<h1>old</h1>")
+    store.save(item)
+    return store, item
+
+
+def test_list_reports_optical_availability_from_verified_html_size(client_with_ready_incident):
+    client, _payload, _clip, _store = client_with_ready_incident
+
+    item = client.get("/api/incidents").json()[0]
+
+    assert item["optical_report_available"] is True
+    assert item["clip_duration"] is None
+
+
+def test_report_regeneration_passes_manual_time_and_overlay_settings(tmp_path):
+    store, item = ready_store_with_clip(tmp_path, duration=45.0)
+    calls = []
+
+    def regenerate(incident, offset, overlays):
+        calls.append((incident.incident_id, offset, overlays))
+        return incident
+
+    client = TestClient(create_app(store, regenerate_report=regenerate))
+    assert client.get("/api/incidents").json()[0]["clip_duration"] == 45.0
+
+    response = client.post("/api/incidents/inc-1/report", json={
+        "incident_offset_seconds": 4.0,
+        "traffic_lights": True,
+        "lanes": False,
+        "traffic_signs": True,
+    })
+
+    assert response.status_code == 200
+    assert calls == [("inc-1", 4.0, OverlaySettings(True, False, True))]
+
+
+def test_report_regeneration_rejects_time_outside_evidence(tmp_path):
+    store, _item = ready_store_with_clip(tmp_path, duration=45.0)
+    client = TestClient(create_app(store, regenerate_report=lambda *_: pytest.fail()))
+
+    assert client.post("/api/incidents/inc-1/report", json={"incident_offset_seconds": 46.0}).status_code == 422
 
 
 @pytest.fixture
@@ -404,6 +455,8 @@ def test_list_returns_metadata_not_filesystem_paths(tmp_path):
             "failure_reason": "model timeout",
             "has_clip": False,
             "has_report": False,
+            "clip_duration": None,
+            "optical_report_available": False,
         }
     ]
     assert str(tmp_path) not in response.text

@@ -4,13 +4,14 @@ import hmac
 from pathlib import Path
 import secrets
 from threading import Lock
-from typing import Literal
+from typing import Callable, Literal
 
 from fastapi import FastAPI, Header, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from dashpi.models import IncidentState
+from dashpi.config import OverlaySettings
+from dashpi.models import IncidentMetadata, IncidentState
 from dashpi.optical.container import MAX_PAYLOAD
 from dashpi.optical.session import OpticalSession
 from dashpi.ranges import _open_verified_file, range_response
@@ -20,6 +21,16 @@ from dashpi.storage import IncidentStore
 class OpticalStart(BaseModel):
     artifact: Literal["clip", "report"]
     block_size: int = Field(ge=512, le=2048)
+
+
+class ReportBuildRequest(BaseModel):
+    incident_offset_seconds: float | None = Field(default=None, ge=0)
+    traffic_lights: bool = False
+    lanes: bool = False
+    traffic_signs: bool = False
+
+    def overlays(self) -> OverlaySettings:
+        return OverlaySettings(self.traffic_lights, self.lanes, self.traffic_signs)
 
 
 class LatestOpticalSession:
@@ -38,7 +49,12 @@ class LatestOpticalSession:
         return None
 
 
-def create_app(store: IncidentStore) -> FastAPI:
+def create_app(
+    store: IncidentStore,
+    regenerate_report: Callable[
+        [IncidentMetadata, float | None, OverlaySettings], IncidentMetadata
+    ] | None = None,
+) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None)
     sessions = LatestOpticalSession()
 
@@ -55,9 +71,35 @@ def create_app(store: IncidentStore) -> FastAPI:
                 "has_report": item.state is IncidentState.READY
                 and item.report_json is not None
                 and item.report_html is not None,
+                "clip_duration": item.clip.duration if item.clip else None,
+                "optical_report_available": item.state is IncidentState.READY
+                and item.report_html is not None
+                and item.report_html.byte_length <= MAX_PAYLOAD,
             }
             for item in store.list()
         ]
+
+    @app.post("/api/incidents/{incident_id}/report")
+    def regenerate_incident_report(incident_id: str, request: ReportBuildRequest):
+        try:
+            with store.open_incident(incident_id) as (item, _directory_descriptor, _directory):
+                if item.incident_id != incident_id:
+                    raise HTTPException(409)
+                if item.clip is None or item.clip.duration is None:
+                    raise HTTPException(409)
+                if (
+                    request.incident_offset_seconds is not None
+                    and request.incident_offset_seconds > item.clip.duration
+                ):
+                    raise HTTPException(422, "incident timestamp outside evidence clip")
+        except (FileNotFoundError, KeyError):
+            raise HTTPException(404) from None
+        except (OSError, TypeError, ValueError, UnicodeDecodeError):
+            raise HTTPException(409) from None
+        if regenerate_report is None:
+            raise HTTPException(503, "report regeneration is unavailable")
+        result = regenerate_report(item, request.incident_offset_seconds, request.overlays())
+        return {"incident_id": result.incident_id, "state": result.state}
 
     def load_report(incident_id: str):
         report_html_source = None

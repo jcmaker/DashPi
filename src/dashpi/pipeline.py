@@ -12,6 +12,7 @@ from dashpi.media import (
     transfer_window,
 )
 from dashpi.models import IncidentMetadata, IncidentState, Segment
+from dashpi.optical.container import MAX_PAYLOAD
 from dashpi.reports import render_report_html, validate_report
 from dashpi.storage import IncidentStore, atomic_write, sha256_file
 from dashpi.vision import annotate_clip
@@ -132,17 +133,38 @@ class IncidentPipeline:
                     },
                 }
             )
-            incident.report_json = atomic_write(
-                directory / "report.json", json.dumps(report, sort_keys=True).encode()
-            )
-            incident.report_html = atomic_write(
-                directory / "report.html",
-                render_report_html(
+            report_html = render_report_html(
+                report,
+                annotated.path.read_bytes(),
+                [frame.path.read_bytes() for frame in keyframes],
+            ).encode()
+            if len(report_html) > MAX_PAYLOAD:
+                annotated = transcode_clip(
+                    annotated.path,
+                    annotated.path,
+                    0.0,
+                    annotated.duration,
+                    360,
+                    "450k",
+                )
+                annotated = replace(annotated, duration=probe_duration(annotated.path))
+                report["digests"]["annotated.mp4"] = annotated.sha256
+                report_html = render_report_html(
                     report,
                     annotated.path.read_bytes(),
                     [frame.path.read_bytes() for frame in keyframes],
-                ).encode(),
+                ).encode()
+                if len(report_html) > MAX_PAYLOAD:
+                    report["warnings"].append("Optical payload exceeds 16 MiB; use Local Wi-Fi.")
+                    report_html = render_report_html(
+                        report,
+                        annotated.path.read_bytes(),
+                        [frame.path.read_bytes() for frame in keyframes],
+                    ).encode()
+            incident.report_json = atomic_write(
+                directory / "report.json", json.dumps(report, sort_keys=True).encode()
             )
+            incident.report_html = atomic_write(directory / "report.html", report_html)
             if sha256_file(incident.clip.path) != clip_before or clip_before != incident.clip.sha256:
                 raise ValueError("clip digest changed")
             incident.annotated = annotated

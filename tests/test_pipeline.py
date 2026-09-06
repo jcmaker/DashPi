@@ -1,9 +1,11 @@
 import pytest
 import json
 
+import dashpi.pipeline as pipeline_module
 from dashpi.config import Settings
 from dashpi.media import extract_frame, probe_duration, segment_source, transcode_clip
 from dashpi.models import IncidentMetadata, IncidentState, Segment
+from dashpi.optical.container import MAX_PAYLOAD
 from dashpi.pipeline import IncidentPipeline
 from dashpi.storage import IncidentStore, sha256_file
 from tests.media_factory import make_video
@@ -45,6 +47,45 @@ def localized_analysis(timestamp=3.0):
         "observations": [{"timestamp": timestamp, "description": "차량 접촉"}],
         "limitations": ["단일 카메라"],
     }
+
+
+def recording_transcode(real, calls):
+    def wrapped(source, output, start, duration, height, bitrate):
+        calls.append((source, output, start, duration, height, bitrate))
+        return real(source, output, start, duration, height, bitrate)
+
+    return wrapped
+
+
+def test_oversized_html_reencodes_only_derivative_once(long_pipeline_fixture, monkeypatch):
+    pipeline, incident, segments, _detector = long_pipeline_fixture
+    sizes = iter([MAX_PAYLOAD + 1, MAX_PAYLOAD - 1])
+    monkeypatch.setattr(pipeline_module, "render_report_html", lambda *args: "x" * next(sizes))
+    calls = []
+    monkeypatch.setattr(
+        pipeline_module,
+        "transcode_clip",
+        recording_transcode(pipeline_module.transcode_clip, calls),
+    )
+
+    result = pipeline.process(incident, segments, lambda _frames: localized_analysis(22.5))
+
+    assert calls[-1][0].name == "annotated.mp4"
+    assert calls[-1][4:] == (360, "450k")
+    assert result.report_html.byte_length <= MAX_PAYLOAD
+    assert result.clip.sha256 == sha256_file(result.clip.path)
+
+
+def test_second_size_failure_keeps_ready_report_for_local_wifi(long_pipeline_fixture, monkeypatch):
+    pipeline, incident, segments, _detector = long_pipeline_fixture
+    monkeypatch.setattr(pipeline_module, "render_report_html", lambda *args: "x" * (MAX_PAYLOAD + 1))
+
+    result = pipeline.process(incident, segments, lambda _frames: localized_analysis(22.5))
+
+    report = json.loads(result.report_json.path.read_text())
+    assert result.state is IncidentState.READY
+    assert result.report_html.byte_length > MAX_PAYLOAD
+    assert "Optical payload exceeds 16 MiB; use Local Wi-Fi." in report["warnings"]
 
 
 def test_pipeline_creates_ten_second_annotated_report_without_mutating_evidence(long_pipeline_fixture):

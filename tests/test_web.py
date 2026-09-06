@@ -26,6 +26,16 @@ def test_local_ui_conditionally_embeds_incident_artifacts(tmp_path):
     assert "fetch('/api/incidents')" in response.text
 
 
+def test_local_ui_offers_manual_report_controls_and_only_available_optical_transfer(tmp_path):
+    response = TestClient(create_app(IncidentStore(tmp_path))).get("/")
+
+    assert 'type="checkbox" name="traffic_lights"' in response.text
+    assert 'type="number" name="incident_offset_seconds"' in response.text
+    assert "리포트 다시 만들기" in response.text
+    assert "정차 후 휴대폰으로 보내기" in response.text
+    assert "optical_report_available" in response.text
+
+
 def test_report_iframes_allow_only_offline_report_controls():
     for name in ("index.html", "receiver.html"):
         text = (WEB_ROOT / name).read_text()

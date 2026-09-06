@@ -74,6 +74,12 @@ h2 { margin: 0; font-size: var(--text-lg); line-height: 1.2; }
 iframe, video { width: 100%; border: var(--rule-thin) solid var(--color-rule); border-radius: var(--radius-md); background: var(--color-paper-raised); }
 iframe { min-height: 20rem; }
 video { min-height: 2.75rem; }
+.report-controls { display: grid; gap: var(--space-3); }
+.report-controls fieldset { display: grid; gap: var(--space-2); margin: 0; border: var(--rule-thin) solid var(--color-rule); border-radius: var(--radius-sm); padding: var(--space-3); }
+.report-controls legend { padding-inline: var(--space-1); font-family: var(--font-display); }
+.report-controls label { display: grid; gap: var(--space-1); }
+.report-controls input[type="number"] { min-height: 2.75rem; border: var(--rule-thin) solid var(--color-rule); border-radius: var(--radius-sm); padding-inline: var(--space-2); background: var(--color-paper-raised); color: var(--color-ink); }
+.report-controls button, .sender-link { display: inline-flex; width: fit-content; min-height: 2.75rem; align-items: center; justify-content: center; border: var(--rule-thin) solid var(--color-ink); border-radius: var(--radius-sm); padding-inline: var(--space-4); background: var(--color-ink); color: var(--color-paper-raised); font: inherit; text-decoration: none; }
 
 /* Hallmark · macrostructure: Split Studio · tone: utilitarian technical · anchor hue: amber
  * genre: modern-minimal · theme: Cobalt · audience: local DashPi operators
