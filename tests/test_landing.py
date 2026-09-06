@@ -84,3 +84,30 @@ class LandingPageTests(unittest.TestCase):
     def test_stylesheets_are_linked(self) -> None:
         parser = self.parser()
         self.assertTrue({"tokens.css", "styles.css"} <= parser.assets)
+
+    def translations(self) -> dict[str, dict[str, str]]:
+        match = re.search(
+            r'<script id="translations" type="application/json">(.*?)</script>',
+            self.page(),
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match)
+        return json.loads(match.group(1))
+
+    def test_translation_keys_match_and_cover_the_page(self) -> None:
+        translations = self.translations()
+        self.assertEqual(set(translations), {"ko", "en"})
+        self.assertEqual(set(translations["ko"]), set(translations["en"]))
+        parser = self.parser()
+        referenced = parser.i18n_keys | parser.i18n_attr_keys
+        self.assertLessEqual(referenced, set(translations["ko"]))
+        self.assertTrue(all(translations[lang][key].strip() for lang in translations for key in translations[lang]))
+
+    def test_script_has_safe_korean_fallback(self) -> None:
+        script = (LANDING / "script.js").read_text(encoding="utf-8")
+        self.assertIn('const DEFAULT_LANGUAGE = "ko";', script)
+        self.assertIn("try", script)
+        self.assertIn("localStorage", script)
+
+    def test_script_is_linked(self) -> None:
+        self.assertIn("script.js", self.parser().assets)
