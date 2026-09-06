@@ -181,10 +181,30 @@ dashpi simulate input.mp4 \
 
 성공하면 incident metadata가 JSON으로 출력되고 다음 결과가 `demo-data/incidents/<incident_id>/`에 생성됩니다.
 
-- `clip.mp4`
+- `clip.mp4` — trigger 전 30초와 후 15초를 보존한 원본 증거 영상이며, overlay를 적용하지 않습니다.
+- `annotated.mp4` — 사고 시점 전후 5초를 담은 10초 전송용 파생 영상입니다.
 - `report.json`
-- `report.html`
+- `report.html` — `annotated.mp4`와 before·incident·after 핵심 장면 3장을 data URL로 포함한 자급형 오프라인 리포트입니다.
 - `metadata.json`
+
+선택 overlay는 기본적으로 모두 OFF입니다. YOLOv8 COCO ONNX detector와 함께 필요할 때만 다음 flags를 사용합니다.
+
+```bash
+dashpi simulate input.mp4 \
+  --trigger-seconds 30 \
+  --data-root ./demo-data \
+  --ollama-model gemma3:4b \
+  --detector-model yolov8n.onnx \
+  --show-traffic-lights --show-lanes --show-traffic-signs
+```
+
+Detector는 YOLOv8 COCO ONNX의 `[1,84,8400]` 또는 `[1,8400,84]` output 형식만 지원합니다.
+
+## 사고 리포트와 전송
+
+`report.html`의 **Download HTML**은 재생 가능한 10초 annotated video를 포함한 오프라인 단일 파일을 저장합니다. **Save as PDF**는 브라우저의 인쇄 대화상자를 사용해 작성 분석과 핵심 장면 3장을 정적 PDF로 저장하므로, 재생 가능한 영상은 HTML에만 남습니다.
+
+Optical QR 전송은 안전하게 정차한 뒤에 시작합니다. 완성된 `report.html`이 16 MiB를 넘으면 DashPi는 전송용 `annotated.mp4`만 낮은 품질로 다시 인코딩하며 원본 `clip.mp4`는 바꾸지 않습니다. 그래도 16 MiB를 초과하면 Optical QR 대신 Local Wi-Fi를 사용합니다.
 
 ### 로컬 UI 실행
 
@@ -214,7 +234,7 @@ npm test --prefix web
 npm run build --prefix web
 ```
 
-2026-09-02 기준 새 환경에서 **Python 223개**, **TypeScript 21개** 테스트를 통과했습니다. 검증 범위에는 다음이 포함됩니다.
+2026-09-06 기준 새 환경에서 **Python 266개**, **TypeScript 21개** 테스트를 통과했습니다. 검증 범위에는 다음이 포함됩니다.
 
 - 사고 clip의 pre/post 경계와 중첩 trigger 병합
 - AI 실패 후 clip 보존 및 상태 전이
@@ -223,6 +243,7 @@ npm run build --prefix web
 - 1 MiB payload의 frame loss·중복·재정렬 복구
 - Python ↔ TypeScript golden vector
 - 외부 네트워크 연결을 차단한 incident pipeline
+- 45초 증거부터 자급형 report까지의 기존 Optical frame loss·중복·재정렬 복구
 - wheel 설치 후 packaged local UI smoke test
 
 ## 데이터 무결성과 안전 원칙
@@ -246,6 +267,7 @@ AI 리포트는 화면에 보이는 정황을 정리하는 **보조 자료**입�
 └── incidents/
     └── <incident_id>/
         ├── clip.mp4
+        ├── annotated.mp4
         ├── metadata.json
         ├── report.json
         └── report.html
