@@ -147,6 +147,14 @@ class LandingPageTests(unittest.TestCase):
         self.assertEqual(translations["en"]["team.affiliation"], "Affiliation")
         self.assertEqual(translations["ko"]["team.roster"], "프로젝트 팀")
         self.assertEqual(translations["en"]["team.roster"], "Project team")
+        self.assertEqual(
+            translations["ko"]["team.member.junhyeong.role"],
+            "Software · Applied AI",
+        )
+        self.assertEqual(
+            translations["en"]["team.member.junhyeong.role"],
+            "Software · Applied AI",
+        )
         for name in ("조준형", "채현수", "우지혁", "최재혁", "최준명", "신태영"):
             self.assertIn(name, team)
         self.assertNotIn("<img", team)
