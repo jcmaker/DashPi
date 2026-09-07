@@ -122,6 +122,28 @@ class LandingPageTests(unittest.TestCase):
         self.assertNotIn("AI가 실패해도, 증거는 남습니다.", page)
         self.assertNotIn('class="numeral" aria-hidden="true">45</span>', page)
 
+    def test_school_and_team_section_is_complete_and_precedes_source(self) -> None:
+        page = self.page()
+        parser = self.parser()
+        translations = self.translations()
+
+        self.assertIn("team", parser.ids)
+        self.assertLess(page.index('id="verification"'), page.index('id="team"'))
+        self.assertLess(page.index('id="team"'), page.index('id="source"'))
+        self.assertEqual(
+            translations["ko"]["team.school"],
+            "경기과학기술대학교 · 디자인공학과 · 캡스톤디자인",
+        )
+        self.assertEqual(
+            translations["en"]["team.school"],
+            "Gyeonggi University of Science and Technology · "
+            "Department of Design Engineering · Capstone Design",
+        )
+        self.assertEqual(translations["en"]["team.title"], "Meet the team")
+        for name in ("조준형", "채현수", "우지혁", "최재혁", "최준명", "신태영"):
+            self.assertIn(name, page)
+        self.assertNotIn("확인 필요", page)
+
     def test_footer_cube_cycles_between_white_and_red(self) -> None:
         styles = (LANDING / "styles.css").read_text(encoding="utf-8")
 
