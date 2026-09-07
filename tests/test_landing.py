@@ -244,6 +244,7 @@ process.stdout.write(JSON.stringify(context.result));
         self.assertNotIn("animateClearboxCube", rendered["scheduledBeforeManualAnimation"])
 
     def test_grid_theme_contract(self) -> None:
+        page = self.page()
         tokens = (LANDING / "tokens.css").read_text(encoding="utf-8")
         styles = (LANDING / "styles.css").read_text(encoding="utf-8")
         expected_tokens = {
@@ -251,7 +252,8 @@ process.stdout.write(JSON.stringify(context.result));
             "--color-ink": "oklch(16% 0.010 255)",
             "--color-rule": "oklch(88% 0.006 255)",
             "--color-accent": "oklch(55% 0.21 28)",
-            "--font-display": '"Archivo", "Noto Sans KR", "Helvetica Neue", Arial, sans-serif',
+            "--font-display": '"Archivo", "Pretendard Variable", "Helvetica Neue", Arial, sans-serif',
+            "--font-body": '"Archivo", "Pretendard Variable", "Helvetica Neue", Arial, sans-serif',
         }
         for name, value in expected_tokens.items():
             self.assertIn(f"{name}: {value};", tokens)
@@ -264,6 +266,9 @@ process.stdout.write(JSON.stringify(context.result));
         self.assertIn("prefers-reduced-motion: reduce", styles)
         self.assertNotIn("box-shadow:", styles)
         self.assertNotIn("linear-gradient(135deg", styles)
+        self.assertIn("family=Archivo:wght@400;500;600;700;800", page)
+        self.assertIn("pretendardvariable-dynamic-subset.min.css", page)
+        self.assertNotIn("Noto Sans KR", page + tokens)
 
     def test_stylesheets_are_linked(self) -> None:
         parser = self.parser()

@@ -11,8 +11,8 @@
   --color-accent: oklch(55% 0.21 28);
   --color-accent-ink: var(--color-paper);
   --color-focus: var(--color-accent);
-  --font-display: "Archivo", "Noto Sans KR", "Helvetica Neue", Arial, sans-serif;
-  --font-body: "Archivo", "Noto Sans KR", "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Archivo", "Pretendard Variable", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "Archivo", "Pretendard Variable", "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   --display-weight: 800;
   --tracking-display: -0.045em;
