@@ -122,10 +122,11 @@ class LandingPageTests(unittest.TestCase):
         self.assertNotIn("AI가 실패해도, 증거는 남습니다.", page)
         self.assertNotIn('class="numeral" aria-hidden="true">45</span>', page)
 
-    def test_school_and_team_section_is_complete_and_precedes_source(self) -> None:
+    def test_school_and_project_credits_section_is_complete_and_precedes_source(self) -> None:
         page = self.page()
         parser = self.parser()
         translations = self.translations()
+        team = page[page.index('<section class="team"'):page.index('<section class="source"')]
 
         self.assertIn("team", parser.ids)
         self.assertLess(page.index('id="verification"'), page.index('id="team"'))
@@ -139,9 +140,18 @@ class LandingPageTests(unittest.TestCase):
             "Gyeonggi University of Science and Technology · "
             "Department of Design Engineering · Capstone Design",
         )
-        self.assertEqual(translations["en"]["team.title"], "Meet the team")
+        self.assertEqual(translations["ko"]["team.eyebrow"], "05 — 프로젝트 크레딧")
+        self.assertEqual(translations["en"]["team.eyebrow"], "05 — Project credits")
+        self.assertEqual(translations["en"]["team.title"], "The people behind DashPi.")
+        self.assertEqual(translations["ko"]["team.affiliation"], "소속")
+        self.assertEqual(translations["en"]["team.affiliation"], "Affiliation")
+        self.assertEqual(translations["ko"]["team.roster"], "프로젝트 팀")
+        self.assertEqual(translations["en"]["team.roster"], "Project team")
         for name in ("조준형", "채현수", "우지혁", "최재혁", "최준명", "신태영"):
-            self.assertIn(name, page)
+            self.assertIn(name, team)
+        self.assertNotIn("<img", team)
+        self.assertNotIn("team__grid", team)
+        self.assertNotIn("team__member", team)
         self.assertNotIn("확인 필요", page)
 
     def test_footer_cube_cycles_between_white_and_red(self) -> None:
