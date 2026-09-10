@@ -176,11 +176,11 @@ python -m pip install -e ".[dev]"
 먼저 45초 이상의 테스트 영상을 저장소 루트에 `input.mp4`라는 이름으로 준비합니다. 다음 예시는 30초 지점을 trigger로 사용하여 기본 `30초 전 + 15초 후` 구간을 처리합니다.
 
 ```bash
-ollama pull gemma3:4b
+ollama pull qwen2.5vl:3b
 dashpi simulate input.mp4 \
   --trigger-seconds 30 \
   --data-root ./demo-data \
-  --ollama-model gemma3:4b
+  --ollama-model qwen2.5vl:3b
 ```
 
 성공하면 incident metadata가 JSON으로 출력되고 다음 결과가 `demo-data/incidents/<incident_id>/`에 생성됩니다.
@@ -197,7 +197,7 @@ dashpi simulate input.mp4 \
 dashpi simulate input.mp4 \
   --trigger-seconds 30 \
   --data-root ./demo-data \
-  --ollama-model gemma3:4b \
+  --ollama-model qwen2.5vl:3b \
   --detector-model yolov8n.onnx \
   --show-traffic-lights --show-lanes --show-traffic-signs
 ```
