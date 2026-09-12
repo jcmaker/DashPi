@@ -310,6 +310,7 @@ DashPi/
 - [Technical Requirements Document](docs/TRD.md)
 - [Offline Incident and Transfer Design](docs/superpowers/specs/2026-09-02-offline-transfer-design.md)
 - [Incident Analysis Report Design](docs/superpowers/specs/2026-09-06-incident-analysis-report-design.md)
+- [Agent Handoff Document](docs/AGENT_HANDOFF.md) — AI 코딩 에이전트를 위한 프로젝트 가이드
 
 ## 설계 및 문서화 레퍼런스
 
