@@ -6,9 +6,10 @@ import json
 
 import pytest
 from PySide6.QtWidgets import QApplication, QLabel, QToolButton
+from PySide6.QtMultimedia import QMediaPlayer
 
-from dashpi.device import VideoSettings, load_settings
-from dashpi.models import IncidentMetadata, IncidentState
+from dashpi.device import Recording, VideoSettings, load_settings
+from dashpi.models import IncidentMetadata, IncidentState, Segment
 from dashpi.optical.container import unpack_container
 from dashpi.optical.fountain import FountainDecoder
 from dashpi.optical.protocol import parse_frame
@@ -39,7 +40,7 @@ class FakeRecorder:
         return QLabel("live camera", parent)
 
     def list_recordings(self):
-        return []
+        return getattr(self, "recordings", [])
 
 
 class FakeSession:
@@ -110,6 +111,73 @@ def test_settings_save_supported_camera_options(qapp, tmp_path):
         window.close()
 
 
+def test_settings_show_disk_usage(qapp, tmp_path, monkeypatch):
+    import dashpi.desktop as desktop
+
+    monkeypatch.setattr(
+        desktop.shutil, "disk_usage",
+        lambda path: SimpleNamespace(total=20 * 2**30, used=5 * 2**30, free=15 * 2**30),
+    )
+    window = desktop.DashPiWindow(FakeSession(), IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        window.show_settings()
+        assert "5.0 GiB" in window.storage_usage.text()
+        assert "20.0 GiB" in window.storage_usage.text()
+    finally:
+        window.close()
+
+
+def test_recording_playback_advances_to_next_segment(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    session = FakeSession()
+    paths = [tmp_path / "000000.mp4", tmp_path / "000001.mp4"]
+    for path in paths:
+        path.write_bytes(b"mp4")
+    session.recorder.recordings = [
+        Recording("session", "drive", "2026-09-24", [
+            Segment(paths[0], 0, 2), Segment(paths[1], 2, 4)
+        ])
+    ]
+    window = DashPiWindow(session, IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        window.show_records()
+        window._open_record(window.record_list.item(0))
+        window._advance_on_end(QMediaPlayer.MediaStatus.EndOfMedia)
+        assert window.player.source().toLocalFile() == str(paths[1])
+    finally:
+        window.close()
+
+
+def test_open_incident_does_not_hash_video_on_ui_thread(qapp, tmp_path, monkeypatch):
+    import dashpi.desktop as desktop
+
+    store = IncidentStore(tmp_path)
+    incident = IncidentMetadata.new("incident-async", datetime.now(UTC).isoformat(), 100.0, 15.0)
+    incident.transition(IncidentState.ANALYSIS_FAILED, datetime.now(UTC).isoformat(), "AI unavailable")
+    incident.clip = atomic_write(store.directory(incident.incident_id) / "clip.mp4", b"evidence")
+    store.save(incident)
+    gate = Event()
+    original = desktop._open_verified_file
+
+    def held_open(*args):
+        if args[1] == "clip.mp4":
+            gate.wait(1)
+        return original(*args)
+
+    monkeypatch.setattr(desktop, "_open_verified_file", held_open)
+    window = desktop.DashPiWindow(FakeSession(), store, tmp_path / "settings.json")
+    try:
+        window.show_records()
+        window._open_record(window.record_list.item(0))
+        assert window.segment_list.count() == 0
+        gate.set()
+        wait_until(qapp, lambda: window.segment_list.count() == 1)
+    finally:
+        gate.set()
+        window.close()
+
+
 def test_stop_during_post_window_shows_pending_state(qapp, tmp_path):
     from dashpi.desktop import DashPiWindow
 
@@ -173,6 +241,25 @@ def test_capture_controls_wait_for_first_recorded_frame(qapp, tmp_path):
         assert all(control.isEnabled() for control in window.recording_controls())
     finally:
         gate.set()
+        session.recorder.recording = False
+        window.close()
+
+
+def test_recording_header_tracks_actual_capture_state(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    session = FakeSession()
+    window = DashPiWindow(session, IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        assert "REC" not in window.record_heading.text()
+        session.recorder.recording = True
+        window._poll()
+        assert "REC" in window.record_heading.text()
+        assert len(window.record_clock.text()) == 5
+        session.recorder.recording = False
+        window._poll()
+        assert "REC" not in window.record_heading.text()
+    finally:
         session.recorder.recording = False
         window.close()
 
@@ -316,6 +403,7 @@ def test_native_optical_screen_sends_verified_report(qapp, tmp_path):
     window = DashPiWindow(FakeSession(), store, tmp_path / "settings.json")
     try:
         window.start_optical(item)
+        wait_until(qapp, lambda: window.optical_session is not None)
         assert window.pages.currentWidget() is window.optical_page
         assert window.qr_label.pixmap() is not None
         frame = parse_frame(window.optical_session.frame(0))
@@ -339,15 +427,46 @@ def test_native_optical_screen_rejects_tampered_or_oversize_report(qapp, tmp_pat
     try:
         path.write_bytes(b"forged report")
         window.start_optical(item)
+        wait_until(qapp, lambda: "검증" in window.optical_status.text())
         assert window.optical_session is None
         assert "검증" in window.optical_status.text()
         item.report_html = atomic_write(path, b"verified report")
         store.save(item)
         monkeypatch.setattr(desktop, "MAX_PAYLOAD", 5)
         window.start_optical(item)
+        wait_until(qapp, lambda: "16 MiB" in window.optical_status.text())
         assert window.optical_session is None
         assert "16 MiB" in window.optical_status.text()
     finally:
+        window.close()
+
+
+def test_optical_preparation_does_not_read_report_on_ui_thread(qapp, tmp_path, monkeypatch):
+    import dashpi.desktop as desktop
+
+    store = IncidentStore(tmp_path)
+    item = IncidentMetadata.new("incident-optical", datetime.now(UTC).isoformat(), 100.0, 15.0)
+    item.transition(IncidentState.READY, datetime.now(UTC).isoformat())
+    item.report_html = atomic_write(store.directory(item.incident_id) / "report.html", b"<html>report</html>")
+    store.save(item)
+    gate = Event()
+    original = desktop._open_verified_file
+
+    def held_open(*args):
+        if args[1] == "report.html":
+            gate.wait(1)
+        return original(*args)
+
+    monkeypatch.setattr(desktop, "_open_verified_file", held_open)
+    window = desktop.DashPiWindow(FakeSession(), store, tmp_path / "settings.json")
+    try:
+        window.start_optical(item)
+        assert window.optical_session is None
+        assert "준비 중" in window.optical_status.text()
+        gate.set()
+        wait_until(qapp, lambda: window.optical_session is not None)
+    finally:
+        gate.set()
         window.close()
 
 

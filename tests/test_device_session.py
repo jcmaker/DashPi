@@ -24,6 +24,7 @@ class FakeRecorder:
         self.session_dir = first.parent
         self.segments = [Segment(first, 50.0, 100.0)]
         self.fail_split = False
+        self.allowed_empty_tail = False
 
     def start(self, mode):
         self.mode = mode
@@ -39,7 +40,8 @@ class FakeRecorder:
             self.segments.append(Segment(path, start, self.now))
         return self.segments
 
-    def stop(self):
+    def stop(self, *, allow_empty_tail=False):
+        self.allowed_empty_tail = allow_empty_tail
         self.recording = False
         return self.segments
 
@@ -82,6 +84,7 @@ def test_stop_waits_for_post_window_and_submits_complete_window(tmp_path, monkey
 
     assert not recorder.recording
     assert not session.pending_stop
+    assert recorder.allowed_empty_tail
     assert len(processed) == 1
     assert processed[0][0].incident_id == incident.incident_id
     assert processed[0][1][-1].end_mono >= 115.0
@@ -211,3 +214,14 @@ def test_post_window_waits_for_recorded_frame_coverage(tmp_path, monkeypatch):
     assert not recorder.recording
     assert len(processed) == 1
     assert processed[0][1][-1].end_mono >= 115.0
+
+
+def test_stop_at_post_deadline_tolerates_newly_opened_tail(tmp_path, monkeypatch):
+    recorder = FakeRecorder(tmp_path)
+    session = make_session(tmp_path, recorder, monkeypatch, [])
+    session.start("drive")
+    session.trigger(100.0)
+    recorder.now = 115.1
+
+    assert session.stop(115.1) is True
+    assert recorder.allowed_empty_tail

@@ -59,11 +59,14 @@ class DeviceSession:
     def stop(self, now: float) -> bool:
         if not self.recorder.recording:
             return True
+        had_active = bool(self.coordinator.active)
         self.tick(now)
+        if not self.recorder.recording:
+            return True
         if self.coordinator.active:
             self.pending_stop = True
             return False
-        self.recorder.stop()
+        self.recorder.stop(allow_empty_tail=had_active)
         return True
 
     def tick(self, now: float) -> None:
@@ -96,7 +99,7 @@ class DeviceSession:
                 self._pending.append((job, {segment.path for segment in segments}))
             self.coordinator.active.remove(incident)
         if self.pending_stop and not self.coordinator.active:
-            self.recorder.stop()
+            self.recorder.stop(allow_empty_tail=True)
             self.pending_stop = False
         elif self.recorder.recording and not self.prune_raw(now):
             self._capture_failed(RuntimeError("저장 공간이 부족합니다."))

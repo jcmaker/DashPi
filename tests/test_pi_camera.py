@@ -186,3 +186,48 @@ def test_pruned_segments_never_reuse_an_mp4_name(fake_picamera2, monkeypatch, tm
     assert [segment.path.name for segment in recorder.segments] == [
         "000001.mp4", "000002.mp4", "000003.mp4"
     ]
+
+
+def test_pending_stop_tolerates_empty_just_opened_tail(fake_picamera2, monkeypatch, tmp_path):
+    from dashpi.device import VideoSettings
+    from dashpi.pi_camera import PiCameraRecorder
+
+    def duration(path):
+        if path.name == "000001.mp4":
+            raise RuntimeError("no video frames")
+        return 2.0
+
+    monkeypatch.setattr("dashpi.pi_camera.probe_duration", duration)
+    recorder = PiCameraRecorder(tmp_path, VideoSettings())
+    recorder.prepare()
+    recorder.create_preview()
+    recorder.start("drive")
+    recorder.split()
+
+    result = recorder.stop(allow_empty_tail=True)
+
+    assert [segment.path.name for segment in result] == ["000000.mp4"]
+    assert (recorder.session_dir / "000001.mp4").exists()  # Preserve even an unreadable raw tail.
+
+
+def test_pending_stop_does_not_hide_manifest_write_failure(fake_picamera2, monkeypatch, tmp_path):
+    import dashpi.pi_camera as pi_camera
+    from dashpi.device import VideoSettings
+    from dashpi.pi_camera import PiCameraRecorder
+
+    monkeypatch.setattr("dashpi.pi_camera.probe_duration", lambda path: 2.0)
+    recorder = PiCameraRecorder(tmp_path, VideoSettings())
+    recorder.prepare()
+    recorder.create_preview()
+    recorder.start("drive")
+    recorder.split()
+    original = pi_camera.atomic_write
+
+    def fail_manifest(path, data):
+        if path.name == "segments.csv":
+            raise OSError("disk full")
+        return original(path, data)
+
+    monkeypatch.setattr("dashpi.pi_camera.atomic_write", fail_manifest)
+    with pytest.raises(OSError, match="disk full"):
+        recorder.stop(allow_empty_tail=True)

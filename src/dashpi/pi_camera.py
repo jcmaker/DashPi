@@ -138,13 +138,21 @@ class PiCameraRecorder:
         self._append_segment(closed)
         return list(self.segments)
 
-    def stop(self) -> list[Segment]:
+    def stop(self, *, allow_empty_tail: bool = False) -> list[Segment]:
         if not self.recording:
             return list(self.segments)
         self.recording = False
         try:
             self.picam2.stop_recording()
-            self._append_segment(self.current_path)
+            try:
+                duration = probe_duration(self.current_path)
+            except Exception:
+                if not allow_empty_tail or not self.segments:
+                    raise
+                # The incident boundary is already closed; keep an unreadable tail as raw evidence.
+            else:
+                if duration > 0 or not (allow_empty_tail and self.segments):
+                    self._append_segment(self.current_path, duration)
         finally:
             self.picam2.close()
             self.picam2 = None
@@ -164,9 +172,9 @@ class PiCameraRecorder:
                 continue
         return sorted(recordings, key=lambda item: item.started_at, reverse=True)
 
-    def _append_segment(self, path: Path) -> None:
+    def _append_segment(self, path: Path, duration: float | None = None) -> None:
         start = self.segments[-1].end_mono if self.segments else self.start_mono
-        duration = probe_duration(path)
+        duration = probe_duration(path) if duration is None else duration
         if duration <= 0:
             raise RuntimeError("빈 카메라 영상 조각입니다.")
         self.segments.append(Segment(path, start, start + duration))

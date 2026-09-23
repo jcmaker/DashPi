@@ -8,6 +8,7 @@ from dataclasses import replace
 import json
 from pathlib import Path
 import secrets
+import shutil
 import time
 
 from PySide6.QtCore import Qt, QTimer, QUrl, QSize
@@ -99,7 +100,9 @@ class DashPiWindow(QMainWindow):
         self._preview_widget = None
         self.optical_session: OpticalSession | None = None
         self._optical_sequence = 0
+        self._optical_generation = 0
         self._selected_incident = None
+        self._detail_generation = 0
         self.pages = QStackedWidget()
         self.setCentralWidget(self.pages)
 
@@ -148,7 +151,10 @@ class DashPiWindow(QMainWindow):
         self.pages.addWidget(self.confirmation)
 
     def _build_recording(self):
-        self.recording_page, layout = page("● REC")
+        self.recording_page, layout = page("DashPi")
+        self.record_heading = layout.itemAt(0).widget()
+        self.record_clock = QLabel(time.strftime("%H:%M", time.localtime()))
+        layout.addWidget(self.record_clock)
         self.record_status = QLabel("카메라 준비 중")
         self.record_status.setObjectName("status")
         layout.addWidget(self.record_status)
@@ -206,6 +212,8 @@ class DashPiWindow(QMainWindow):
             layout.addWidget(control)
         self.settings_status = QLabel("")
         layout.addWidget(self.settings_status)
+        self.storage_usage = QLabel("")
+        layout.addWidget(self.storage_usage)
         layout.addStretch()
         self.save_settings_button = button("저장", self._save_settings, primary=True)
         layout.addWidget(self.save_settings_button)
@@ -217,6 +225,7 @@ class DashPiWindow(QMainWindow):
         self.detail_title = QLabel("")
         layout.addWidget(self.detail_title)
         self.player = QMediaPlayer(self)
+        self.player.mediaStatusChanged.connect(self._advance_on_end)
         self.video = QVideoWidget()
         self.player.setVideoOutput(self.video)
         layout.addWidget(self.video, 1)
@@ -274,6 +283,13 @@ class DashPiWindow(QMainWindow):
         self.pages.setCurrentWidget(self.records_page)
 
     def show_settings(self):
+        try:
+            usage = shutil.disk_usage(self.settings_path.parent)
+            self.storage_usage.setText(
+                f"저장 공간: {usage.used / 2**30:.1f} GiB 사용 / {usage.total / 2**30:.1f} GiB 전체"
+            )
+        except OSError:
+            self.storage_usage.setText("저장 공간을 확인할 수 없습니다.")
         self.pages.setCurrentWidget(self.settings_page)
 
     def _begin(self, mode: str):
@@ -354,6 +370,8 @@ class DashPiWindow(QMainWindow):
         self._jobs.append((self._executor.submit(work), callback))
 
     def _poll(self):
+        self.record_heading.setText("● REC" if self.session.recorder.recording else "DashPi")
+        self.record_clock.setText(time.strftime("%H:%M", time.localtime()))
         for future, callback in list(self._jobs):
             if future.done():
                 self._jobs.remove((future, callback))
@@ -416,6 +434,8 @@ class DashPiWindow(QMainWindow):
                 self.record_list.addItem(item)
 
     def _open_record(self, item: QListWidgetItem):
+        self._detail_generation += 1
+        generation = self._detail_generation
         kind, value = item.data(Qt.ItemDataRole.UserRole)
         self._selected_incident = value if kind == "incident" else None
         self.optical_button.setVisible(
@@ -432,19 +452,10 @@ class DashPiWindow(QMainWindow):
                 self.segment_list.addItem(part)
         else:
             if value.clip is not None:
-                try:
-                    with self.store.open_incident(value.incident_id) as (_item, descriptor, directory):
-                        if value.clip.path != directory / "clip.mp4":
-                            raise ValueError("invalid clip path")
-                        source, _ = _open_verified_file(
-                            descriptor, "clip.mp4", value.clip.byte_length, value.clip.sha256
-                        )
-                        source.close()
-                    part = QListWidgetItem("사고 증거 영상")
-                    part.setData(Qt.ItemDataRole.UserRole, value.clip.path)
-                    self.segment_list.addItem(part)
-                except Exception:
-                    self.report_text.setText("사고 영상을 검증할 수 없습니다.")
+                self._submit(
+                    lambda: self._verified_clip_path(value),
+                    lambda future: self._clip_checked(future, generation),
+                )
             if value.state is IncidentState.ANALYSIS_FAILED:
                 self.report_text.setText("AI 분석에 실패했습니다. 원본 사고 영상은 보존됩니다.")
             elif value.report_json is not None:
@@ -477,40 +488,82 @@ class DashPiWindow(QMainWindow):
             self._play_segment(self.segment_list.item(0))
         self.pages.setCurrentWidget(self.detail_page)
 
+    def _verified_clip_path(self, incident):
+        with self.store.open_incident(incident.incident_id) as (_item, descriptor, directory):
+            if incident.clip.path != directory / "clip.mp4":
+                raise ValueError("invalid clip path")
+            source, _ = _open_verified_file(
+                descriptor, "clip.mp4", incident.clip.byte_length, incident.clip.sha256
+            )
+            source.close()
+        return incident.clip.path
+
+    def _clip_checked(self, future: Future, generation: int):
+        if generation != self._detail_generation or self.pages.currentWidget() is not self.detail_page:
+            return
+        try:
+            path = future.result()
+        except Exception:
+            self.report_text.setText(
+                "\n".join(filter(None, [self.report_text.text(), "사고 영상을 검증할 수 없습니다."]))
+            )
+            return
+        part = QListWidgetItem("사고 증거 영상")
+        part.setData(Qt.ItemDataRole.UserRole, path)
+        self.segment_list.addItem(part)
+        self._play_segment(part)
+
     def _open_selected_optical(self):
         if self._selected_incident is not None:
             self.start_optical(self._selected_incident)
 
     def start_optical(self, incident):
+        self._optical_generation += 1
+        generation = self._optical_generation
         self.optical_timer.stop()
         self.optical_session = None
         self.qr_label.clear()
         self.pages.setCurrentWidget(self.optical_page)
-        try:
-            with self.store.open_incident(incident.incident_id) as (current, descriptor, directory):
-                artifact = current.report_html
-                if current.state is not IncidentState.READY or artifact is None:
-                    raise ValueError("리포트가 준비되지 않았습니다.")
-                if artifact.byte_length > MAX_PAYLOAD:
-                    self.optical_status.setText("16 MiB를 초과해 QR 전송을 사용할 수 없습니다. 로컬 리포트는 보존됩니다.")
-                    return
-                if artifact.path != directory / "report.html":
-                    raise ValueError("invalid report path")
-                source, _ = _open_verified_file(
-                    descriptor, "report.html", artifact.byte_length, artifact.sha256
-                )
-                with source:
-                    source.seek(0)
-                    payload = source.read()
-            self.optical_session = OpticalSession.from_bytes(
-                "report.html", payload, "text/html", 512, secrets.randbits(32)
+        self.optical_status.setText("리포트 준비 중...")
+        self._submit(
+            lambda: self._prepare_optical(incident),
+            lambda future: self._optical_ready(future, generation),
+        )
+
+    def _prepare_optical(self, incident):
+        with self.store.open_incident(incident.incident_id) as (current, descriptor, directory):
+            artifact = current.report_html
+            if current.state is not IncidentState.READY or artifact is None:
+                raise ValueError("리포트가 준비되지 않았습니다.")
+            if artifact.byte_length > MAX_PAYLOAD:
+                return None
+            if artifact.path != directory / "report.html":
+                raise ValueError("invalid report path")
+            source, _ = _open_verified_file(
+                descriptor, "report.html", artifact.byte_length, artifact.sha256
             )
-            self._optical_sequence = 0
-            self.optical_status.setText("휴대폰 수신 PWA로 QR 프레임을 계속 비추세요.")
-            self._render_optical_frame()
-            self.optical_timer.start(250)
+            with source:
+                source.seek(0)
+                payload = source.read()
+        return OpticalSession.from_bytes(
+            "report.html", payload, "text/html", 512, secrets.randbits(32)
+        )
+
+    def _optical_ready(self, future: Future, generation: int):
+        if generation != self._optical_generation or self.pages.currentWidget() is not self.optical_page:
+            return
+        try:
+            self.optical_session = future.result()
         except Exception:
             self.optical_status.setText("리포트를 검증하거나 QR 전송을 시작할 수 없습니다.")
+            return
+        if self.optical_session is None:
+            self.optical_status.setText("16 MiB를 초과해 QR 전송을 사용할 수 없습니다. 로컬 리포트는 보존됩니다.")
+            return
+        self._optical_sequence = 0
+        self.optical_status.setText("휴대폰 수신 PWA로 QR 프레임을 계속 비추세요.")
+        self._render_optical_frame()
+        self.optical_timer.start(250)
 
     def _render_optical_frame(self):
         if self.optical_session is None:
@@ -538,12 +591,23 @@ class DashPiWindow(QMainWindow):
         self._optical_sequence = (self._optical_sequence + 1) % (2**32)
 
     def _leave_optical(self):
+        self._optical_generation += 1
         self.optical_timer.stop()
         self.pages.setCurrentWidget(self.detail_page)
 
     def _play_segment(self, item: QListWidgetItem):
+        self.segment_list.setCurrentItem(item)
         self.player.setSource(QUrl.fromLocalFile(str(item.data(Qt.ItemDataRole.UserRole))))
         self.player.play()
+
+    def _advance_on_end(self, status):
+        if status is not QMediaPlayer.MediaStatus.EndOfMedia:
+            return
+        if self.pages.currentWidget() is not self.detail_page:
+            return
+        index = self.segment_list.currentRow() + 1
+        if index < self.segment_list.count():
+            self._play_segment(self.segment_list.item(index))
 
     def _toggle_playback(self):
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
