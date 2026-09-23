@@ -96,6 +96,7 @@ class DashPiWindow(QMainWindow):
         self._jobs: list[tuple[Future, object]] = []
         self._tick_future: Future | None = None
         self._close_when_done = False
+        self._starting = False
         self._recording_mode = "drive"
         self._preview_widget = None
         self.optical_session: OpticalSession | None = None
@@ -138,6 +139,9 @@ class DashPiWindow(QMainWindow):
         row.addWidget(home_tile("설정", settings_icon, self.show_settings))
         row.addStretch()
         layout.addLayout(row)
+        self.home_status = QLabel("")
+        self.home_status.setWordWrap(True)
+        layout.addWidget(self.home_status)
         layout.addStretch()
         self.pages.addWidget(self.home)
 
@@ -293,6 +297,9 @@ class DashPiWindow(QMainWindow):
         self.pages.setCurrentWidget(self.settings_page)
 
     def _begin(self, mode: str):
+        if self._starting or self.session.recorder.recording:
+            return
+        self._starting = True
         self._recording_mode = mode
         self.record_status.setText("카메라 준비 중")
         self.analyze_button.setEnabled(False)
@@ -308,21 +315,26 @@ class DashPiWindow(QMainWindow):
 
     def _prepared(self, future: Future):
         if not self._report_error(future):
+            self._starting = False
             self._release_camera()
             return
         try:
             self.show_recording()
         except Exception as error:
             self.record_status.setText(str(error))
+            self._starting = False
             self._release_camera()
             return
         self._submit(lambda: self.session.start(self._recording_mode), self._started)
 
     def _started(self, future: Future):
+        self._starting = False
         if self._report_error(future):
             self.record_status.setText("녹화 중")
             self.analyze_button.setEnabled(True)
             self.stop_button.setEnabled(True)
+            if self._close_when_done:
+                self._stop()
         else:
             self._release_camera()
 
@@ -335,8 +347,13 @@ class DashPiWindow(QMainWindow):
             self.preview = QLabel("카메라 연결 중")
             self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.preview_layout.addWidget(self.preview)
-        self._submit(self.session.recorder.release, self._report_error)
+        self._submit(self.session.recorder.release, self._released)
         self.stop_button.setEnabled(True)
+
+    def _released(self, future: Future):
+        self._report_error(future)
+        if self._close_when_done and not self.session.recorder.recording:
+            self.close()
 
     def _trigger(self):
         if not self.analyze_button.isEnabled():
@@ -356,7 +373,13 @@ class DashPiWindow(QMainWindow):
         if future.result():
             error = getattr(self.session, "last_error", None)
             if error:
-                self.record_status.setText(f"녹화 중단: {error}. 원본 영상은 보존됩니다.")
+                message = f"녹화 중단: {error}. 원본 영상은 보존됩니다."
+                self.record_status.setText(message)
+                self.home_status.setText(message)
+                if self._close_when_done:
+                    self.close()
+                else:
+                    self.show_home()
                 return
             self.record_status.setText("녹화 종료")
             if self._close_when_done:
@@ -382,7 +405,9 @@ class DashPiWindow(QMainWindow):
             if not self.session.recorder.recording and self.session.pending_stop is False:
                 error = getattr(self.session, "last_error", None)
                 if error:
-                    self.record_status.setText(f"녹화 중단: {error}. 원본 영상은 보존됩니다.")
+                    message = f"녹화 중단: {error}. 원본 영상은 보존됩니다."
+                    self.record_status.setText(message)
+                    self.home_status.setText(message)
                 elif not tick_ok:
                     pass
                 elif self._close_when_done:
@@ -436,6 +461,8 @@ class DashPiWindow(QMainWindow):
     def _open_record(self, item: QListWidgetItem):
         self._detail_generation += 1
         generation = self._detail_generation
+        self.player.stop()
+        self.player.setSource(QUrl())
         kind, value = item.data(Qt.ItemDataRole.UserRole)
         self._selected_incident = value if kind == "incident" else None
         self.optical_button.setVisible(
@@ -499,7 +526,7 @@ class DashPiWindow(QMainWindow):
         return incident.clip.path
 
     def _clip_checked(self, future: Future, generation: int):
-        if generation != self._detail_generation or self.pages.currentWidget() is not self.detail_page:
+        if generation != self._detail_generation:
             return
         try:
             path = future.result()
@@ -511,7 +538,8 @@ class DashPiWindow(QMainWindow):
         part = QListWidgetItem("사고 증거 영상")
         part.setData(Qt.ItemDataRole.UserRole, path)
         self.segment_list.addItem(part)
-        self._play_segment(part)
+        if self.pages.currentWidget() is self.detail_page:
+            self._play_segment(part)
 
     def _open_selected_optical(self):
         if self._selected_incident is not None:
@@ -572,7 +600,12 @@ class DashPiWindow(QMainWindow):
 
         qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_L, border=4)
         qr.add_data(self.optical_session.frame(self._optical_sequence))
-        qr.make(fit=True)
+        try:
+            qr.make(fit=True)
+        except ValueError:
+            # A malformed QR encoding must not halt the fountain stream; the receiver tolerates loss.
+            self._optical_sequence = (self._optical_sequence + 1) % (2**32)
+            return
         matrix = qr.get_matrix()
         width = len(matrix)
         image = QImage(width, width, QImage.Format.Format_RGB32)
@@ -594,6 +627,8 @@ class DashPiWindow(QMainWindow):
         self._optical_generation += 1
         self.optical_timer.stop()
         self.pages.setCurrentWidget(self.detail_page)
+        if self.player.source().isEmpty() and self.segment_list.count():
+            self._play_segment(self.segment_list.item(0))
 
     def _play_segment(self, item: QListWidgetItem):
         self.segment_list.setCurrentItem(item)
@@ -616,6 +651,10 @@ class DashPiWindow(QMainWindow):
             self.player.play()
 
     def closeEvent(self, event):
+        if self._starting:
+            self._close_when_done = True
+            event.ignore()
+            return
         if self.session.recorder.recording:
             if not self._close_when_done:
                 self._close_when_done = True

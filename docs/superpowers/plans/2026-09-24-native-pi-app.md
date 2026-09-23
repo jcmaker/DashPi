@@ -29,6 +29,8 @@
 
 **Implementation checkpoint (2026-09-24):** The four software tasks were implemented in `60fd7d3`, `7bf2775`, `53f2b41`, and `3511b7a`; safety follow-up is `a1bdfe6`. The session exposes the few attributes the UI reads directly instead of adding an unused status-snapshot abstraction. Normal/parking recordings are playable by MP4 segment; incident evidence is a single `clip.mp4`. The Raspberry Pi 5 acceptance gate below is still open—desktop tests cannot validate camera timing, codec support, or performance. The checkboxes remain the original execution recipe, not a claim of Pi acceptance.
 
+**Review follow-up (2026-09-24):** `1e15005` prevents MP4 filename reuse after pruning, rejects pre-capture triggers, waits for post-window frame coverage, and releases a failed startup for retry. `5430327` makes segmented playback continuous, prepares verified media/QR data off the Qt thread, shows disk usage, and tolerates an unreadable empty tail after a protected incident boundary. A further follow-up guards close/double-tap during startup, keeps verified clips across QR navigation, and makes failure exit possible. The latest desktop suite passed 358 tests; Pi hardware acceptance remains open.
+
 ---
 
 ### Task 1: One camera, live-preview-compatible MP4 segments

@@ -13,6 +13,7 @@ from dashpi.models import IncidentMetadata, IncidentState, Segment
 from dashpi.optical.container import unpack_container
 from dashpi.optical.fountain import FountainDecoder
 from dashpi.optical.protocol import parse_frame
+from dashpi.optical.session import OpticalSession
 from dashpi.storage import IncidentStore, atomic_write
 
 
@@ -27,9 +28,11 @@ class FakeRecorder:
         self.recording = False
         self.picam2 = object()
         self.prepared = False
+        self.prepare_count = 0
 
     def prepare(self):
         self.prepared = True
+        self.prepare_count += 1
         self.picam2 = object()
 
     def release(self):
@@ -47,8 +50,11 @@ class FakeSession:
     def __init__(self):
         self.recorder = FakeRecorder()
         self.pending_stop = False
+        self.start_count = 0
+        self.stop_count = 0
 
     def start(self, mode):
+        self.start_count += 1
         self.mode = mode
         self.recorder.recording = True
 
@@ -57,6 +63,7 @@ class FakeSession:
         self.pending_stop = True
 
     def stop(self, now):
+        self.stop_count += 1
         if self.pending_stop:
             return False
         self.recorder.recording = False
@@ -175,6 +182,80 @@ def test_open_incident_does_not_hash_video_on_ui_thread(qapp, tmp_path, monkeypa
         wait_until(qapp, lambda: window.segment_list.count() == 1)
     finally:
         gate.set()
+        window.close()
+
+
+def test_verified_clip_is_kept_while_optical_page_is_open(qapp, tmp_path, monkeypatch):
+    import dashpi.desktop as desktop
+
+    store = IncidentStore(tmp_path)
+    incident = IncidentMetadata.new("incident-qr-switch", datetime.now(UTC).isoformat(), 100.0, 15.0)
+    incident.transition(IncidentState.READY, datetime.now(UTC).isoformat())
+    directory = store.directory(incident.incident_id)
+    incident.clip = atomic_write(directory / "clip.mp4", b"evidence")
+    incident.report_html = atomic_write(directory / "report.html", b"<html>report</html>")
+    store.save(incident)
+    gate = Event()
+    original = desktop._open_verified_file
+
+    def held_open(*args):
+        if args[1] == "clip.mp4":
+            gate.wait(1)
+        return original(*args)
+
+    monkeypatch.setattr(desktop, "_open_verified_file", held_open)
+    window = desktop.DashPiWindow(FakeSession(), store, tmp_path / "settings.json")
+    try:
+        window.show_records()
+        window._open_record(window.record_list.item(0))
+        window.start_optical(incident)
+        gate.set()
+        wait_until(qapp, lambda: window.optical_session is not None)
+        window._leave_optical()
+        assert window.segment_list.count() == 1
+    finally:
+        gate.set()
+        window.close()
+
+
+def test_stop_after_camera_failure_returns_home(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    session = FakeSession()
+    session.last_error = "camera disconnected"
+    window = DashPiWindow(session, IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        window.show_recording()
+        window.stop_button.click()
+        wait_until(qapp, lambda: window.pages.currentWidget() is window.home)
+        assert "camera disconnected" in window.home_status.text()
+    finally:
+        window.close()
+
+
+def test_qr_render_skips_a_bad_frame_and_keeps_transfer_running(qapp, tmp_path, monkeypatch):
+    import qrcode
+    from dashpi.desktop import DashPiWindow
+
+    window = DashPiWindow(FakeSession(), IncidentStore(tmp_path), tmp_path / "settings.json")
+    window.optical_session = OpticalSession.from_bytes("report.html", b"report", "text/html", 512, 123)
+    original = qrcode.QRCode.make
+    failed = False
+
+    def fail_once(self, *args, **kwargs):
+        nonlocal failed
+        if not failed:
+            failed = True
+            raise ValueError("glog(0)")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(qrcode.QRCode, "make", fail_once)
+    try:
+        window._render_optical_frame()
+        assert window._optical_sequence == 1
+        window._render_optical_frame()
+        assert window.qr_label.pixmap() is not None
+    finally:
         window.close()
 
 
@@ -304,6 +385,59 @@ def test_capture_can_retry_after_failed_start(qapp, tmp_path):
         wait_until(qapp, lambda: window.record_status.text() == "녹화 중")
         assert session.attempts == 2
     finally:
+        session.recorder.recording = False
+        window.close()
+
+
+def test_close_during_camera_start_waits_then_stops_capture(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    entered, gate = Event(), Event()
+
+    class SlowSession(FakeSession):
+        def start(self, mode):
+            entered.set()
+            gate.wait(1)
+            super().start(mode)
+
+    session = SlowSession()
+    window = DashPiWindow(session, IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        window._begin("drive")
+        wait_until(qapp, entered.is_set)
+        window.close()
+        assert window.timer.isActive()
+        gate.set()
+        wait_until(qapp, lambda: not window.timer.isActive())
+        assert not session.recorder.recording
+        assert session.stop_count == 1
+    finally:
+        gate.set()
+        session.recorder.recording = False
+        window.close()
+
+
+def test_double_start_tap_does_not_prepare_camera_twice(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    gate = Event()
+
+    class SlowSession(FakeSession):
+        def start(self, mode):
+            gate.wait(1)
+            super().start(mode)
+
+    session = SlowSession()
+    window = DashPiWindow(session, IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        window._begin("drive")
+        window._begin("drive")
+        gate.set()
+        wait_until(qapp, lambda: window.record_status.text() == "녹화 중")
+        assert session.recorder.prepare_count == 1
+        assert session.start_count == 1
+    finally:
+        gate.set()
         session.recorder.recording = False
         window.close()
 
