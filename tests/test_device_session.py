@@ -19,6 +19,7 @@ class FakeRecorder:
         first = root / "raw" / "session" / "000000.mp4"
         first.parent.mkdir(parents=True)
         first.write_bytes(b"raw video")
+        self.session_dir = first.parent
         self.segments = [Segment(first, 50.0, 100.0)]
         self.fail_split = False
 
@@ -155,3 +156,26 @@ def test_pending_clip_job_protects_its_source_segments(tmp_path, monkeypatch):
     assert session.prune_raw(200.0) is False
     assert not old.exists()
     assert all(path.exists() for path in evidence_sources)
+
+
+def test_incomplete_capture_keeps_raw_across_later_pruning(tmp_path, monkeypatch):
+    recorder = FakeRecorder(tmp_path)
+    session = make_session(tmp_path, recorder, monkeypatch, [])
+    session.start("drive")
+    session.trigger(100.0)
+    recorder.fail_split = True
+    session.tick(110.0)
+    old = tmp_path / "raw" / "previous" / "000000.mp4"
+    old.parent.mkdir()
+    old.write_bytes(b"x" * 100)
+    os.utime(old, (1, 1))
+    monkeypatch.setattr(
+        "shutil.disk_usage",
+        lambda path: SimpleNamespace(total=1000, used=300, free=700),
+    )
+    session.settings = Settings(tmp_path, "fake", raw_max_fraction=0.001)
+
+    assert session.prune_raw(200.0) is False
+    assert (recorder.session_dir / "incomplete_capture.txt").is_file()
+    assert recorder.segments[0].path.exists()
+    assert not old.exists()

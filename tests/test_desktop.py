@@ -180,6 +180,30 @@ def test_record_detail_displays_verified_summary(qapp, tmp_path):
         window.close()
 
 
+def test_record_detail_displays_observations_and_limitations(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    store = IncidentStore(tmp_path)
+    item = IncidentMetadata.new("incident-3", datetime.now(UTC).isoformat(), 100.0, 15.0)
+    item.transition(IncidentState.READY, datetime.now(UTC).isoformat())
+    item.report_json = atomic_write(
+        store.directory(item.incident_id) / "report.json",
+        json.dumps({"summary": "접촉 가능성", "incident_timestamp": 10.5,
+                    "observations": [{"timestamp": 10.5, "description": "차량 접근"}],
+                    "limitations": ["영상만으로 과실 판단 불가"]}).encode(),
+    )
+    store.save(item)
+    window = DashPiWindow(FakeSession(), store, tmp_path / "settings.json")
+    try:
+        window.show_records()
+        window._open_record(window.record_list.item(0))
+        assert "접촉 가능성" in window.report_text.text()
+        assert "10.5초 · 차량 접근" in window.report_text.text()
+        assert "영상만으로 과실 판단 불가" in window.report_text.text()
+    finally:
+        window.close()
+
+
 def test_repeated_close_does_not_queue_duplicate_stop(qapp, tmp_path):
     session = FakeSession()
     session.recorder.recording = True
@@ -243,4 +267,25 @@ def test_native_optical_screen_rejects_tampered_or_oversize_report(qapp, tmp_pat
         assert window.optical_session is None
         assert "16 MiB" in window.optical_status.text()
     finally:
+        window.close()
+
+
+def test_camera_failure_stays_visible_instead_of_silently_returning_home(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    class FailedSession(FakeSession):
+        def tick(self, now):
+            self.last_error = "camera disconnected"
+            self.recorder.recording = False
+
+    session = FailedSession()
+    window = DashPiWindow(session, IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        window.show_recording()
+        session.recorder.recording = True
+        wait_until(qapp, lambda: hasattr(session, "last_error"))
+        wait_until(qapp, lambda: "camera disconnected" in window.record_status.text())
+        assert window.pages.currentWidget() is window.recording_page
+    finally:
+        session.recorder.recording = False
         window.close()

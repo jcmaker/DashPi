@@ -16,7 +16,7 @@ from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QListWidgetItem, QMainWindow, QPushButton, QSizePolicy,
+    QListWidget, QListWidgetItem, QMainWindow, QPushButton, QScrollArea, QSizePolicy,
     QStackedWidget, QStyle, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -225,7 +225,11 @@ class DashPiWindow(QMainWindow):
         layout.addWidget(self.segment_list)
         self.report_text = QLabel("")
         self.report_text.setWordWrap(True)
-        layout.addWidget(self.report_text)
+        report_scroll = QScrollArea()
+        report_scroll.setWidgetResizable(True)
+        report_scroll.setMaximumHeight(160)
+        report_scroll.setWidget(self.report_text)
+        layout.addWidget(report_scroll)
         self.optical_button = button("리포트 QR 전송", self._open_selected_optical, primary=True)
         self.optical_button.hide()
         layout.addWidget(self.optical_button)
@@ -312,6 +316,10 @@ class DashPiWindow(QMainWindow):
         if not self._report_error(future):
             return
         if future.result():
+            error = getattr(self.session, "last_error", None)
+            if error:
+                self.record_status.setText(f"녹화 중단: {error}. 원본 영상은 보존됩니다.")
+                return
             self.record_status.setText("녹화 종료")
             if self._close_when_done:
                 self.close()
@@ -329,10 +337,15 @@ class DashPiWindow(QMainWindow):
                 self._jobs.remove((future, callback))
                 callback(future)
         if self._tick_future is not None and self._tick_future.done():
-            self._report_error(self._tick_future)
+            tick_ok = self._report_error(self._tick_future)
             self._tick_future = None
             if not self.session.recorder.recording and self.session.pending_stop is False:
-                if self._close_when_done:
+                error = getattr(self.session, "last_error", None)
+                if error:
+                    self.record_status.setText(f"녹화 중단: {error}. 원본 영상은 보존됩니다.")
+                elif not tick_ok:
+                    pass
+                elif self._close_when_done:
                     self.close()
                 elif self.pages.currentWidget() is self.recording_page:
                     self.record_status.setText("녹화 종료")
@@ -426,7 +439,16 @@ class DashPiWindow(QMainWindow):
                             report = json.loads(source.read())
                     if not isinstance(report, dict):
                         raise ValueError("invalid report")
-                    self.report_text.setText(str(report.get("summary", "")))
+                    lines = [str(report.get("summary", ""))]
+                    for observation in report.get("observations", []):
+                        lines.append(
+                            f"{float(observation['timestamp']):.1f}초 · {observation['description']}"
+                        )
+                    for limitation in report.get("limitations", []):
+                        lines.append(f"한계: {limitation}")
+                    for warning in report.get("warnings", []):
+                        lines.append(f"주의: {warning}")
+                    self.report_text.setText("\n".join(lines))
                 except Exception:
                     self.report_text.setText("리포트를 검증할 수 없습니다.")
         if self.segment_list.count():

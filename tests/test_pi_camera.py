@@ -39,6 +39,10 @@ def fake_picamera2(monkeypatch):
         def __init__(self, **kwargs):
             self.options = kwargs
             self.firsttimestamp = None
+            self.forced_keyframes = 0
+
+        def force_key_frame(self):
+            self.forced_keyframes += 1
 
     class Output:
         def __init__(self, path):
@@ -102,6 +106,7 @@ def test_single_camera_previews_and_closes_timestamped_segments(fake_picamera2, 
     assert preview.camera is recorder.picam2
     recorder.start("drive")
     assert len(recorder.split()) == 1
+    assert recorder._encoder.forced_keyframes == 1
     result = recorder.stop()
 
     assert state.created == state.started == state.closed == 1

@@ -118,6 +118,7 @@ class PiCameraRecorder:
             raise RuntimeError("recording is not active")
         closed = self.session_dir / f"{len(self.segments):06d}.mp4"
         next_path = self.session_dir / f"{len(self.segments) + 1:06d}.mp4"
+        self._encoder.force_key_frame()
         self._splitter.split_output(self._output_type(next_path))
         self._append_segment(closed)
         return list(self.segments)

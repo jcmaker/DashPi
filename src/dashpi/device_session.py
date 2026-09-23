@@ -16,7 +16,7 @@ from dashpi.config import Settings
 from dashpi.incidents import IncidentCoordinator, segments_for_window
 from dashpi.models import IncidentMetadata, IncidentState, Segment
 from dashpi.pipeline import IncidentPipeline
-from dashpi.storage import IncidentStore, bytes_to_free, choose_prunable_segments
+from dashpi.storage import IncidentStore, atomic_write, bytes_to_free, choose_prunable_segments
 
 
 class DeviceSession:
@@ -36,6 +36,7 @@ class DeviceSession:
         self.last_error: str | None = None
         self._last_split = 0.0
         self._pending: list[tuple[Future, set[Path]]] = []
+        self._failed_paths: set[Path] = set()
 
     def start(self, mode: str) -> None:
         self.settings.data_root.mkdir(parents=True, exist_ok=True)
@@ -105,10 +106,12 @@ class DeviceSession:
         )
         if needed <= 0:
             return True
-        protected: set[Path] = {
+        protected: set[Path] = self._failed_paths.copy()
+        protected.update(path for path in files if (path.parent / "incomplete_capture.txt").exists())
+        protected.update({
             segment.path for segment in self.recorder.segments
             if self.recorder.recording and segment.end_mono > now - self.settings.pre_seconds
-        }
+        })
         for incident in self.coordinator.active:
             protected.update(
                 segment.path for segment in segments_for_window(
@@ -136,6 +139,12 @@ class DeviceSession:
 
     def _capture_failed(self, error: Exception) -> None:
         self.last_error = str(error)
+        if self.coordinator.active:
+            self._failed_paths.update(segment.path for segment in self.recorder.segments)
+            session_dir = getattr(self.recorder, "session_dir", None)
+            if session_dir is not None:
+                with suppress(OSError):
+                    atomic_write(session_dir / "incomplete_capture.txt", str(error).encode())
         for incident in self.coordinator.active:
             incident.transition(
                 IncidentState.CLIP_FAILED,
