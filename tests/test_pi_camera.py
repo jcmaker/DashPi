@@ -1,0 +1,146 @@
+import sys
+from types import ModuleType, SimpleNamespace
+
+import pytest
+
+
+@pytest.fixture
+def fake_picamera2(monkeypatch):
+    state = SimpleNamespace(created=0, started=0, closed=0)
+
+    class Camera:
+        def __init__(self):
+            state.created += 1
+            self.configuration = None
+            self.output = None
+
+        def create_video_configuration(self, **kwargs):
+            return kwargs
+
+        def configure(self, configuration):
+            self.configuration = configuration
+
+        def start_recording(self, encoder, output):
+            state.started += 1
+            self.output = output
+            encoder.firsttimestamp = 100_000_000
+            output.start()
+
+        def stop_recording(self):
+            self.output.stop()
+
+        def close(self):
+            state.closed += 1
+
+    class Encoder:
+        def __init__(self, **kwargs):
+            self.options = kwargs
+            self.firsttimestamp = None
+
+    class Output:
+        def __init__(self, path):
+            self.path = path
+
+        def start(self):
+            self.path.write_bytes(b"mp4")
+
+        def stop(self):
+            pass
+
+    class Splitter:
+        def __init__(self, output):
+            self.output = output
+
+        def start(self):
+            self.output.start()
+
+        def split_output(self, new_output):
+            self.output.stop()
+            self.output = new_output
+            self.output.start()
+
+        def stop(self):
+            self.output.stop()
+
+    class Preview:
+        def __init__(self, camera, parent=None):
+            self.camera = camera
+
+    package = ModuleType("picamera2")
+    package.Picamera2 = Camera
+    encoders = ModuleType("picamera2.encoders")
+    encoders.LibavH264Encoder = Encoder
+    outputs = ModuleType("picamera2.outputs")
+    outputs.PyavOutput = Output
+    outputs.SplittableOutput = Splitter
+    previews = ModuleType("picamera2.previews")
+    qt = ModuleType("picamera2.previews.qt")
+    qt.QGlSide6Picamera2 = Preview
+    for name, module in (
+        ("picamera2", package),
+        ("picamera2.encoders", encoders),
+        ("picamera2.outputs", outputs),
+        ("picamera2.previews", previews),
+        ("picamera2.previews.qt", qt),
+    ):
+        monkeypatch.setitem(sys.modules, name, module)
+    return state, outputs
+
+
+def test_single_camera_previews_and_closes_timestamped_segments(fake_picamera2, monkeypatch, tmp_path):
+    from dashpi.device import VideoSettings
+    from dashpi.pi_camera import PiCameraRecorder
+
+    state, _ = fake_picamera2
+    monkeypatch.setattr("dashpi.pi_camera.probe_duration", lambda path: 2.0)
+    recorder = PiCameraRecorder(tmp_path, VideoSettings())
+    recorder.prepare()
+    preview = recorder.create_preview()
+    assert preview.camera is recorder.picam2
+    recorder.start("drive")
+    assert len(recorder.split()) == 1
+    result = recorder.stop()
+
+    assert state.created == state.started == state.closed == 1
+    assert [item.path.name for item in result] == ["000000.mp4", "000001.mp4"]
+    assert [(item.start_mono, item.end_mono) for item in result] == [(100.0, 102.0), (102.0, 104.0)]
+    assert all(item.path.is_file() for item in result)
+    assert recorder.list_recordings()[0].mode == "drive"
+
+
+def test_missing_split_api_fails_before_camera_start(fake_picamera2, tmp_path):
+    from dashpi.device import VideoSettings
+    from dashpi.pi_camera import PiCameraRecorder
+
+    state, outputs = fake_picamera2
+    del outputs.SplittableOutput
+    recorder = PiCameraRecorder(tmp_path, VideoSettings())
+
+    with pytest.raises(RuntimeError, match="Picamera2.*업데이트"):
+        recorder.prepare()
+    assert state.created == state.started == 0
+
+
+def test_start_failure_preserves_original_error_and_closes_camera(fake_picamera2, monkeypatch, tmp_path):
+    from dashpi.device import VideoSettings
+    from dashpi.pi_camera import PiCameraRecorder
+
+    state, _ = fake_picamera2
+    camera_type = sys.modules["picamera2"].Picamera2
+
+    def failed_start(self, encoder, output):
+        raise RuntimeError("encoder failed")
+
+    def failed_stop(self):
+        raise RuntimeError("not started")
+
+    monkeypatch.setattr(camera_type, "start_recording", failed_start)
+    monkeypatch.setattr(camera_type, "stop_recording", failed_stop)
+    recorder = PiCameraRecorder(tmp_path, VideoSettings())
+    recorder.prepare()
+    recorder.create_preview()
+
+    with pytest.raises(RuntimeError, match="encoder failed"):
+        recorder.start("drive")
+    assert state.closed == 1
+    assert recorder.picam2 is None
