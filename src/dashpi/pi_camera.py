@@ -57,6 +57,7 @@ class PiCameraRecorder:
                 controls={"FrameRate": self.settings.fps},
             )
             camera.configure(configuration)
+            camera.set_controls({"Brightness": self.settings.brightness})
         except BaseException:
             camera.close()
             raise

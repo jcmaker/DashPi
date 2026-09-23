@@ -20,6 +20,9 @@ def fake_picamera2(monkeypatch):
         def configure(self, configuration):
             self.configuration = configuration
 
+        def set_controls(self, controls):
+            self.controls = controls
+
         def start_recording(self, encoder, output):
             state.started += 1
             self.output = output
@@ -144,3 +147,15 @@ def test_start_failure_preserves_original_error_and_closes_camera(fake_picamera2
         recorder.start("drive")
     assert state.closed == 1
     assert recorder.picam2 is None
+
+
+def test_camera_applies_brightness_setting(fake_picamera2, tmp_path):
+    from dashpi.device import VideoSettings
+    from dashpi.pi_camera import PiCameraRecorder
+
+    recorder = PiCameraRecorder(tmp_path, VideoSettings(brightness=0.2))
+    recorder.prepare()
+    try:
+        assert recorder.picam2.controls == {"Brightness": 0.2}
+    finally:
+        recorder.picam2.close()

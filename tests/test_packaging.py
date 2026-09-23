@@ -3,6 +3,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from zipfile import ZipFile
 
 
 def test_installed_wheel_constructs_app_and_serves_local_ui(tmp_path):
@@ -39,6 +40,9 @@ def test_installed_wheel_constructs_app_and_serves_local_ui(tmp_path):
     assert build.returncode == 0, build.stdout + build.stderr
     wheels = list(distribution_directory.glob("dashpi-*.whl"))
     assert len(wheels) == 1
+    with ZipFile(wheels[0]) as wheel:
+        entry_points = next(name for name in wheel.namelist() if name.endswith("entry_points.txt"))
+        assert "dashpi-app = dashpi.desktop:main" in wheel.read(entry_points).decode()
 
     environment = os.environ.copy()
     environment.update(
