@@ -11,13 +11,13 @@
   </p>
 </div>
 
-> **현재 단계:** 데스크톱에서 전체 사고 처리·전송 흐름을 검증한 MVP 소프트웨어 프로토타입입니다. Raspberry Pi 카메라, 물리 버튼, 디스플레이 및 핫스팟 제어는 하드웨어 통합·수락 시험 단계로 구분합니다.
+> **현재 단계:** 사고 처리·광학 전송과 Pi용 PySide6 네이티브 앱의 데스크톱 자동 테스트를 통과했습니다. Pi 5 카메라·LCD 실기에서 동시 프리뷰/녹화, 성능, 전원 차단 복구는 아직 검증하지 않았습니다. 현재 장치는 카메라와 화면만 사용합니다.
 
 ## 프로젝트 소개
 
 사고 증거가 가장 필요한 순간에 인터넷 연결이나 외부 서버를 신뢰할 수 없다면 어떻게 해야 할까요?
 
-DashPi는 사고 영상을 먼저 안전하게 보존하고, Raspberry Pi에서 실행되는 vision-capable Ollama 모델로 영상을 분석합니다. 사용자는 계정이나 네이티브 앱 없이 결과를 확인하고 다음 두 경로 중 하나로 가져갈 수 있습니다.
+DashPi는 사고 영상을 먼저 안전하게 보존하고, Raspberry Pi에서 실행되는 vision-capable Ollama 모델로 영상을 분석합니다. Pi에서는 네이티브 앱으로 녹화를 제어하며, 휴대폰에는 별도 네이티브 앱 없이 수신 PWA를 사용합니다. 기존 웹 프로토타입에는 다음 전송 경로가 있습니다.
 
 - **Local Wi-Fi:** 영상처럼 큰 파일을 HTTP Range 기반으로 재생·이어받기
 - **Optical QR:** 네트워크 없이 최대 16 MiB 파일을 애니메이션 QR로 전송
@@ -52,7 +52,7 @@ DashPi는 마이크로서비스 묶음이 아니라 Raspberry Pi에서 실행되
 flowchart LR
     subgraph Device["DashPi / Raspberry Pi"]
         Source["카메라 또는 샘플 MP4"] --> Segments["2초 영상 세그먼트"]
-        Trigger["물리 버튼 또는 화면"] --> Incident["Incident Coordinator"]
+        Trigger["Pi 화면의 사고 분석 버튼"] --> Incident["Incident Coordinator"]
         Segments --> Clip["사고 구간 Clip"]
         Incident --> Clip
         Clip --> Hash["SHA-256 + Atomic Storage"]
@@ -130,12 +130,13 @@ Optical QR은 일반 카메라 앱만으로 복원할 수 없으므로, 수신 P
 
 ### Raspberry Pi 하드웨어 수락 시험 필요
 
-- Picamera2 장시간 녹화 안정성 및 timestamp 정확도
-- 물리 trigger wiring·debounce와 로컬 디스플레이 통합
-- WPA2 hotspot 시작·종료 및 captive portal 동작
+- Pi 5 Picamera2 단일 카메라로 동시 Qt 프리뷰·MP4 녹화, 장시간 안정성 및 timestamp 정확도
+- LCD 터치 제어, 15초 후 자동 종료 및 바탕화면 실행 아이콘
 - 실제 화면 밝기·QR scale·FPS·휴대폰 decode rate 보정
 - Ollama latency, 메모리, 발열 및 전력 측정
 - 갑작스러운 전원 차단 이후 저장소 복구
+
+현재 Pi 앱에는 물리 트리거와 핫스팟 제어가 없습니다. Local Wi-Fi 서버는 별도의 기존 웹 프로토타입이며 Pi 앱 실행에 필요하지 않습니다.
 
 ### MVP 범위 밖
 
@@ -146,6 +147,26 @@ Optical QR은 일반 카메라 앱만으로 복원할 수 없으므로, 수신 P
 - 사고 과실에 대한 법적 판단
 
 ## 빠른 시작
+
+### Raspberry Pi 5 네이티브 앱 (실기 수락 시험 전)
+
+Raspberry Pi OS Desktop 64-bit, Pi 카메라 모듈, LCD가 필요합니다. 마이크·GPS·배터리 센서는 사용하지 않습니다. Picamera2는 Pi OS의 libcamera와 맞는 apt 패키지로 설치합니다. 가상환경은 apt의 Picamera2/OpenCV가 보이도록 `--system-site-packages`로 만들고, pip의 OpenCV wheel이 apt NumPy를 덮어쓰지 않도록 앱 자체는 `--no-deps`로 설치합니다.
+
+```bash
+sudo apt update
+sudo apt install python3-venv python3-picamera2 python3-opencv ffmpeg
+python3 -m venv --system-site-packages .venv
+source .venv/bin/activate
+python -m pip install --no-deps -e .
+python -m pip install 'fastapi>=0.116,<1' 'uvicorn>=0.35,<1' 'PySide6>=6.7,<7' 'qrcode>=8,<9'
+python -c 'from picamera2 import Picamera2; from picamera2.encoders import LibavH264Encoder; from picamera2.outputs import PyavOutput, SplittableOutput; from picamera2.previews.qt import QGlSide6Picamera2; import cv2'
+dashpi-install-desktop
+dashpi-app
+```
+
+`dashpi-install-desktop`은 현재 사용자의 바탕화면과 앱 메뉴에 DashPi 아이콘을 설치합니다. 재부팅 후 아이콘을 누르면 브라우저 없이 앱이 열립니다. 녹화는 자동 시작되지 않습니다. 홈의 **주행시작**에서 주행/수동 주차를 고른 뒤, 녹화 화면 아래 **사고 분석** 또는 **종료**를 누릅니다. 사고 분석은 누른 시점을 기준으로 이전 30초와 이후 15초를 보존합니다. 이후 15초 중 종료를 누르면 수집 완료 후 자동 종료합니다. 완성된 사고 상세에서 **리포트 QR 전송**을 누르고 휴대폰의 사전 설치된 DashPi 수신 PWA로 애니메이션 QR을 읽습니다. 일반 QR 카메라 앱만으로는 복원할 수 없습니다.
+
+Pi 5에는 H.264 하드웨어 인코더가 없어 Picamera2의 소프트웨어 인코더를 사용합니다. 실제 장치에서 1080p30 동시 프리뷰/녹화, 사고 시점 오차, 앱 시작 시간, 버튼 반응, RAM·CPU 온도·Ollama 지연, QR 수신률을 측정해야 합니다. 무겁거나 스왑이 생기면 설정에서 720p/24 FPS로 낮춰 다시 측정하세요. 모델은 Pi RAM에 맞는 vision-capable Ollama 모델을 설치하고 설정의 모델명을 일치시켜야 합니다. 현재 이 실기 수락 시험은 수행되지 않았습니다.
 
 ### 요구사항
 

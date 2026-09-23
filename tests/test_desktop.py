@@ -9,6 +9,9 @@ from PySide6.QtWidgets import QApplication, QLabel, QToolButton
 
 from dashpi.device import VideoSettings, load_settings
 from dashpi.models import IncidentMetadata, IncidentState
+from dashpi.optical.container import unpack_container
+from dashpi.optical.fountain import FountainDecoder
+from dashpi.optical.protocol import parse_frame
 from dashpi.storage import IncidentStore, atomic_write
 
 
@@ -157,6 +160,26 @@ def test_record_detail_rejects_tampered_report(qapp, tmp_path):
         window.close()
 
 
+def test_record_detail_displays_verified_summary(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    store = IncidentStore(tmp_path)
+    item = IncidentMetadata.new("incident-2", datetime.now(UTC).isoformat(), 100.0, 15.0)
+    item.transition(IncidentState.READY, datetime.now(UTC).isoformat())
+    item.report_json = atomic_write(
+        store.directory(item.incident_id) / "report.json",
+        json.dumps({"summary": "verified summary"}).encode(),
+    )
+    store.save(item)
+    window = DashPiWindow(FakeSession(), store, tmp_path / "settings.json")
+    try:
+        window.show_records()
+        window._open_record(window.record_list.item(0))
+        assert window.report_text.text() == "verified summary"
+    finally:
+        window.close()
+
+
 def test_repeated_close_does_not_queue_duplicate_stop(qapp, tmp_path):
     session = FakeSession()
     session.recorder.recording = True
@@ -173,4 +196,51 @@ def test_repeated_close_does_not_queue_duplicate_stop(qapp, tmp_path):
     finally:
         gate.set()
         session.recorder.recording = False
+        window.close()
+
+
+def test_native_optical_screen_sends_verified_report(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    store = IncidentStore(tmp_path)
+    item = IncidentMetadata.new("incident-1", datetime.now(UTC).isoformat(), 100.0, 15.0)
+    item.transition(IncidentState.READY, datetime.now(UTC).isoformat())
+    payload = b"<html>DashPi report</html>"
+    item.report_html = atomic_write(store.directory(item.incident_id) / "report.html", payload)
+    store.save(item)
+    window = DashPiWindow(FakeSession(), store, tmp_path / "settings.json")
+    try:
+        window.start_optical(item)
+        assert window.pages.currentWidget() is window.optical_page
+        assert window.qr_label.pixmap() is not None
+        frame = parse_frame(window.optical_session.frame(0))
+        decoder = FountainDecoder(frame.block_count, frame.block_size, frame.total_length)
+        decoder.add(frame.indices, frame.symbol)
+        assert unpack_container(decoder.result()).payload == payload
+    finally:
+        window.close()
+
+
+def test_native_optical_screen_rejects_tampered_or_oversize_report(qapp, tmp_path, monkeypatch):
+    import dashpi.desktop as desktop
+
+    store = IncidentStore(tmp_path)
+    item = IncidentMetadata.new("incident-1", datetime.now(UTC).isoformat(), 100.0, 15.0)
+    item.transition(IncidentState.READY, datetime.now(UTC).isoformat())
+    path = store.directory(item.incident_id) / "report.html"
+    item.report_html = atomic_write(path, b"verified report")
+    store.save(item)
+    window = desktop.DashPiWindow(FakeSession(), store, tmp_path / "settings.json")
+    try:
+        path.write_bytes(b"forged report")
+        window.start_optical(item)
+        assert window.optical_session is None
+        assert "검증" in window.optical_status.text()
+        item.report_html = atomic_write(path, b"verified report")
+        store.save(item)
+        monkeypatch.setattr(desktop, "MAX_PAYLOAD", 5)
+        window.start_optical(item)
+        assert window.optical_session is None
+        assert "16 MiB" in window.optical_status.text()
+    finally:
         window.close()

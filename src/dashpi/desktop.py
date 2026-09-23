@@ -7,10 +7,11 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import replace
 import json
 from pathlib import Path
+import secrets
 import time
 
 from PySide6.QtCore import Qt, QTimer, QUrl, QSize
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QImage, QPixmap
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -24,6 +25,8 @@ from dashpi.config import Settings
 from dashpi.device import VideoSettings, load_settings, save_settings
 from dashpi.device_session import DeviceSession
 from dashpi.models import IncidentState
+from dashpi.optical.container import MAX_PAYLOAD
+from dashpi.optical.session import OpticalSession
 from dashpi.pi_camera import PiCameraRecorder
 from dashpi.ranges import _open_verified_file
 from dashpi.reports import OllamaClient
@@ -94,6 +97,9 @@ class DashPiWindow(QMainWindow):
         self._close_when_done = False
         self._recording_mode = "drive"
         self._preview_widget = None
+        self.optical_session: OpticalSession | None = None
+        self._optical_sequence = 0
+        self._selected_incident = None
         self.pages = QStackedWidget()
         self.setCentralWidget(self.pages)
 
@@ -103,11 +109,14 @@ class DashPiWindow(QMainWindow):
         self._build_records()
         self._build_settings()
         self._build_detail()
+        self._build_optical()
         self.show_home()
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._poll)
         self.timer.start(100)
+        self.optical_timer = QTimer(self)
+        self.optical_timer.timeout.connect(self._render_optical_frame)
 
     def _build_home(self):
         self.home, layout = page("DashPi")
@@ -217,9 +226,25 @@ class DashPiWindow(QMainWindow):
         self.report_text = QLabel("")
         self.report_text.setWordWrap(True)
         layout.addWidget(self.report_text)
+        self.optical_button = button("리포트 QR 전송", self._open_selected_optical, primary=True)
+        self.optical_button.hide()
+        layout.addWidget(self.optical_button)
         layout.addWidget(button("재생 / 일시정지", self._toggle_playback))
         layout.addWidget(button("뒤로", self.show_records))
         self.pages.addWidget(self.detail_page)
+
+    def _build_optical(self):
+        self.optical_page, layout = page("광학 리포트 전송")
+        warning = QLabel("이 QR은 호환 수신기로 누구나 촬영할 수 있습니다. 휴대폰 DashPi 수신 PWA를 여세요.")
+        warning.setWordWrap(True)
+        layout.addWidget(warning)
+        self.optical_status = QLabel("")
+        layout.addWidget(self.optical_status)
+        self.qr_label = QLabel()
+        self.qr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.qr_label, 1)
+        layout.addWidget(button("뒤로", self._leave_optical))
+        self.pages.addWidget(self.optical_page)
 
     def show_home(self):
         self.pages.setCurrentWidget(self.home)
@@ -240,6 +265,7 @@ class DashPiWindow(QMainWindow):
         self.pages.setCurrentWidget(self.recording_page)
 
     def show_records(self):
+        self.optical_timer.stop()
         self._refresh_records()
         self.pages.setCurrentWidget(self.records_page)
 
@@ -356,6 +382,11 @@ class DashPiWindow(QMainWindow):
 
     def _open_record(self, item: QListWidgetItem):
         kind, value = item.data(Qt.ItemDataRole.UserRole)
+        self._selected_incident = value if kind == "incident" else None
+        self.optical_button.setVisible(
+            kind == "incident" and value.state is IncidentState.READY
+            and value.report_html is not None
+        )
         self.segment_list.clear()
         self.report_text.setText("")
         self.detail_title.setText(item.text())
@@ -391,6 +422,7 @@ class DashPiWindow(QMainWindow):
                             value.report_json.sha256,
                         )
                         with source:
+                            source.seek(0)
                             report = json.loads(source.read())
                     if not isinstance(report, dict):
                         raise ValueError("invalid report")
@@ -399,6 +431,70 @@ class DashPiWindow(QMainWindow):
                     self.report_text.setText("리포트를 검증할 수 없습니다.")
         if self.segment_list.count():
             self._play_segment(self.segment_list.item(0))
+        self.pages.setCurrentWidget(self.detail_page)
+
+    def _open_selected_optical(self):
+        if self._selected_incident is not None:
+            self.start_optical(self._selected_incident)
+
+    def start_optical(self, incident):
+        self.optical_timer.stop()
+        self.optical_session = None
+        self.qr_label.clear()
+        self.pages.setCurrentWidget(self.optical_page)
+        try:
+            with self.store.open_incident(incident.incident_id) as (current, descriptor, directory):
+                artifact = current.report_html
+                if current.state is not IncidentState.READY or artifact is None:
+                    raise ValueError("리포트가 준비되지 않았습니다.")
+                if artifact.byte_length > MAX_PAYLOAD:
+                    self.optical_status.setText("16 MiB를 초과해 QR 전송을 사용할 수 없습니다. 로컬 리포트는 보존됩니다.")
+                    return
+                if artifact.path != directory / "report.html":
+                    raise ValueError("invalid report path")
+                source, _ = _open_verified_file(
+                    descriptor, "report.html", artifact.byte_length, artifact.sha256
+                )
+                with source:
+                    source.seek(0)
+                    payload = source.read()
+            self.optical_session = OpticalSession.from_bytes(
+                "report.html", payload, "text/html", 512, secrets.randbits(32)
+            )
+            self._optical_sequence = 0
+            self.optical_status.setText("휴대폰 수신 PWA로 QR 프레임을 계속 비추세요.")
+            self._render_optical_frame()
+            self.optical_timer.start(250)
+        except Exception:
+            self.optical_status.setText("리포트를 검증하거나 QR 전송을 시작할 수 없습니다.")
+
+    def _render_optical_frame(self):
+        if self.optical_session is None:
+            return
+        import qrcode
+
+        qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_L, border=4)
+        qr.add_data(self.optical_session.frame(self._optical_sequence))
+        qr.make(fit=True)
+        matrix = qr.get_matrix()
+        width = len(matrix)
+        image = QImage(width, width, QImage.Format.Format_RGB32)
+        image.fill(0xFFFFFFFF)
+        for y, row in enumerate(matrix):
+            for x, dark in enumerate(row):
+                if dark:
+                    image.setPixel(x, y, 0xFF000000)
+        size = max(180, min(self.qr_label.width(), self.qr_label.height(), 480))
+        self.qr_label.setPixmap(
+            QPixmap.fromImage(image).scaled(
+                size, size, Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.FastTransformation,
+            )
+        )
+        self._optical_sequence = (self._optical_sequence + 1) % (2**32)
+
+    def _leave_optical(self):
+        self.optical_timer.stop()
         self.pages.setCurrentWidget(self.detail_page)
 
     def _play_segment(self, item: QListWidgetItem):
@@ -419,6 +515,7 @@ class DashPiWindow(QMainWindow):
             event.ignore()
             return
         self.timer.stop()
+        self.optical_timer.stop()
         self.player.stop()
         self._executor.shutdown(wait=False, cancel_futures=False)
         event.accept()

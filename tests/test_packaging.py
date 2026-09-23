@@ -43,6 +43,7 @@ def test_installed_wheel_constructs_app_and_serves_local_ui(tmp_path):
     with ZipFile(wheels[0]) as wheel:
         entry_points = next(name for name in wheel.namelist() if name.endswith("entry_points.txt"))
         assert "dashpi-app = dashpi.desktop:main" in wheel.read(entry_points).decode()
+        assert "dashpi-install-desktop = dashpi.desktop_install:main" in wheel.read(entry_points).decode()
 
     environment = os.environ.copy()
     environment.update(
