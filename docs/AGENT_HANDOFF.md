@@ -76,7 +76,7 @@
 
 기존 incident·전송 파이프라인에 **Python + PySide6(Qt Widgets) 네이티브 Pi 앱**이 추가되었습니다. `src/dashpi/pi_camera.py`는 Picamera2 단일 카메라에서 Qt 프리뷰와 timestamped MP4 녹화를 함께 제공하도록 작성했고, `src/dashpi/device_session.py`는 수동 트리거·15초 지연 종료·원본 보호를 조정합니다. `src/dashpi/desktop.py`에는 홈·녹화·기록·설정·QR 화면, `src/dashpi/desktop_install.py`에는 바탕화면 아이콘 설치가 있습니다. 데스크톱 가짜 카메라/오프스크린 UI 테스트는 통과했지만 **실제 Pi 5 + LCD + 카메라 검증은 아직 하지 않았습니다**. [설계](superpowers/specs/2026-09-24-native-pi-app-design.md) · [구현 계획](superpowers/plans/2026-09-24-native-pi-app.md) · [설치 안내](../README.md#raspberry-pi-5-네이티브-앱-실기-수락-시험-전)를 우선 읽으세요.
 
-2026-09-24 코드 리뷰 후 MP4 이름 재사용 방지, 사고 후속 영상 범위 검증, 시작 실패 재시도, 시작 중 종료·중복 탭 보호, 분할 영상 연속 재생, 비동기 리포트/영상 검증, 저장 공간 표시를 보강했습니다. 자동 테스트 358개 통과는 소프트웨어 검증 결과이며, Pi 실기 검증을 대신하지 않습니다.
+2026-09-24 코드 리뷰 후 MP4 이름 재사용 방지, 사고 후속 영상 범위 검증, 시작 실패 재시도, 시작 중 종료·중복 탭·설정 오류 보호, 분할 영상 연속 재생, 비동기 리포트/영상 검증, 저장 공간 표시를 보강했습니다. 자동 테스트 359개 통과는 소프트웨어 검증 결과이며, Pi 실기 검증을 대신하지 않습니다.
 
 ### As-Built Flow (2026-09-24 기준)
 

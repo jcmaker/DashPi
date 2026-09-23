@@ -442,6 +442,22 @@ def test_double_start_tap_does_not_prepare_camera_twice(qapp, tmp_path):
         window.close()
 
 
+def test_bad_settings_do_not_trap_window_in_starting_state(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    path = tmp_path / "settings.json"
+    window = DashPiWindow(FakeSession(), IncidentStore(tmp_path), path)
+    path.write_text("not json")
+    try:
+        window._begin("drive")
+        assert not window._starting
+        assert window.stop_button.isEnabled()
+        window.close()
+        assert not window.timer.isActive()
+    finally:
+        window.close()
+
+
 def test_record_detail_rejects_tampered_report(qapp, tmp_path):
     from dashpi.desktop import DashPiWindow
 

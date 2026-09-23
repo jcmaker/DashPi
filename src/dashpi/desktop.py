@@ -305,13 +305,18 @@ class DashPiWindow(QMainWindow):
         self.analyze_button.setEnabled(False)
         self.stop_button.setEnabled(False)
         self.pages.setCurrentWidget(self.recording_page)
-        self.session.recorder.settings = load_settings(self.settings_path)
-        if hasattr(self.session, "settings"):
-            self.session.settings = replace(
-                self.session.settings, ollama_model=self.session.recorder.settings.ollama_model
-            )
-            self.session.analyze = OllamaClient(self.session.settings.ollama_model).analyze
-        self._submit(self.session.recorder.prepare, self._prepared)
+        try:
+            self.session.recorder.settings = load_settings(self.settings_path)
+            if hasattr(self.session, "settings"):
+                self.session.settings = replace(
+                    self.session.settings, ollama_model=self.session.recorder.settings.ollama_model
+                )
+                self.session.analyze = OllamaClient(self.session.settings.ollama_model).analyze
+            self._submit(self.session.recorder.prepare, self._prepared)
+        except Exception as error:
+            self._starting = False
+            self.record_status.setText(str(error))
+            self.stop_button.setEnabled(True)
 
     def _prepared(self, future: Future):
         if not self._report_error(future):
