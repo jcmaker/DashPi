@@ -25,9 +25,15 @@ class FakeRecorder:
     def __init__(self):
         self.recording = False
         self.picam2 = object()
+        self.prepared = False
 
     def prepare(self):
-        pass
+        self.prepared = True
+        self.picam2 = object()
+
+    def release(self):
+        self.prepared = False
+        self.picam2 = None
 
     def create_preview(self, parent=None):
         return QLabel("live camera", parent)
@@ -109,9 +115,11 @@ def test_stop_during_post_window_shows_pending_state(qapp, tmp_path):
 
     session = FakeSession()
     session.pending_stop = True
+    session.recorder.recording = True
     window = DashPiWindow(session, IncidentStore(tmp_path), tmp_path / "settings.json")
     try:
         window.show_recording()
+        window.stop_button.setEnabled(True)
         window.recording_controls()[1].click()
         wait_until(qapp, lambda: "15초" in window.record_status.text())
         assert session.pending_stop
@@ -124,10 +132,12 @@ def test_trigger_uses_button_press_time_even_if_camera_worker_is_busy(qapp, tmp_
     import dashpi.desktop as desktop
 
     session = FakeSession()
+    session.recorder.recording = True
     window = desktop.DashPiWindow(session, IncidentStore(tmp_path), tmp_path / "settings.json")
     gate = Event()
     try:
         window.timer.stop()
+        window.analyze_button.setEnabled(True)
         window._executor.submit(lambda: gate.wait(1))
         monkeypatch.setattr(desktop, "time", SimpleNamespace(monotonic=lambda: 100.0))
         window._trigger()
@@ -137,6 +147,77 @@ def test_trigger_uses_button_press_time_even_if_camera_worker_is_busy(qapp, tmp_
         assert session.trigger_at == 100.0
     finally:
         gate.set()
+        window.close()
+
+
+def test_capture_controls_wait_for_first_recorded_frame(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    gate = Event()
+
+    class SlowSession(FakeSession):
+        def start(self, mode):
+            gate.wait(1)
+            super().start(mode)
+
+    session = SlowSession()
+    window = DashPiWindow(session, IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        window._begin("drive")
+        wait_until(qapp, lambda: session.recorder.prepared)
+        qapp.processEvents()
+        assert not window.analyze_button.isEnabled()
+        assert not window.stop_button.isEnabled()
+        gate.set()
+        wait_until(qapp, lambda: window.record_status.text() == "녹화 중")
+        assert all(control.isEnabled() for control in window.recording_controls())
+    finally:
+        gate.set()
+        session.recorder.recording = False
+        window.close()
+
+
+def test_failed_capture_start_releases_prepared_camera(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    class FailedSession(FakeSession):
+        def start(self, mode):
+            raise RuntimeError("disk full")
+
+    session = FailedSession()
+    window = DashPiWindow(session, IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        window._begin("drive")
+        wait_until(qapp, lambda: "disk full" in window.record_status.text())
+        wait_until(qapp, lambda: not session.recorder.prepared)
+        assert session.recorder.picam2 is None
+    finally:
+        window.close()
+
+
+def test_capture_can_retry_after_failed_start(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    class FailOnceSession(FakeSession):
+        attempts = 0
+
+        def start(self, mode):
+            self.attempts += 1
+            if self.attempts == 1:
+                raise RuntimeError("disk full")
+            super().start(mode)
+
+    session = FailOnceSession()
+    window = DashPiWindow(session, IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        window._begin("drive")
+        wait_until(qapp, lambda: "disk full" in window.record_status.text())
+        wait_until(qapp, lambda: not session.recorder.prepared)
+        window._begin("drive")
+        wait_until(qapp, lambda: window.record_status.text() == "녹화 중")
+        assert session.attempts == 2
+    finally:
+        session.recorder.recording = False
         window.close()
 
 

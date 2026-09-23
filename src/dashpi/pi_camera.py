@@ -33,6 +33,8 @@ class PiCameraRecorder:
         self.start_mono = 0.0
         self.segments: list[Segment] = []
         self.recording = False
+        self.current_path: Path | None = None
+        self._next_index = 0
 
     def prepare(self) -> None:
         if self.picam2 is not None:
@@ -69,6 +71,15 @@ class PiCameraRecorder:
         self._preview = self._preview_type(self.picam2, parent=parent)
         return self._preview
 
+    def release(self) -> None:
+        if self.recording:
+            raise RuntimeError("cannot release a recording camera")
+        if self.picam2 is not None:
+            self.picam2.close()
+        self.picam2 = None
+        self._preview = None
+        self.current_path = None
+
     def start(self, mode: str) -> None:
         if mode not in {"drive", "parking"}:
             raise ValueError("invalid recording mode")
@@ -83,7 +94,9 @@ class PiCameraRecorder:
             iperiod=max(1, round(self.settings.fps * self.segment_seconds)),
             framerate=self.settings.fps,
         )
-        self._splitter = self._splitter_type(self._output_type(self.session_dir / "000000.mp4"))
+        self.current_path = self.session_dir / "000000.mp4"
+        self._next_index = 1
+        self._splitter = self._splitter_type(self._output_type(self.current_path))
         started = False
         try:
             self.picam2.start_recording(self._encoder, self._splitter)
@@ -116,10 +129,12 @@ class PiCameraRecorder:
     def split(self) -> list[Segment]:
         if not self.recording:
             raise RuntimeError("recording is not active")
-        closed = self.session_dir / f"{len(self.segments):06d}.mp4"
-        next_path = self.session_dir / f"{len(self.segments) + 1:06d}.mp4"
+        closed = self.current_path
+        next_path = self.session_dir / f"{self._next_index:06d}.mp4"
         self._encoder.force_key_frame()
         self._splitter.split_output(self._output_type(next_path))
+        self.current_path = next_path
+        self._next_index += 1
         self._append_segment(closed)
         return list(self.segments)
 
@@ -129,11 +144,12 @@ class PiCameraRecorder:
         self.recording = False
         try:
             self.picam2.stop_recording()
-            self._append_segment(self.session_dir / f"{len(self.segments):06d}.mp4")
+            self._append_segment(self.current_path)
         finally:
             self.picam2.close()
             self.picam2 = None
             self._preview = None
+            self.current_path = None
         return list(self.segments)
 
     def list_recordings(self) -> list[Recording]:

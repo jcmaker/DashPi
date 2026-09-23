@@ -279,6 +279,8 @@ class DashPiWindow(QMainWindow):
     def _begin(self, mode: str):
         self._recording_mode = mode
         self.record_status.setText("카메라 준비 중")
+        self.analyze_button.setEnabled(False)
+        self.stop_button.setEnabled(False)
         self.pages.setCurrentWidget(self.recording_page)
         self.session.recorder.settings = load_settings(self.settings_path)
         if hasattr(self.session, "settings"):
@@ -290,19 +292,39 @@ class DashPiWindow(QMainWindow):
 
     def _prepared(self, future: Future):
         if not self._report_error(future):
+            self._release_camera()
             return
         try:
             self.show_recording()
         except Exception as error:
             self.record_status.setText(str(error))
+            self._release_camera()
             return
         self._submit(lambda: self.session.start(self._recording_mode), self._started)
 
     def _started(self, future: Future):
         if self._report_error(future):
             self.record_status.setText("녹화 중")
+            self.analyze_button.setEnabled(True)
+            self.stop_button.setEnabled(True)
+        else:
+            self._release_camera()
+
+    def _release_camera(self):
+        if self._preview_widget is not None:
+            self.preview_layout.removeWidget(self._preview_widget)
+            self._preview_widget.close()
+            self._preview_widget.deleteLater()
+            self._preview_widget = None
+            self.preview = QLabel("카메라 연결 중")
+            self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.preview_layout.addWidget(self.preview)
+        self._submit(self.session.recorder.release, self._report_error)
+        self.stop_button.setEnabled(True)
 
     def _trigger(self):
+        if not self.analyze_button.isEnabled():
+            return
         pressed_at = time.monotonic()
         self.record_status.setText("사고 이후 15초 수집 중")
         self._submit(lambda: self.session.trigger(pressed_at), self._report_error)

@@ -164,3 +164,25 @@ def test_camera_applies_brightness_setting(fake_picamera2, tmp_path):
         assert recorder.picam2.controls == {"Brightness": 0.2}
     finally:
         recorder.picam2.close()
+
+
+def test_pruned_segments_never_reuse_an_mp4_name(fake_picamera2, monkeypatch, tmp_path):
+    from dashpi.device import VideoSettings
+    from dashpi.pi_camera import PiCameraRecorder
+
+    monkeypatch.setattr("dashpi.pi_camera.probe_duration", lambda path: 2.0)
+    recorder = PiCameraRecorder(tmp_path, VideoSettings())
+    recorder.prepare()
+    recorder.create_preview()
+    recorder.start("drive")
+    recorder.split()
+    recorder.split()
+    surviving = recorder.segments[1].path
+    recorder.segments.pop(0)  # Storage retention removed the oldest closed segment.
+    recorder.split()
+    recorder.stop()
+
+    assert surviving.is_file()
+    assert [segment.path.name for segment in recorder.segments] == [
+        "000001.mp4", "000002.mp4", "000003.mp4"
+    ]

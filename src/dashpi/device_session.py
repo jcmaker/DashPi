@@ -50,6 +50,8 @@ class DeviceSession:
     def trigger(self, now: float) -> IncidentMetadata:
         if not self.recorder.recording:
             raise RuntimeError("녹화 중이 아닙니다.")
+        if now < self.recorder.start_mono:
+            raise RuntimeError("녹화 시작 전 사고는 기록할 수 없습니다.")
         incident = self.coordinator.trigger(now, datetime.now(UTC).isoformat())
         self.store.save(incident)
         return incident
@@ -68,7 +70,9 @@ class DeviceSession:
         if not self.recorder.recording:
             return
         ready = self.coordinator.ready_at(now)
-        if now - self._last_split >= self.recorder.segment_seconds or ready:
+        if now - self._last_split >= self.recorder.segment_seconds or (
+            ready and self._last_split < min(item.post_deadline_mono for item in ready)
+        ):
             try:
                 self.recorder.split()
                 self._last_split = now
@@ -81,6 +85,8 @@ class DeviceSession:
                 incident.trigger_mono - self.settings.pre_seconds,
                 incident.post_deadline_mono,
             )
+            if not segments or segments[-1].end_mono < incident.post_deadline_mono:
+                continue
             pipeline = IncidentPipeline(self.settings, self.store, self.detector)
             job = self.worker.submit(
                 lambda incident=incident, segments=segments, pipeline=pipeline:
@@ -123,8 +129,8 @@ class DeviceSession:
         self._pending = [(job, paths) for job, paths in self._pending if not job.done()]
         for _job, paths in self._pending:
             protected.update(paths)
-        if self.recorder.recording and getattr(self.recorder, "session_dir", None) is not None:
-            protected.add(self.recorder.session_dir / f"{len(self.recorder.segments):06d}.mp4")
+        if self.recorder.recording and getattr(self.recorder, "current_path", None) is not None:
+            protected.add(self.recorder.current_path)
         # File mtime orders raw footage across reboots, where monotonic clocks reset.
         candidates = [Segment(path, path.stat().st_mtime, path.stat().st_mtime + 1) for path in files]
         chosen = choose_prunable_segments(candidates, protected, needed, sizes)

@@ -3,6 +3,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from concurrent.futures import Future
 
+import pytest
+
 from dashpi.config import Settings
 from dashpi.models import IncidentState, Segment
 from dashpi.storage import IncidentStore
@@ -179,3 +181,33 @@ def test_incomplete_capture_keeps_raw_across_later_pruning(tmp_path, monkeypatch
     assert (recorder.session_dir / "incomplete_capture.txt").is_file()
     assert recorder.segments[0].path.exists()
     assert not old.exists()
+
+
+def test_trigger_before_first_capture_frame_is_rejected(tmp_path, monkeypatch):
+    recorder = FakeRecorder(tmp_path)
+    session = make_session(tmp_path, recorder, monkeypatch, [])
+    session.start("drive")
+
+    with pytest.raises(RuntimeError, match="녹화 시작 전"):
+        session.trigger(recorder.start_mono - 0.1)
+    assert session.coordinator.active == []
+
+
+def test_post_window_waits_for_recorded_frame_coverage(tmp_path, monkeypatch):
+    recorder = FakeRecorder(tmp_path)
+    processed = []
+    session = make_session(tmp_path, recorder, monkeypatch, processed)
+    session.start("drive")
+    session.trigger(100.0)
+    assert session.stop(101.0) is False
+
+    recorder.now = 114.9
+    session.tick(115.1)
+    assert recorder.recording
+    assert not processed
+
+    recorder.now = 117.2
+    session.tick(117.2)
+    assert not recorder.recording
+    assert len(processed) == 1
+    assert processed[0][1][-1].end_mono >= 115.0
