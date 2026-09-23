@@ -1,11 +1,11 @@
 # Native Raspberry Pi App Design
 
 **Date:** 2026-09-24
-**Status:** Conversation-approved; written spec awaiting review
+**Status:** Approved for implementation; Pi 5 performance pending hardware verification
 
 ## User experience
 
-Raspberry Pi OS Desktop shows a DashPi launcher. Clicking it opens a standalone native Qt window, with no browser or web view on the device. The supplied 16:9 wireframe guides the dark palette, large touch targets, and navigation. Home has **녹화기록**, **주행시작**, and **설정**. A top bar shows time and a recording indicator only when recording; it does not invent a battery reading.
+Raspberry Pi 5 with 64-bit Raspberry Pi OS Desktop shows a DashPi launcher. Clicking it opens a standalone Python/PySide6 Qt Widgets window, with no browser, web view, QML, or Electron on the device. The supplied 16:9 wireframe guides the dark palette, large touch targets, and navigation. Home has **녹화기록**, **주행시작**, and **설정**. A top bar shows time and a recording indicator only when recording; it does not invent a battery reading.
 
 **주행시작** opens a confirmation screen, then starts real camera recording. The recording screen has exactly two controls below the video: **사고 분석** and **종료**. **녹화기록** filters normal, event, and manually started parking recordings, and opens native video playback. An event detail shows the existing AI report from `report.json`; analysis failure still exposes the original clip. **설정** controls supported camera resolution, frame rate, quality, local AI model, and storage usage. Changes to capture settings apply on the next recording.
 
@@ -19,12 +19,14 @@ Optical transfer uses the existing 16 MiB report limit. If the saved report exce
 
 ## Runtime
 
-The native app calls the current Python incident pipeline and storage code directly. It does not require the local FastAPI server for its own display. The existing browser UI remains available for phone transfer only. Raspberry Pi OS supplies `rpicam-vid` (or `libcamera-vid`), FFmpeg, and a camera. The camera rotates H.264 files at keyframes; once a file closes, FFmpeg remuxes it into MP4 using the configured frame rate, with no re-encoding. The monotonic recording clock starts when the first camera segment appears, not when the subprocess launches. The previous raw H.264 pipe had no presentation timestamps and compressed a 4.2-second test stream into 2.7 seconds. Synthetic segmented-camera tests now preserve approximately 4.2 seconds, but real Pi frame-rate drift and trigger alignment still require hardware acceptance. A bounded raw recording history keeps recent normal and parking footage. Event segments remain protected while the 30-second pre-trigger and 15-second post-trigger clip is built. The current pipeline then writes the evidence clip and AI report in a worker so the UI stays responsive.
+The native app calls the current Python incident pipeline and storage code directly. It does not require the local FastAPI server for its own display or a Rust frontend/process bridge. Camera polling, media conversion, and AI analysis run outside the Qt UI thread. The existing browser UI remains available for phone transfer only. Raspberry Pi OS supplies `rpicam-vid` (or `libcamera-vid`), FFmpeg, and a camera. The camera rotates H.264 files at keyframes; once a file closes, FFmpeg remuxes it into MP4 using the configured frame rate, with no re-encoding. The monotonic recording clock starts when the first camera segment appears, not when the subprocess launches. The previous raw H.264 pipe had no presentation timestamps and compressed a 4.2-second test stream into 2.7 seconds. Synthetic segmented-camera tests now preserve approximately 4.2 seconds, but real Pi frame-rate drift and trigger alignment still require hardware acceptance. A bounded raw recording history keeps recent normal and parking footage. Event segments remain protected while the 30-second pre-trigger and 15-second post-trigger clip is built. The current pipeline then writes the evidence clip and AI report in a worker so the UI stays responsive.
 
 The app runs after a desktop icon click; it does not start recording merely because the Pi boots. Startup and capture errors are shown plainly. Low storage must stop new capture without deleting saved incidents. A graceful close follows the same pending-stop rule as **종료**; forced power loss cannot guarantee a complete post-trigger window. The Ollama model may fail while capture continues; an event clip remains available as `analysis_failed`.
 
 ## Verification
 
 Desktop tests use synthetic video and a fake camera command to exercise recording, the two separate controls, delayed stopping, event timing, settings persistence, and Qt navigation. A packaged launcher smoke test checks the desktop entry. Raspberry Pi acceptance must confirm camera capture, MP4 playback, screen scaling, storage pressure, heat, power loss recovery, and local Ollama latency on the actual device.
+
+Before expanding the full UI, run a native shell on the Pi 5 and record cold launch time, idle memory, and button feedback while recording. During capture and AI work, a tap must produce visible feedback without waiting for those jobs to finish. Discover RAM on-device; if the vision model causes swapping or UI stalls, reduce its workload before replacing the Qt frontend. Qt dependency installation size is a storage cost, not proof of high idle memory. No performance claim is final until this gate is measured on the Pi.
 
 Implementation proceeds in reviewable commits: (1) connect capture, incident retention, and delayed stopping; (2) add the native Qt screens and desktop launcher; (3) show optical QR frames from the saved report and document on-device acceptance. Each stage keeps the existing synthetic-media pipeline working and receives its own tests before commit.
