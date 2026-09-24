@@ -122,6 +122,36 @@ def test_external_video_appears_in_records_and_opens_for_playback(qapp, tmp_path
         window.close()
 
 
+def test_external_video_analysis_opens_optical_report(qapp, tmp_path, monkeypatch):
+    import dashpi.desktop as desktop
+    from dashpi.analysis_worker import AnalysisWorker
+    from dashpi.config import Settings
+
+    source = tmp_path / "Videos" / "source.mp4"
+    source.parent.mkdir()
+    source.write_bytes(b"video")
+    monkeypatch.setattr(desktop.Path, "home", lambda: tmp_path)
+    store = IncidentStore(tmp_path / "data")
+    incident = IncidentMetadata.new("external-result", datetime.now(UTC).isoformat(), 0, 1)
+    incident.transition(IncidentState.READY, datetime.now(UTC).isoformat())
+    incident.report_html = atomic_write(store.directory(incident.incident_id) / "report.html", b"report")
+    store.save(incident)
+    monkeypatch.setattr(desktop, "analyze_external_video", lambda *_args: incident, raising=False)
+    session = FakeSession()
+    session.worker = AnalysisWorker()
+    session.settings = Settings(store.root, "test-model")
+    session.analyze = lambda _frames: {}
+    window = desktop.DashPiWindow(session, store, store.root / "settings.json")
+    try:
+        window.show_records()
+        window._open_record(window.record_list.item(0))
+        window.external_analyze_button.click()
+        wait_until(qapp, lambda: window.pages.currentWidget() is window.optical_page)
+    finally:
+        window.close()
+        session.worker.close()
+
+
 def test_settings_save_supported_camera_options(qapp, tmp_path):
     from dashpi.desktop import DashPiWindow
 

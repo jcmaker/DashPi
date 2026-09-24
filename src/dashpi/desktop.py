@@ -26,6 +26,7 @@ from dashpi.config import Settings
 from dashpi.device import VideoSettings, load_settings, save_settings
 from dashpi.device_session import DeviceSession
 from dashpi.models import IncidentState
+from dashpi.offline_video import analyze_external_video
 from dashpi.optical.container import MAX_PAYLOAD
 from dashpi.optical.session import OpticalSession
 from dashpi.pi_camera import PiCameraRecorder
@@ -103,6 +104,7 @@ class DashPiWindow(QMainWindow):
         self._optical_sequence = 0
         self._optical_generation = 0
         self._selected_incident = None
+        self._selected_external: Path | None = None
         self._detail_generation = 0
         self.pages = QStackedWidget()
         self.setCentralWidget(self.pages)
@@ -243,6 +245,9 @@ class DashPiWindow(QMainWindow):
         report_scroll.setMaximumHeight(160)
         report_scroll.setWidget(self.report_text)
         layout.addWidget(report_scroll)
+        self.external_analyze_button = button("사고 분석", self._analyze_external, primary=True)
+        self.external_analyze_button.hide()
+        layout.addWidget(self.external_analyze_button)
         self.optical_button = button("리포트 QR 전송", self._open_selected_optical, primary=True)
         self.optical_button.hide()
         layout.addWidget(self.optical_button)
@@ -476,6 +481,9 @@ class DashPiWindow(QMainWindow):
         self.player.setSource(QUrl())
         kind, value = item.data(Qt.ItemDataRole.UserRole)
         self._selected_incident = value if kind == "incident" else None
+        self._selected_external = value if kind == "external" else None
+        self.external_analyze_button.setVisible(kind == "external")
+        self.external_analyze_button.setEnabled(True)
         self.optical_button.setVisible(
             kind == "incident" and value.state is IncidentState.READY
             and value.report_html is not None
@@ -529,6 +537,45 @@ class DashPiWindow(QMainWindow):
         if self.segment_list.count():
             self._play_segment(self.segment_list.item(0))
         self.pages.setCurrentWidget(self.detail_page)
+
+    def _analyze_external(self):
+        source = self._selected_external
+        if source is None or not self.external_analyze_button.isEnabled():
+            return
+        position = self.player.position() / 1000.0
+        generation = self._detail_generation
+        self.external_analyze_button.setEnabled(False)
+        self.report_text.setText("사고 영상 분석 중...")
+        try:
+            model = load_settings(self.settings_path).ollama_model
+            settings = replace(self.session.settings, ollama_model=model)
+            analyze = OllamaClient(model).analyze
+            future = self.session.worker.submit(
+                lambda: analyze_external_video(source, position, settings, self.store, analyze)
+            )
+            self._jobs.append((future, lambda done: self._external_analysis_done(done, generation)))
+        except Exception as error:
+            self.external_analyze_button.setEnabled(True)
+            self.report_text.setText(f"분석을 시작할 수 없습니다: {error}")
+
+    def _external_analysis_done(self, future: Future, generation: int):
+        if generation != self._detail_generation or self.pages.currentWidget() is not self.detail_page:
+            return
+        self.external_analyze_button.setEnabled(True)
+        try:
+            incident = future.result()
+        except Exception as error:
+            self.report_text.setText(f"분석 실패: {error}. 원본 영상은 보존됩니다.")
+            return
+        if incident.state is not IncidentState.READY:
+            self.report_text.setText(
+                f"분석 실패: {incident.failure_reason or incident.state.value}. 원본 영상은 보존됩니다."
+            )
+            return
+        self._selected_incident = incident
+        self.report_text.setText("분석 완료. 광학 리포트를 표시합니다.")
+        self.optical_button.show()
+        self.start_optical(incident)
 
     def _verified_clip_path(self, incident):
         with self.store.open_incident(incident.incident_id) as (_item, descriptor, directory):
