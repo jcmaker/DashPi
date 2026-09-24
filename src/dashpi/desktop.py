@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import replace
+from datetime import datetime
 import json
 from pathlib import Path
 import secrets
@@ -17,7 +18,8 @@ from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
+    QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QScrollArea, QScroller,
+    QSizePolicy,
     QStackedWidget, QStyle, QStyleOptionToolButton, QStylePainter, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -34,6 +36,25 @@ from dashpi.ranges import _open_verified_file
 from dashpi.reports import OllamaClient
 from dashpi.storage import IncidentStore
 from dashpi import theme
+
+
+STATE_LABELS = {
+    IncidentState.COLLECTING_POST_TRIGGER: "수집 중",
+    IncidentState.CLIPPING: "영상 저장 중",
+    IncidentState.ANALYZING: "분석 중",
+    IncidentState.READY: "분석 완료",
+    IncidentState.CLIP_FAILED: "영상 저장 실패",
+    IncidentState.ANALYSIS_FAILED: "분석 실패",
+}
+
+
+def local_time(iso: str) -> str:
+    """'2026-09-24T14:13:03+00:00' -> '9월 24일 23:13' in the Pi's local time zone."""
+    try:
+        moment = datetime.fromisoformat(iso).astimezone()
+    except ValueError:
+        return iso
+    return f"{moment.month}월 {moment.day}일 {moment:%H:%M}"
 
 
 def button(text: str, callback, *, primary: bool = False) -> QPushButton:
@@ -223,14 +244,20 @@ class DashPiWindow(QMainWindow):
             label = QLabel(name)
             label.setMinimumHeight(52)
             form.addRow(label, control)
-        layout.addLayout(form)
+        self.storage_usage = QLabel("")
+        self.storage_usage.setObjectName("caption")
+        form.addRow(self.storage_usage)
+        fields = QWidget()
+        fields.setLayout(form)
+        scroll = QScrollArea()
+        scroll.setObjectName("plain")
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(fields)
+        QScroller.grabGesture(scroll.viewport(), QScroller.ScrollerGestureType.LeftMouseButtonGesture)
+        layout.addWidget(scroll, 1)
         self.settings_status = QLabel("")
         self.settings_status.setObjectName("caption")
         layout.addWidget(self.settings_status)
-        self.storage_usage = QLabel("")
-        self.storage_usage.setObjectName("caption")
-        layout.addWidget(self.storage_usage)
-        layout.addStretch()
         actions = QHBoxLayout()
         actions.addWidget(button("뒤로", self.show_home))
         self.exit_button = button("앱 종료", self._confirm_exit)
@@ -473,11 +500,17 @@ class DashPiWindow(QMainWindow):
             self.settings_status.setText(str(error))
 
     def _confirm_exit(self):
-        if QMessageBox.question(
-            self, "DashPi 종료", "앱을 종료하시겠습니까?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        ) == QMessageBox.StandardButton.Yes:
+        box = QMessageBox(
+            QMessageBox.Icon.Question, "DashPi 종료", "앱을 종료하시겠습니까?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, self,
+        )
+        confirm, cancel = box.button(QMessageBox.StandardButton.Yes), box.button(QMessageBox.StandardButton.No)
+        confirm.setText("종료")
+        confirm.setObjectName("danger")
+        cancel.setText("취소")
+        box.setDefaultButton(cancel)
+        box.exec()
+        if box.clickedButton() is confirm:
             self.close()
 
     def _refresh_records(self):
@@ -491,7 +524,9 @@ class DashPiWindow(QMainWindow):
                     self.record_list.addItem(item)
         if filter_name in {"전체", "사고"}:
             for incident in self.store.list():
-                item = QListWidgetItem(f"사고 · {incident.triggered_at} · {incident.state.value}")
+                item = QListWidgetItem(
+                    f"사고 · {local_time(incident.triggered_at)} · {STATE_LABELS[incident.state]}"
+                )
                 item.setData(Qt.ItemDataRole.UserRole, ("incident", incident))
                 self.record_list.addItem(item)
         if filter_name in {"전체", "주행", "주차"}:
@@ -501,7 +536,7 @@ class DashPiWindow(QMainWindow):
                 if filter_name == "주차" and recording.mode != "parking":
                     continue
                 label = "주행" if recording.mode == "drive" else "주차"
-                item = QListWidgetItem(f"{label} · {recording.started_at}")
+                item = QListWidgetItem(f"{label} · {local_time(recording.started_at)}")
                 item.setData(Qt.ItemDataRole.UserRole, ("recording", recording))
                 self.record_list.addItem(item)
 

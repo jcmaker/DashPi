@@ -89,6 +89,7 @@ QListWidget::item:selected {{
 
 QScrollArea {{ border: 1px solid {stroke}; border-radius: {radius_card}; background: {card}; }}
 QScrollArea > QWidget > QWidget {{ background: {card}; }}
+QScrollArea#plain, QScrollArea#plain > QWidget > QWidget {{ border: none; background: {bg}; }}
 QScrollBar:vertical {{ background: transparent; width: 10px; margin: 4px 2px; }}
 QScrollBar::handle:vertical {{ background: {stroke_top}; border-radius: 3px; min-height: 40px; }}
 QScrollBar::add-line, QScrollBar::sub-line, QScrollBar::add-page, QScrollBar::sub-page {{

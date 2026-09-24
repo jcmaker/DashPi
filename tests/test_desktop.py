@@ -742,3 +742,50 @@ def test_home_tiles_share_the_screen_at_any_lcd_size(qapp, tmp_path, size):
         assert all(tile.width() > width / 4 and tile.height() > height / 3 for tile in tiles)
     finally:
         window.close()
+
+
+@pytest.mark.parametrize("size", [(480, 320), (800, 480)])
+def test_settings_fields_keep_touch_height_and_save_stays_visible_on_small_lcd(qapp, tmp_path, size):
+    from dashpi.desktop import DashPiWindow
+
+    window = DashPiWindow(FakeSession(), IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        window.showNormal()
+        window.setFixedSize(*size)
+        window.show_settings()
+        qapp.processEvents()
+        assert all(control.height() >= 52 for control in
+                   (window.resolution, window.fps, window.quality, window.brightness, window.model))
+        save = window.save_settings_button
+        bottom_right = save.mapTo(window, save.rect().bottomRight())
+        assert save.isVisible() and bottom_right.x() < size[0] and bottom_right.y() < size[1]
+    finally:
+        window.close()
+
+
+def test_exit_confirmation_uses_korean_buttons(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    window = DashPiWindow(FakeSession(), IncidentStore(tmp_path), tmp_path / "settings.json")
+    seen = []
+    try:
+        def answer():
+            dialog = QApplication.activeModalWidget()
+            seen.extend(button.text() for button in dialog.buttons())
+            dialog.button(QMessageBox.StandardButton.No).click()
+
+        QTimer.singleShot(0, answer)
+        window.exit_button.click()
+        assert sorted(seen) == ["종료", "취소"]
+        assert window.isVisible()
+    finally:
+        window.close()
+
+
+def test_record_labels_read_as_local_date_and_korean_state():
+    import re
+    from dashpi.desktop import STATE_LABELS, local_time
+
+    assert re.fullmatch(r"9월 2[45]일 \d\d:\d\d", local_time("2026-09-24T14:13:03.930062+00:00"))
+    assert local_time("not a time") == "not a time"
+    assert set(STATE_LABELS) == set(IncidentState)
