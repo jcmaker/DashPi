@@ -17,7 +17,7 @@ from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QListWidgetItem, QMainWindow, QPushButton, QScrollArea, QSizePolicy,
+    QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
     QStackedWidget, QStyle, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -224,7 +224,12 @@ class DashPiWindow(QMainWindow):
         layout.addStretch()
         self.save_settings_button = button("저장", self._save_settings, primary=True)
         layout.addWidget(self.save_settings_button)
-        layout.addWidget(button("뒤로", self.show_home))
+        actions = QHBoxLayout()
+        actions.addWidget(button("뒤로", self.show_home))
+        self.exit_button = button("앱 종료", self._confirm_exit)
+        self.exit_button.setObjectName("danger")
+        actions.addWidget(self.exit_button)
+        layout.addLayout(actions)
         self.pages.addWidget(self.settings_page)
 
     def _build_detail(self):
@@ -449,6 +454,14 @@ class DashPiWindow(QMainWindow):
             self.settings_status.setText("저장했습니다. 다음 녹화부터 적용됩니다.")
         except Exception as error:
             self.settings_status.setText(str(error))
+
+    def _confirm_exit(self):
+        if QMessageBox.question(
+            self, "DashPi 종료", "앱을 종료하시겠습니까?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        ) == QMessageBox.StandardButton.Yes:
+            self.close()
 
     def _refresh_records(self):
         self.record_list.clear()

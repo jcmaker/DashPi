@@ -5,7 +5,8 @@ from datetime import UTC, datetime
 import json
 
 import pytest
-from PySide6.QtWidgets import QApplication, QLabel, QToolButton
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QToolButton
 from PySide6.QtMultimedia import QMediaPlayer
 
 from dashpi.device import Recording, VideoSettings, load_settings
@@ -191,6 +192,30 @@ def test_settings_show_disk_usage(qapp, tmp_path, monkeypatch):
         window.show_settings()
         assert "5.0 GiB" in window.storage_usage.text()
         assert "20.0 GiB" in window.storage_usage.text()
+    finally:
+        window.close()
+
+
+def test_settings_exit_requires_confirmation(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    window = DashPiWindow(FakeSession(), IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        window.show_settings()
+
+        def answer(choice):
+            dialog = QApplication.activeModalWidget()
+            assert isinstance(dialog, QMessageBox)
+            dialog.button(choice).click()
+
+        QTimer.singleShot(0, lambda: answer(QMessageBox.StandardButton.No))
+        window.exit_button.click()
+        assert window.isVisible()
+        assert window.pages.currentWidget() is window.settings_page
+
+        QTimer.singleShot(0, lambda: answer(QMessageBox.StandardButton.Yes))
+        window.exit_button.click()
+        assert not window.isVisible()
     finally:
         window.close()
 
