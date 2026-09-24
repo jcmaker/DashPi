@@ -123,6 +123,7 @@ class DashPiWindow(QMainWindow):
         self.timer.start(100)
         self.optical_timer = QTimer(self)
         self.optical_timer.timeout.connect(self._render_optical_frame)
+        self.showFullScreen()
 
     def _build_home(self):
         self.home, layout = page("DashPi")
@@ -743,7 +744,6 @@ def main():
     session = DeviceSession(recorder, settings, IncidentStore(root), worker,
                             OllamaClient(settings.ollama_model).analyze)
     window = DashPiWindow(session, IncidentStore(root), root / "settings.json")
-    window.show()
     try:
         app.exec()
     finally:

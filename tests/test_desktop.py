@@ -103,6 +103,18 @@ def test_home_and_recording_controls_are_native_and_exact(qapp, tmp_path):
         window.close()
 
 
+def test_native_window_opens_full_screen(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    window = DashPiWindow(FakeSession(), IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        wait_until(qapp, window.isFullScreen)
+        assert window.isVisible()
+        assert window.isFullScreen()
+    finally:
+        window.close()
+
+
 def test_external_video_appears_in_records_and_opens_for_playback(qapp, tmp_path, monkeypatch):
     import dashpi.desktop as desktop
 

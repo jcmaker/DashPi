@@ -14,7 +14,7 @@ from dashpi.storage import atomic_write
 def install_launcher(applications_dir: Path, desktop_dir: Path, executable: Path) -> Path:
     if not executable.is_absolute():
         raise ValueError("dashpi-app executable path must be absolute")
-    command = str(executable)
+    command = str(executable.parent / "python")
     if any(character in command for character in "\n\r%"):
         raise ValueError("invalid dashpi-app executable path")
     if any(character in command for character in ' \\"'):
@@ -30,7 +30,7 @@ def install_launcher(applications_dir: Path, desktop_dir: Path, executable: Path
         "Type=Application\n"
         "Name=DashPi\n"
         "Comment=Native camera and incident analysis\n"
-        f"Exec={command}\n"
+        f"Exec={command} -m dashpi.desktop\n"
         f"Icon={icon}\n"
         "Terminal=false\n"
         "Categories=AudioVideo;Video;\n"
