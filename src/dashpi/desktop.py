@@ -507,6 +507,7 @@ class DashPiWindow(QMainWindow):
         confirm, cancel = box.button(QMessageBox.StandardButton.Yes), box.button(QMessageBox.StandardButton.No)
         confirm.setText("종료")
         confirm.setObjectName("danger")
+        confirm.style().polish(confirm)  # the dialog already styled its buttons before the rename
         cancel.setText("취소")
         box.setDefaultButton(cancel)
         box.exec()
