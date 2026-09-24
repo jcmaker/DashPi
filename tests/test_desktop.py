@@ -789,3 +789,32 @@ def test_record_labels_read_as_local_date_and_korean_state():
     assert re.fullmatch(r"9월 2[45]일 \d\d:\d\d", local_time("2026-09-24T14:13:03.930062+00:00"))
     assert local_time("not a time") == "not a time"
     assert set(STATE_LABELS) == set(IncidentState)
+
+
+def test_log_file_records_screens_clicks_and_uncaught_errors(qapp, tmp_path, monkeypatch):
+    import faulthandler
+    import logging
+    import sys
+    import threading
+    from PySide6.QtCore import qInstallMessageHandler
+    from dashpi import desktop
+
+    monkeypatch.setattr(sys, "excepthook", sys.excepthook)
+    monkeypatch.setattr(threading, "excepthook", threading.excepthook)
+    directory = desktop.setup_logging(tmp_path)
+    window = desktop.DashPiWindow(FakeSession(), IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        window.show_settings()
+        window.save_settings_button.click()
+        sys.excepthook(RuntimeError, RuntimeError("boom in slot"), None)
+        text = (directory / "dashpi.log").read_text(encoding="utf-8")
+        assert "화면: 설정" in text
+        assert "버튼: 저장" in text
+        assert "처리되지 않은 오류" in text and "boom in slot" in text
+    finally:
+        window.close()
+        for handler in logging.root.handlers[:]:
+            logging.root.removeHandler(handler)
+            handler.close()
+        faulthandler.disable()
+        qInstallMessageHandler(None)

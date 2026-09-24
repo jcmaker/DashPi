@@ -6,13 +6,18 @@ import argparse
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime
+import faulthandler
 import json
+import logging
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 import secrets
 import shutil
+import sys
+import threading
 import time
 
-from PySide6.QtCore import Qt, QRect, QTimer, QUrl, QSize
+from PySide6.QtCore import Qt, QtMsgType, QRect, QTimer, QUrl, QSize, qInstallMessageHandler
 from PySide6.QtGui import QIcon, QImage, QPixmap
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -36,6 +41,35 @@ from dashpi.ranges import _open_verified_file
 from dashpi.reports import OllamaClient
 from dashpi.storage import IncidentStore
 from dashpi import theme
+
+
+log = logging.getLogger("dashpi")
+
+
+def setup_logging(root: Path) -> Path:
+    """Daily log files under <data root>/logs so a reported time can be matched to what happened."""
+    directory = root / "logs"
+    directory.mkdir(parents=True, exist_ok=True)
+    handler = TimedRotatingFileHandler(directory / "dashpi.log", when="midnight", backupCount=14,
+                                       encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(threadName)s: %(message)s"))
+    logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
+
+    def uncaught(kind, value, traceback):
+        log.critical("처리되지 않은 오류", exc_info=(kind, value, traceback))
+        sys.__excepthook__(kind, value, traceback)
+
+    sys.excepthook = uncaught
+    threading.excepthook = lambda args: log.critical(
+        "스레드 오류", exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+    faulthandler.enable(open(directory / "crash.log", "a"))  # native crashes (segfaults) in Qt/camera code
+
+    def qt_message(kind, _context, message):
+        if kind in (QtMsgType.QtWarningMsg, QtMsgType.QtCriticalMsg, QtMsgType.QtFatalMsg):
+            log.warning("Qt: %s", message)
+
+    qInstallMessageHandler(qt_message)
+    return directory
 
 
 STATE_LABELS = {
@@ -62,6 +96,7 @@ def button(text: str, callback, *, primary: bool = False) -> QPushButton:
     result.setMinimumHeight(64)
     if primary:
         result.setObjectName("primary")
+    result.clicked.connect(lambda: log.info("버튼: %s", text))
     result.clicked.connect(callback)
     return result
 
@@ -108,6 +143,7 @@ def home_tile(text: str, icon: QIcon, callback, *, primary: bool = False) -> QTo
     result.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
     if primary:
         result.setObjectName("primary")
+    result.clicked.connect(lambda: log.info("버튼: %s", text))
     result.clicked.connect(callback)
     return result
 
@@ -133,6 +169,9 @@ class DashPiWindow(QMainWindow):
         self._selected_external: Path | None = None
         self._detail_generation = 0
         self.pages = QStackedWidget()
+        self.pages.currentChanged.connect(
+            lambda index: log.info("화면: %s", self.pages.widget(index).layout().itemAt(0).widget().text())
+        )
         self.setCentralWidget(self.pages)
 
         self._build_home()
@@ -365,6 +404,7 @@ class DashPiWindow(QMainWindow):
                 self.session.analyze = OllamaClient(self.session.settings.ollama_model).analyze
             self._submit(self.session.recorder.prepare, self._prepared)
         except Exception as error:
+            log.exception("녹화 시작 실패")
             self._starting = False
             self.record_status.setText(str(error))
             self.stop_button.setEnabled(True)
@@ -377,6 +417,7 @@ class DashPiWindow(QMainWindow):
         try:
             self.show_recording()
         except Exception as error:
+            log.exception("카메라 프리뷰 표시 실패")
             self.record_status.setText(str(error))
             self._starting = False
             self._release_camera()
@@ -430,6 +471,7 @@ class DashPiWindow(QMainWindow):
             error = getattr(self.session, "last_error", None)
             if error:
                 message = f"녹화 중단: {error}. 원본 영상은 보존됩니다."
+                log.error(message)
                 self.record_status.setText(message)
                 self.home_status.setText(message)
                 if self._close_when_done:
@@ -466,6 +508,7 @@ class DashPiWindow(QMainWindow):
                 error = getattr(self.session, "last_error", None)
                 if error:
                     message = f"녹화 중단: {error}. 원본 영상은 보존됩니다."
+                    log.error(message)
                     self.record_status.setText(message)
                     self.home_status.setText(message)
                 elif not tick_ok:
@@ -483,6 +526,7 @@ class DashPiWindow(QMainWindow):
             future.result()
             return True
         except Exception as error:
+            log.error("작업 실패: %s", error, exc_info=error)
             self.record_status.setText(str(error))
             return False
 
@@ -497,6 +541,7 @@ class DashPiWindow(QMainWindow):
             save_settings(self.settings_path, settings)
             self.settings_status.setText("저장했습니다. 다음 녹화부터 적용됩니다.")
         except Exception as error:
+            log.exception("설정 저장 실패")
             self.settings_status.setText(str(error))
 
     def _confirm_exit(self):
@@ -600,6 +645,7 @@ class DashPiWindow(QMainWindow):
                         lines.append(f"주의: {warning}")
                     self.report_text.setText("\n".join(lines))
                 except Exception:
+                    log.exception("리포트 검증 실패")
                     self.report_text.setText("리포트를 검증할 수 없습니다.")
         if self.segment_list.count():
             self._play_segment(self.segment_list.item(0))
@@ -622,6 +668,7 @@ class DashPiWindow(QMainWindow):
             )
             self._jobs.append((future, lambda done: self._external_analysis_done(done, generation)))
         except Exception as error:
+            log.exception("외부 영상 분석 시작 실패")
             self.external_analyze_button.setEnabled(True)
             self.report_text.setText(f"분석을 시작할 수 없습니다: {error}")
 
@@ -632,9 +679,11 @@ class DashPiWindow(QMainWindow):
         try:
             incident = future.result()
         except Exception as error:
+            log.error("외부 영상 분석 실패", exc_info=error)
             self.report_text.setText(f"분석 실패: {error}. 원본 영상은 보존됩니다.")
             return
         if incident.state is not IncidentState.READY:
+            log.warning("외부 영상 분석 결과: %s (%s)", incident.state.value, incident.failure_reason)
             self.report_text.setText(
                 f"분석 실패: {incident.failure_reason or incident.state.value}. 원본 영상은 보존됩니다."
             )
@@ -659,7 +708,8 @@ class DashPiWindow(QMainWindow):
             return
         try:
             path = future.result()
-        except Exception:
+        except Exception as error:
+            log.error("사고 영상 검증 실패", exc_info=error)
             self.report_text.setText(
                 "\n".join(filter(None, [self.report_text.text(), "사고 영상을 검증할 수 없습니다."]))
             )
@@ -711,7 +761,8 @@ class DashPiWindow(QMainWindow):
             return
         try:
             self.optical_session = future.result()
-        except Exception:
+        except Exception as error:
+            log.error("QR 전송 준비 실패", exc_info=error)
             self.optical_status.setText("리포트를 검증하거나 QR 전송을 시작할 수 없습니다.")
             return
         if self.optical_session is None:
@@ -802,6 +853,8 @@ def main():
     parser.add_argument("--data-root", type=Path, default=Path.home() / ".local/share/dashpi")
     args = parser.parse_args()
     root = args.data_root
+    setup_logging(root)
+    log.info("DashPi 시작 (data root: %s)", root)
     current = load_settings(root / "settings.json")
     app = QApplication([])
     worker = AnalysisWorker()
@@ -813,6 +866,7 @@ def main():
     try:
         app.exec()
     finally:
+        log.info("DashPi 종료")
         worker.close()
 
 
