@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from io import StringIO
 import json
 from pathlib import Path
+import threading
 import time
 import uuid
 
@@ -20,6 +21,8 @@ from dashpi.storage import atomic_write
 class PiCameraRecorder:
     def __init__(self, root: Path, settings: VideoSettings, segment_seconds: float = 2.0):
         self.root, self.settings, self.segment_seconds = root, settings, segment_seconds
+        # A split waits for the next natural keyframe (one GOP = segment_seconds); longer means frames stopped.
+        self.split_timeout = max(5.0, segment_seconds * 3)
         self.picam2 = None
         self._preview_type = None
         self._encoder_type = None
@@ -131,12 +134,34 @@ class PiCameraRecorder:
             raise RuntimeError("recording is not active")
         closed = self.current_path
         next_path = self.session_dir / f"{self._next_index:06d}.mp4"
-        self._encoder.force_key_frame()
-        self._splitter.split_output(self._output_type(next_path))
+        # No force_key_frame(): Picamera2 0.3.36-0.3.37 sets pict_type="I", which PyAV 14 rejects, and the
+        # failed encode skips req.release(), leaking a camera buffer per split until capture stalls.
+        # iperiod already puts a keyframe at every segment boundary.
+        self._split_with_timeout(self._output_type(next_path))
         self.current_path = next_path
         self._next_index += 1
         self._append_segment(closed)
         return list(self.segments)
+
+    def _split_with_timeout(self, output) -> None:
+        """split_output() blocks until a keyframe arrives; if the camera stalls it would block forever."""
+        done, errors = threading.Event(), []
+
+        def run():
+            try:
+                self._splitter.split_output(output)
+            except BaseException as error:
+                errors.append(error)
+            finally:
+                done.set()
+
+        # ponytail: a timed-out helper thread stays parked on Picamera2's event until exit; recording is
+        # aborted by the caller, so at most one leaks per failed session.
+        threading.Thread(target=run, name="dashpi-split", daemon=True).start()
+        if not done.wait(self.split_timeout):
+            raise TimeoutError("카메라 프레임이 멈춰 영상을 나눌 수 없습니다.")
+        if errors:
+            raise errors[0]
 
     def stop(self, *, allow_empty_tail: bool = False) -> list[Segment]:
         if not self.recording:

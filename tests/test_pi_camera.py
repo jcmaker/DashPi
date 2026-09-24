@@ -106,7 +106,7 @@ def test_single_camera_previews_and_closes_timestamped_segments(fake_picamera2, 
     assert preview.camera is recorder.picam2
     recorder.start("drive")
     assert len(recorder.split()) == 1
-    assert recorder._encoder.forced_keyframes == 1
+    assert recorder._encoder.forced_keyframes == 0  # breaks on Pi's Picamera2 + PyAV 14; iperiod aligns GOPs
     result = recorder.stop()
 
     assert state.created == state.started == state.closed == 1
@@ -231,3 +231,23 @@ def test_pending_stop_does_not_hide_manifest_write_failure(fake_picamera2, monke
     monkeypatch.setattr("dashpi.pi_camera.atomic_write", fail_manifest)
     with pytest.raises(OSError, match="disk full"):
         recorder.stop(allow_empty_tail=True)
+
+
+def test_split_times_out_instead_of_hanging_when_camera_frames_stop(fake_picamera2, monkeypatch, tmp_path):
+    import threading
+    from dashpi.device import VideoSettings
+    from dashpi.pi_camera import PiCameraRecorder
+
+    _, outputs = fake_picamera2
+    never = threading.Event()
+    monkeypatch.setattr(outputs.SplittableOutput, "split_output", lambda self, new_output: never.wait())
+    recorder = PiCameraRecorder(tmp_path, VideoSettings())
+    recorder.prepare()
+    recorder.create_preview()
+    recorder.start("drive")
+    recorder.split_timeout = 0.2
+    try:
+        with pytest.raises(TimeoutError):
+            recorder.split()
+    finally:
+        never.set()
