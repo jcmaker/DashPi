@@ -89,7 +89,7 @@ class LandingPageTests(unittest.TestCase):
 
     def test_hero_art_has_a_korean_no_javascript_label(self) -> None:
         self.assertIn(
-            'role="img" aria-label="영상 녹화와 사고 시점 포착을 표현한 카메라 뷰파인더"',
+            'role="img" aria-label="녹화 중 사고 순간을 포착하고, 화면의 애니메이션 QR로 네트워크 없이 휴대폰에 검증된 리포트를 넘기는 과정"',
             self.page(),
         )
 
@@ -105,8 +105,13 @@ class LandingPageTests(unittest.TestCase):
         self.assertIn(".viewfinder", styles)
         self.assertIn(".recording-indicator", styles)
         self.assertIn(".focus-window", styles)
+        for part in ('class="handoff-qr"', 'class="timeline"', 'class="phone"', 'data-phase="record"'):
+            self.assertIn(part, page)
+        for phase in ("incident", "handoff", "verified"):
+            self.assertIn(f'.viewfinder[data-phase="{phase}"]', styles)
         self.assertIn(
-            '"hero.artLabel": "Camera viewfinder representing video recording and incident capture"',
+            '"hero.artLabel": "A recording captures the accident moment, then an animated QR on the screen '
+            'hands a verified report to a phone with no network"',
             page,
         )
 

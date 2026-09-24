@@ -166,3 +166,80 @@ if (cube) {
   cube.textContent = renderClearboxCube(0);
   if (!reducedMotion.matches) requestAnimationFrame(animateClearboxCube);
 }
+
+// Hero: record → incident → optical handoff → verified, the product's one-line story on a loop.
+const handoff = document.querySelector("[data-handoff]");
+const handoffCanvas = document.querySelector(".handoff-qr");
+const HANDOFF_PHASES = [["record", 4200], ["incident", 1800], ["handoff", 4400], ["verified", 2200]];
+const HANDOFF_CYCLE = HANDOFF_PHASES.reduce((total, [, duration]) => total + duration, 0);
+const QR_MODULES = 29;
+
+function drawQrFrame(context, seed, ink, paper) {
+  let state = (seed * 2654435761) >>> 0 || 1;
+  const random = () => {
+    state ^= state << 13; state ^= state >>> 17; state ^= state << 5;
+    return (state >>> 0) / 4294967296;
+  };
+  const finders = [[0, 0], [0, QR_MODULES - 7], [QR_MODULES - 7, 0]];
+  const inFinder = (row, column) => finders.some(([top, left]) =>
+    row >= top - 1 && row <= top + 7 && column >= left - 1 && column <= left + 7);
+  context.fillStyle = paper;
+  context.fillRect(0, 0, QR_MODULES, QR_MODULES);
+  context.fillStyle = ink;
+  for (let row = 0; row < QR_MODULES; row += 1) {
+    for (let column = 0; column < QR_MODULES; column += 1) {
+      if (inFinder(row, column)) continue;
+      const timing = (row === 6 || column === 6) && (row + column) % 2 === 0;
+      if (timing || random() < 0.5) context.fillRect(column, row, 1, 1);
+    }
+  }
+  for (const [top, left] of finders) {
+    context.fillRect(left, top, 7, 7);
+    context.fillStyle = paper;
+    context.fillRect(left + 1, top + 1, 5, 5);
+    context.fillStyle = ink;
+    context.fillRect(left + 2, top + 2, 3, 3);
+  }
+}
+
+function timecode(seconds) {
+  const whole = Math.floor(seconds);
+  return [whole / 3600, (whole % 3600) / 60, whole % 60]
+    .map((part) => String(Math.floor(part)).padStart(2, "0")).join(":");
+}
+
+function startHandoff() {
+  const context = handoffCanvas.getContext("2d");
+  const ink = getComputedStyle(handoff).color;
+  const paper = getComputedStyle(document.body).backgroundColor;
+  const recordLabel = handoff.querySelector('[data-for="record"]');
+  let frame = 0;
+  let lastFrameTime = 0;
+  drawQrFrame(context, frame, ink, paper);
+
+  if (reducedMotion.matches) {
+    handoff.dataset.phase = "verified";
+    handoff.style.setProperty("--progress", "1");
+    return;
+  }
+
+  const start = performance.now();
+  function tick(now) {
+    let local = (now - start) % HANDOFF_CYCLE;
+    let index = 0;
+    while (local >= HANDOFF_PHASES[index][1]) local -= HANDOFF_PHASES[index++][1];
+    const [phase, duration] = HANDOFF_PHASES[index];
+    if (handoff.dataset.phase !== phase) handoff.dataset.phase = phase;
+    if (phase === "record") recordLabel.textContent = `REC ${timecode(754 + (now - start) / 1000)}`;
+    const progress = phase === "handoff" ? local / duration : phase === "verified" ? 1 : 0;
+    handoff.style.setProperty("--progress", progress.toFixed(3));
+    if (phase === "handoff" && now - lastFrameTime >= 110) {
+      drawQrFrame(context, (frame += 1), ink, paper);
+      lastFrameTime = now;
+    }
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+if (handoff && handoff.dataset && handoffCanvas && handoffCanvas.getContext) startHandoff();

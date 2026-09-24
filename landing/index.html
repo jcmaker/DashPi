@@ -56,9 +56,13 @@
           <p class="label" data-i18n="hero.description">인터넷 없이 사고 영상을 보존하고, 로컬 AI로 분석하는 스마트 대시캠</p>
           <p class="label" data-ko-only>Understand and preserve an accident without depending on the cloud.</p>
         </div>
-        <div class="hero__composition viewfinder" role="img" aria-label="영상 녹화와 사고 시점 포착을 표현한 카메라 뷰파인더" data-i18n-attr="aria-label:hero.artLabel">
+        <div class="hero__composition viewfinder" data-handoff data-phase="record" role="img" aria-label="녹화 중 사고 순간을 포착하고, 화면의 애니메이션 QR로 네트워크 없이 휴대폰에 검증된 리포트를 넘기는 과정" data-i18n-attr="aria-label:hero.artLabel">
           <span class="recording-indicator" aria-hidden="true"></span>
           <span class="focus-window" aria-hidden="true"></span>
+          <canvas class="handoff-qr" width="29" height="29" aria-hidden="true"></canvas>
+          <span class="timeline" aria-hidden="true"><span class="timeline__window"></span></span>
+          <span class="phone" aria-hidden="true"><span class="phone__screen"><span class="phone__progress"></span></span></span>
+          <span class="handoff-status" aria-hidden="true"><span data-for="record">REC</span><span data-for="incident">−30s · +15s</span><span data-for="handoff">OPTICAL QR · NO NETWORK</span><span data-for="verified">SHA-256 ✓</span></span>
         </div>
       </div>
     </section>
@@ -312,7 +316,7 @@
     "nav.verification": "검증",
     "nav.github": "GitHub",
     "hero.description": "인터넷 없이 사고 영상을 보존하고, 로컬 AI로 분석하는 스마트 대시캠",
-    "hero.artLabel": "영상 녹화와 사고 시점 포착을 표현한 카메라 뷰파인더",
+    "hero.artLabel": "녹화 중 사고 순간을 포착하고, 화면의 애니메이션 QR로 네트워크 없이 휴대폰에 검증된 리포트를 넘기는 과정",
     "ticker.label": "DashPi 핵심 원칙과 기술",
     "flow.eyebrow": "01 — 작동 방식",
     "flow.title": "사고 순간부터, 검증 가능한 전달까지.",
@@ -411,7 +415,7 @@
     "nav.verification": "Verification",
     "nav.github": "GitHub",
     "hero.description": "A smart dashcam that preserves accident footage and analyses it with local AI—without the internet",
-    "hero.artLabel": "Camera viewfinder representing video recording and incident capture",
+    "hero.artLabel": "A recording captures the accident moment, then an animated QR on the screen hands a verified report to a phone with no network",
     "ticker.label": "DashPi principles and technologies",
     "flow.eyebrow": "01 — How it works",
     "flow.title": "From the moment of impact to verifiable delivery.",
