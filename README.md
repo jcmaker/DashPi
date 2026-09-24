@@ -38,11 +38,25 @@ DashPi는 사고 영상을 먼저 안전하게 보존하고, Raspberry Pi에서 
 
 ## 동작 화면
 
-아래 이미지는 목업이 아니라 현재 FastAPI 애플리케이션과 임시 incident 데이터로 직접 캡처한 화면입니다.
+목업이 아니라 Raspberry Pi 5에서 실행한 네이티브 앱을 800×480으로 캡처한 화면입니다. 녹화기록은 기기에 있던 실제 기록이며, QR 송신 화면만 데모 리포트로 캡처했습니다.
 
-| 사고 영상·리포트 조회 | Animated QR 송신 | Offline PWA 수신 |
+### Raspberry Pi 앱
+
+| 홈 | 녹화 시작 | 녹화기록 |
 | --- | --- | --- |
-| ![사고 영상과 로컬 AI 리포트를 함께 보여주는 DashPi 인시던트 화면](docs/assets/dashpi-incidents.jpg) | ![보안 경고와 보정 옵션 및 실제 QR 프레임을 표시하는 DashPi 광학 송신 화면](docs/assets/dashpi-optical-sender.jpg) | ![카메라 프레임과 명시적 저장 동작을 제공하는 DashPi 광학 수신 화면](docs/assets/dashpi-optical-receiver.jpg) |
+| ![녹화기록, 주행시작, 설정 세 개의 큰 터치 타일이 있는 DashPi 홈 화면](docs/assets/pi-home.png) | ![주행 녹화와 주차 녹화 중 하나를 고르는 녹화 시작 화면](docs/assets/pi-start.png) | ![외부 영상과 날짜별 사고 기록을 보여주는 녹화기록 화면](docs/assets/pi-records.png) |
+
+| 광학 QR 송신 | 설정 |
+| --- | --- |
+| ![보안 안내와 계속 바뀌는 QR 프레임을 표시하는 광학 리포트 전송 화면](docs/assets/pi-optical-qr.png) | ![녹화 화질, 프레임, 비트레이트, 화면 밝기, 분석 모델과 저장 공간을 보여주는 설정 화면](docs/assets/pi-settings.png) |
+
+### 휴대폰과 Local Wi-Fi 웹 UI
+
+| Offline Receiver PWA | 사고 영상·리포트 조회 (웹) | Animated QR 송신 (웹) |
+| --- | --- | --- |
+| ![카메라 프레임과 명시적 저장 동작을 제공하는 DashPi 광학 수신 화면](docs/assets/dashpi-optical-receiver.jpg) | ![사고 영상과 리포트를 함께 보여주는 DashPi 인시던트 웹 화면](docs/assets/dashpi-incidents.jpg) | ![보안 경고와 보정 옵션 및 실제 QR 프레임을 표시하는 DashPi 광학 송신 웹 화면](docs/assets/dashpi-optical-sender.jpg) |
+
+휴대폰에는 네이티브 앱 없이 사전 설치한 수신 PWA만 사용합니다. 웹 화면은 Local Wi-Fi 전송용 FastAPI 프로토타입이며 Pi 앱 실행에는 필요하지 않습니다.
 
 ## 시스템 아키텍처
 
