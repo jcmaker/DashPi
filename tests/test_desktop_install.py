@@ -10,11 +10,13 @@ def test_installer_creates_clickable_native_desktop_entry(tmp_path):
 
     assert installed == desktop / "DashPi.desktop"
     content = installed.read_text()
-    assert (applications / "DashPi.desktop").read_text() == content
-    assert "Type=Application" in content
-    assert f"Exec={tmp_path / 'bin' / 'python'} -m dashpi.desktop" in content
-    assert "Terminal=false" in content
-    assert "Chromium" not in content
+    application = (applications / "DashPi.desktop").read_text()
+    assert "Type=Application" in application
+    assert f"Exec={tmp_path / 'bin' / 'python'} -m dashpi.desktop" in application
+    assert "Terminal=false" in application
+    assert "Type=Link" in content
+    assert "URL=/usr/local/share/applications/DashPi.desktop" in content
+    assert "Chromium" not in content + application
     icon = tmp_path / "data" / "icons" / "hicolor" / "scalable" / "apps" / "dashpi.svg"
     assert icon.is_file() and icon.stat().st_size > 100
     assert f"Icon={icon}" in content

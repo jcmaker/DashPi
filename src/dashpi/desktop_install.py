@@ -7,8 +7,12 @@ from importlib.resources import files
 import os
 from pathlib import Path
 import shutil
+import subprocess
 
 from dashpi.storage import atomic_write
+
+
+SYSTEM_APPLICATION = Path("/usr/local/share/applications/DashPi.desktop")
 
 
 def install_launcher(applications_dir: Path, desktop_dir: Path, executable: Path) -> Path:
@@ -36,10 +40,18 @@ def install_launcher(applications_dir: Path, desktop_dir: Path, executable: Path
         "Categories=AudioVideo;Video;\n"
         "X-DashPi-Managed=true\n"
     ).encode()
+    shortcut = (
+        "[Desktop Entry]\n"
+        "Type=Link\n"
+        "Name=DashPi\n"
+        f"URL={SYSTEM_APPLICATION}\n"
+        f"Icon={icon}\n"
+        "X-DashPi-Managed=true\n"
+    ).encode()
     atomic_write(icon, files("dashpi").joinpath("web", "icon.svg").read_bytes())
-    for target in (application, desktop):
-        atomic_write(target, entry)
-        target.chmod(0o755)
+    atomic_write(application, entry)
+    atomic_write(desktop, shortcut)
+    desktop.chmod(0o755)
     return desktop
 
 
@@ -52,7 +64,14 @@ def main() -> None:
     command = shutil.which("dashpi-app")
     if command is None:
         parser.error("dashpi-app 실행 파일을 찾을 수 없습니다. 먼저 앱을 설치하세요.")
+    if SYSTEM_APPLICATION.exists() and "X-DashPi-Managed=true" not in SYSTEM_APPLICATION.read_text():
+        parser.error(f"시스템 앱 항목을 덮어쓰지 않습니다: {SYSTEM_APPLICATION}")
     print(install_launcher(args.applications_dir, args.desktop_dir, Path(command).resolve()))
+    subprocess.run(
+        ["sudo", "install", "-D", "-m", "644",
+         str(args.applications_dir / "DashPi.desktop"), str(SYSTEM_APPLICATION)],
+        check=True,
+    )
 
 
 if __name__ == "__main__":
