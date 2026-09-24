@@ -5,7 +5,7 @@ const dictionaryNode = document.querySelector("#translations");
 const CUBE_COLUMNS = 40;
 const CUBE_ROWS = 20;
 const CUBE_SHADES = " .,:;irsXA253hMHGS#9B&@";
-const CUBE_ROTATION_PERIOD = 30000;
+const CUBE_ROTATION_PERIOD = 12000;
 const cube = document.querySelector("[data-clearbox-cube]");
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 let previousFrameTime = 0;
@@ -145,7 +145,7 @@ function applyLanguage(language) {
 }
 
 function animateClearboxCube(time) {
-  if (time - previousFrameTime >= 120) {
+  if (time - previousFrameTime >= 60) {  // ~16 fps keeps the faster spin smooth
     cube.textContent = renderClearboxCube(time * Math.PI * 2 / CUBE_ROTATION_PERIOD);
     previousFrameTime = time;
   }

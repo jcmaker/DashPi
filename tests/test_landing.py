@@ -222,7 +222,7 @@ vm.runInNewContext(source + `
     return render(angle);
   };
   const scheduledBeforeManualAnimation = [...scheduled];
-  animateClearboxCube(15000);
+  animateClearboxCube(CUBE_ROTATION_PERIOD / 2);
   globalThis.result = {
     first: render(0),
     rotated: render(0.7),
