@@ -56,9 +56,13 @@
           <p class="label" data-i18n="hero.description">인터넷 없이 사고 영상을 보존하고, 로컬 AI로 분석하는 스마트 대시캠</p>
           <p class="label" data-ko-only>Understand and preserve an accident without depending on the cloud.</p>
         </div>
-        <div class="hero__composition viewfinder" role="img" aria-label="영상 녹화와 사고 시점 포착을 표현한 카메라 뷰파인더" data-i18n-attr="aria-label:hero.artLabel">
+        <div class="hero__composition viewfinder" data-handoff data-phase="record" role="img" aria-label="녹화 중 사고 순간을 포착하고, 화면의 애니메이션 QR로 네트워크 없이 휴대폰에 검증된 리포트를 넘기는 과정" data-i18n-attr="aria-label:hero.artLabel">
           <span class="recording-indicator" aria-hidden="true"></span>
           <span class="focus-window" aria-hidden="true"></span>
+          <canvas class="handoff-qr" width="29" height="29" aria-hidden="true"></canvas>
+          <span class="timeline" aria-hidden="true"><span class="timeline__window"></span></span>
+          <span class="phone" aria-hidden="true"><span class="phone__screen"><span class="phone__progress"></span></span></span>
+          <span class="handoff-status" aria-hidden="true"><span data-for="record">REC</span><span data-for="incident">−30s · +15s</span><span data-for="handoff">OPTICAL QR · NO NETWORK</span><span data-for="verified">SHA-256 ✓</span></span>
         </div>
       </div>
     </section>
@@ -124,23 +128,23 @@
         </div>
         <div class="evidence__grid evidence__figures">
           <figure class="evidence__figure">
-            <img src="assets/dashpi-incidents.jpg" width="600" height="410" loading="lazy" alt="사고 영상과 로컬 AI 리포트를 함께 보여주는 DashPi 인시던트 화면" data-i18n-attr="alt:evidence.incidents.alt">
+            <img src="assets/dashpi-device-home.png" width="800" height="480" loading="lazy" alt="녹화기록, 주행시작, 설정 세 개의 큰 터치 타일이 있는 DashPi 라즈베리파이 앱 홈 화면" data-i18n-attr="alt:evidence.home.alt">
             <figcaption>
-              <span data-i18n="evidence.incidents.title">사고 영상과 로컬 AI 리포트</span>
-              <small data-i18n="evidence.caption">실제 애플리케이션 캡처</small>
+              <span data-i18n="evidence.home.title">Raspberry Pi 앱 홈</span>
+              <small data-i18n="evidence.deviceCaption">Raspberry Pi 5 앱 캡처 · 800×480</small>
             </figcaption>
           </figure>
           <figure class="evidence__figure">
-            <img src="assets/dashpi-optical-sender.jpg" width="650" height="520" loading="lazy" alt="보안 경고와 보정 옵션 및 실제 QR 프레임을 표시하는 DashPi 광학 송신 화면" data-i18n-attr="alt:evidence.sender.alt">
+            <img src="assets/dashpi-device-optical.png" width="800" height="480" loading="lazy" alt="보안 안내 문구와 계속 바뀌는 QR 프레임을 표시하는 DashPi 라즈베리파이 앱의 광학 리포트 전송 화면" data-i18n-attr="alt:evidence.sender.alt">
             <figcaption>
-              <span data-i18n="evidence.sender.title">Animated QR 송신</span>
-              <small data-i18n="evidence.caption">실제 애플리케이션 캡처</small>
+              <span data-i18n="evidence.sender.title">기기 화면에서 Animated QR 송신</span>
+              <small data-i18n="evidence.demoCaption">Raspberry Pi 5 앱 캡처 · 데모 리포트</small>
             </figcaption>
           </figure>
           <figure class="evidence__figure">
             <img src="assets/dashpi-optical-receiver.jpg" width="650" height="460" loading="lazy" alt="카메라 프레임과 명시적 저장 동작을 제공하는 DashPi 광학 수신 화면" data-i18n-attr="alt:evidence.receiver.alt">
             <figcaption>
-              <span data-i18n="evidence.receiver.title">Offline Receiver PWA</span>
+              <span data-i18n="evidence.receiver.title">휴대폰 Offline Receiver PWA</span>
               <small data-i18n="evidence.caption">실제 애플리케이션 캡처</small>
             </figcaption>
           </figure>
@@ -312,7 +316,7 @@
     "nav.verification": "검증",
     "nav.github": "GitHub",
     "hero.description": "인터넷 없이 사고 영상을 보존하고, 로컬 AI로 분석하는 스마트 대시캠",
-    "hero.artLabel": "영상 녹화와 사고 시점 포착을 표현한 카메라 뷰파인더",
+    "hero.artLabel": "녹화 중 사고 순간을 포착하고, 화면의 애니메이션 QR로 네트워크 없이 휴대폰에 검증된 리포트를 넘기는 과정",
     "ticker.label": "DashPi 핵심 원칙과 기술",
     "flow.eyebrow": "01 — 작동 방식",
     "flow.title": "사고 순간부터, 검증 가능한 전달까지.",
@@ -328,13 +332,15 @@
     "plate.description": "DashPi는 사고 전후 기록을 바탕으로 상황과 필요한 조치를 정리합니다. 운전자는 해야 할 일을 확인하고, 경찰·보험사 등 제3자에게 빠뜨리지 않고 상황을 전달할 수 있습니다.",
     "evidence.eyebrow": "02 — 실제 화면",
     "evidence.title": "목업이 아닌, 현재 애플리케이션 캡처.",
-    "evidence.incidents.alt": "사고 영상과 로컬 AI 리포트를 함께 보여주는 DashPi 인시던트 화면",
-    "evidence.incidents.title": "사고 영상과 로컬 AI 리포트",
+    "evidence.home.alt": "녹화기록, 주행시작, 설정 세 개의 큰 터치 타일이 있는 DashPi 라즈베리파이 앱 홈 화면",
+    "evidence.home.title": "Raspberry Pi 앱 홈",
+    "evidence.deviceCaption": "Raspberry Pi 5 앱 캡처 · 800×480",
+    "evidence.demoCaption": "Raspberry Pi 5 앱 캡처 · 데모 리포트",
     "evidence.caption": "실제 애플리케이션 캡처",
-    "evidence.sender.alt": "보안 경고와 보정 옵션 및 실제 QR 프레임을 표시하는 DashPi 광학 송신 화면",
-    "evidence.sender.title": "Animated QR 송신",
+    "evidence.sender.alt": "보안 안내 문구와 계속 바뀌는 QR 프레임을 표시하는 DashPi 라즈베리파이 앱의 광학 리포트 전송 화면",
+    "evidence.sender.title": "기기 화면에서 Animated QR 송신",
     "evidence.receiver.alt": "카메라 프레임과 명시적 저장 동작을 제공하는 DashPi 광학 수신 화면",
-    "evidence.receiver.title": "Offline Receiver PWA",
+    "evidence.receiver.title": "휴대폰 Offline Receiver PWA",
     "transfer.eyebrow": "03 — 전송",
     "transfer.title": "파일 크기와 상황에 맞는 두 경로.",
     "transfer.table.aspect": "구분",
@@ -411,7 +417,7 @@
     "nav.verification": "Verification",
     "nav.github": "GitHub",
     "hero.description": "A smart dashcam that preserves accident footage and analyses it with local AI—without the internet",
-    "hero.artLabel": "Camera viewfinder representing video recording and incident capture",
+    "hero.artLabel": "A recording captures the accident moment, then an animated QR on the screen hands a verified report to a phone with no network",
     "ticker.label": "DashPi principles and technologies",
     "flow.eyebrow": "01 — How it works",
     "flow.title": "From the moment of impact to verifiable delivery.",
@@ -427,13 +433,15 @@
     "plate.description": "DashPi organizes the recorded situation and next steps. Drivers can see what to do next and give police, insurers, and other responders a clear account without leaving out key details.",
     "evidence.eyebrow": "02 — Product views",
     "evidence.title": "Current application captures, not mockups.",
-    "evidence.incidents.alt": "DashPi incident screen showing accident footage alongside a local AI report",
-    "evidence.incidents.title": "Accident footage and local AI report",
+    "evidence.home.alt": "DashPi Raspberry Pi app home screen with three large touch tiles: records, start driving, and settings",
+    "evidence.home.title": "Raspberry Pi app home",
+    "evidence.deviceCaption": "Raspberry Pi 5 app capture · 800×480",
+    "evidence.demoCaption": "Raspberry Pi 5 app capture · demo report",
     "evidence.caption": "Actual application capture",
-    "evidence.sender.alt": "DashPi optical sender screen showing a security warning, calibration options, and a real QR frame",
-    "evidence.sender.title": "Animated QR sender",
+    "evidence.sender.alt": "DashPi Raspberry Pi app optical report screen showing a security notice and a changing QR frame",
+    "evidence.sender.title": "Animated QR from the device screen",
     "evidence.receiver.alt": "DashPi optical receiver screen with camera frames and an explicit save action",
-    "evidence.receiver.title": "Offline Receiver PWA",
+    "evidence.receiver.title": "Offline Receiver PWA on the phone",
     "transfer.eyebrow": "03 — Transfer",
     "transfer.title": "Two paths for different file sizes and situations.",
     "transfer.table.aspect": "Aspect",

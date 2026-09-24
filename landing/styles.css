@@ -103,6 +103,33 @@ button:focus-visible,
 .recording-indicator { position: absolute; inset-block-start: 12%; inset-inline-start: 10%; width: 7%; aspect-ratio: 1; border-radius: 50%; background: var(--color-accent); }
 .focus-window { position: absolute; inset-block-start: 32.5%; inset-inline-start: 36%; width: 28%; aspect-ratio: 4 / 3; border: var(--rule-hairline) solid var(--color-ink); }
 .focus-window::after { content: ""; position: absolute; inset-block-start: 39%; inset-inline-start: 39%; width: 22%; aspect-ratio: 1; background: var(--color-accent); }
+/* Hero loop (driven by data-phase from script.js): record → incident → handoff → verified. */
+.recording-indicator { animation: rec-blink 1.2s steps(2, jump-none) infinite; }
+.focus-window { transition: transform 0.35s var(--ease-out), opacity 0.35s var(--ease-out), border-color 0.2s; }
+.handoff-qr, .phone, .timeline__window { opacity: 0; transition: opacity 0.4s var(--ease-out), transform 0.4s var(--ease-out); }
+.handoff-qr { position: absolute; inset-block-start: 19%; inset-inline-start: 50%; height: 56%; aspect-ratio: 1; transform: translateX(-50%) scale(0.94); image-rendering: pixelated; background: var(--color-paper); }
+.timeline { position: absolute; inset-block-end: 9%; inset-inline: 10%; height: 10px; border-block: var(--rule-hairline) solid var(--color-ink); background: repeating-linear-gradient(to right, var(--color-ink) 0 var(--rule-hairline), transparent var(--rule-hairline) 24px); animation: timeline-run 2s linear infinite; }
+.timeline__window { position: absolute; inset-block: -5px; inset-inline-start: 30%; width: 30%; border-inline: var(--rule-section) solid var(--color-accent); background: color-mix(in oklch, var(--color-accent) 18%, transparent); }
+.timeline__window::after { content: ""; position: absolute; inset-block: 0; inset-inline-start: 66.6%; border-inline-start: var(--rule-hairline) solid var(--color-accent); }
+.phone { position: absolute; inset-inline-end: -5%; inset-block-end: -12%; width: 16%; aspect-ratio: 9 / 18; border: var(--rule-section) solid var(--color-ink); background: var(--color-paper); transform: translateY(10%); }
+.phone__screen { position: absolute; inset: 10% 9%; border: var(--rule-hairline) solid var(--color-rule); overflow: hidden; }
+.phone__progress { position: absolute; inset-inline: 0; inset-block-end: 0; height: calc(var(--progress, 0) * 100%); background: var(--color-accent); }
+.phone__screen::after { content: "✓"; position: absolute; inset: 0; display: grid; place-items: center; color: var(--color-paper); font-weight: 800; font-size: clamp(14px, 2vw, 24px); opacity: 0; }
+.handoff-status { position: absolute; inset-block-start: 11.5%; inset-inline-start: 20%; font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: var(--tracking-label); font-variant-numeric: tabular-nums; }
+.handoff-status > span { display: none; }
+.viewfinder[data-phase="record"] [data-for="record"], .viewfinder[data-phase="incident"] [data-for="incident"],
+.viewfinder[data-phase="handoff"] [data-for="handoff"], .viewfinder[data-phase="verified"] [data-for="verified"] { display: inline; }
+.viewfinder:not([data-phase="record"]) .timeline { animation-play-state: paused; }
+.viewfinder:not([data-phase="record"]) .timeline__window { opacity: 1; }
+.viewfinder[data-phase="incident"] .focus-window { transform: scale(0.82); border-color: var(--color-accent); border-width: var(--rule-section); }
+.viewfinder[data-phase="handoff"] .focus-window, .viewfinder[data-phase="verified"] .focus-window { opacity: 0; transform: scale(1.3); }
+.viewfinder[data-phase="handoff"] .handoff-qr, .viewfinder[data-phase="verified"] .handoff-qr { opacity: 1; transform: translateX(-50%) scale(1); }
+.viewfinder[data-phase="handoff"] .phone, .viewfinder[data-phase="verified"] .phone { opacity: 1; transform: none; }
+.viewfinder[data-phase="verified"] .phone__progress { background: var(--color-ink); }
+.viewfinder[data-phase="verified"] .phone__screen::after { opacity: 1; }
+.viewfinder:not([data-phase="record"]) .recording-indicator { animation: none; }
+@keyframes rec-blink { 50% { opacity: 0.15; } }
+@keyframes timeline-run { to { background-position: -24px 0; } }  /* one tick = one 2 s segment */
 .ticker { position: relative; z-index: 1; display: flex; overflow: clip; border-block: var(--rule-hairline) solid var(--color-ink); padding-block: var(--space-3); }
 .ticker__run { flex: none; white-space: nowrap; font-size: 12px; font-weight: 600; letter-spacing: var(--tracking-label); padding-inline-end: var(--space-3); animation: ticker 46s linear infinite; }
 .ticker:hover .ticker__run, .ticker:focus .ticker__run, .ticker:focus-within .ticker__run { animation-play-state: paused; }
@@ -142,7 +169,7 @@ button:focus-visible,
 .evidence__figures { grid-column: 1 / 13; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-block: var(--rule-hairline) solid var(--color-ink); }
 .evidence__figure { min-width: 0; padding: var(--space-3); border-inline-start: var(--rule-hairline) solid var(--color-rule); }
 .evidence__figure:last-child { border-inline-end: var(--rule-hairline) solid var(--color-rule); }
-.evidence__figure img { display: block; width: 100%; height: auto; aspect-ratio: 4 / 3; object-fit: cover; object-position: top; border: var(--rule-hairline) solid var(--color-rule); }
+.evidence__figure img { display: block; width: 100%; height: auto; aspect-ratio: 5 / 3; object-fit: cover; object-position: top;  /* Pi LCD captures are 800×480 */ border: var(--rule-hairline) solid var(--color-rule); }
 figcaption { display: grid; gap: var(--space-2); padding-block: var(--space-4) var(--space-2); font-weight: 600; }
 figcaption small { color: var(--color-muted); font-size: 12px; font-weight: 400; }
 .transfer { padding-block: var(--space-8); border-top: var(--rule-section) solid var(--color-ink); }
@@ -203,6 +230,7 @@ tbody th { color: var(--color-muted); font-size: 12px; font-weight: 600; }
   .topbar__controls { grid-column: 6 / 13; grid-row: 1; }
   .topbar__nav, .topbar__controls { gap: var(--space-3); }
   .hero__composition { grid-row: 2; width: min(100%, 480px); justify-self: end; }
+  .phone { inset-inline-end: 0; }  /* no room to overhang the frame on narrow screens */
   .section-heading { grid-column: 1 / 13; }
   .transfer__text { padding-inline-end: 0; }
   .transfer__note { grid-column: 1 / 13; }
