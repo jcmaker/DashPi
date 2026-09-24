@@ -447,6 +447,12 @@ class DashPiWindow(QMainWindow):
     def _refresh_records(self):
         self.record_list.clear()
         filter_name = self.record_filter.currentText()
+        if filter_name == "전체":
+            for source in sorted((Path.home() / "Videos").glob("*.mp4")):
+                if source.is_file():
+                    item = QListWidgetItem(f"외부 영상 · {source.name}")
+                    item.setData(Qt.ItemDataRole.UserRole, ("external", source))
+                    self.record_list.addItem(item)
         if filter_name in {"전체", "사고"}:
             for incident in self.store.list():
                 item = QListWidgetItem(f"사고 · {incident.triggered_at} · {incident.state.value}")
@@ -477,7 +483,11 @@ class DashPiWindow(QMainWindow):
         self.segment_list.clear()
         self.report_text.setText("")
         self.detail_title.setText(item.text())
-        if kind == "recording":
+        if kind == "external":
+            part = QListWidgetItem(value.name)
+            part.setData(Qt.ItemDataRole.UserRole, value)
+            self.segment_list.addItem(part)
+        elif kind == "recording":
             for segment in value.segments:
                 part = QListWidgetItem(segment.path.name)
                 part.setData(Qt.ItemDataRole.UserRole, segment.path)

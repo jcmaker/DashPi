@@ -103,6 +103,25 @@ def test_home_and_recording_controls_are_native_and_exact(qapp, tmp_path):
         window.close()
 
 
+def test_external_video_appears_in_records_and_opens_for_playback(qapp, tmp_path, monkeypatch):
+    import dashpi.desktop as desktop
+
+    videos = tmp_path / "Videos"
+    videos.mkdir()
+    source = videos / "CQkN1776752331_423_com.mp4"
+    source.write_bytes(b"test video")
+    monkeypatch.setattr(desktop.Path, "home", lambda: tmp_path)
+    window = desktop.DashPiWindow(FakeSession(), IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        window.show_records()
+        items = [window.record_list.item(index) for index in range(window.record_list.count())]
+        video_item = next(item for item in items if source.name in item.text())
+        window._open_record(video_item)
+        assert window.player.source().toLocalFile() == str(source)
+    finally:
+        window.close()
+
+
 def test_settings_save_supported_camera_options(qapp, tmp_path):
     from dashpi.desktop import DashPiWindow
 
