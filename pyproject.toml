@@ -19,7 +19,7 @@ dashpi-app = "dashpi.desktop:main"
 dashpi-install-desktop = "dashpi.desktop_install:main"
 
 [tool.setuptools.package-data]
-dashpi = ["web/*.html", "web/*.css", "web/*.js", "web/*.svg", "web/*.webmanifest", "web/assets/*.js"]
+dashpi = ["assets/*", "web/*.html", "web/*.css", "web/*.js", "web/*.svg", "web/*.webmanifest", "web/assets/*.js"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

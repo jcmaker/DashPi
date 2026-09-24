@@ -16,9 +16,9 @@ from PySide6.QtGui import QIcon, QImage, QPixmap
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QLineEdit,
+    QApplication, QComboBox, QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
-    QStackedWidget, QStyle, QToolButton, QVBoxLayout, QWidget,
+    QStackedWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
 from dashpi.analysis_worker import AnalysisWorker
@@ -33,22 +33,7 @@ from dashpi.pi_camera import PiCameraRecorder
 from dashpi.ranges import _open_verified_file
 from dashpi.reports import OllamaClient
 from dashpi.storage import IncidentStore
-
-
-STYLE = """
-QWidget { background: #101820; color: #edf3f8; font-size: 18px; }
-QPushButton, QToolButton, QComboBox, QLineEdit, QDoubleSpinBox {
-  background: #233342; border: 1px solid #385068; border-radius: 12px;
-  min-height: 48px; padding: 8px 16px;
-}
-QPushButton:hover { background: #31516d; }
-QToolButton:hover { background: #31516d; }
-QToolButton { min-height: 180px; }
-QPushButton#primary, QToolButton#primary { background: #1665df; border-color: #3182ff; }
-QPushButton#danger { background: #9a2738; border-color: #dd4156; }
-QListWidget { background: #192734; border: 1px solid #385068; border-radius: 12px; }
-QLabel#status { color: #a9c3d9; }
-"""
+from dashpi import theme
 
 
 def button(text: str, callback, *, primary: bool = False) -> QPushButton:
@@ -66,7 +51,7 @@ def page(title: str) -> tuple[QWidget, QVBoxLayout]:
     layout.setContentsMargins(24, 20, 24, 20)
     layout.setSpacing(14)
     heading = QLabel(title)
-    heading.setStyleSheet("font-size: 26px; font-weight: 700; padding: 4px;")
+    heading.setObjectName("title")
     layout.addWidget(heading)
     return widget, layout
 
@@ -75,9 +60,9 @@ def home_tile(text: str, icon: QIcon, callback, *, primary: bool = False) -> QTo
     result = QToolButton()
     result.setText(text)
     result.setIcon(icon)
-    result.setIconSize(QSize(54, 54))
+    result.setIconSize(QSize(56, 56))
     result.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-    result.setMinimumSize(110, 180)
+    result.setMinimumSize(150, 180)
     result.setMaximumWidth(230)
     result.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     if primary:
@@ -92,7 +77,7 @@ class DashPiWindow(QMainWindow):
         self.session, self.store, self.settings_path = session, store, settings_path
         self.setWindowTitle("DashPi")
         self.resize(1024, 600)
-        self.setStyleSheet(STYLE)
+        theme.apply(QApplication.instance())
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dashpi-camera")
         self._jobs: list[tuple[Future, object]] = []
         self._tick_future: Future | None = None
@@ -131,18 +116,15 @@ class DashPiWindow(QMainWindow):
         row = QHBoxLayout()
         row.setSpacing(16)
         row.addStretch()
-        style = self.style()
-        row.addWidget(home_tile("녹화기록", style.standardIcon(QStyle.StandardPixmap.SP_DirIcon),
-                                self.show_records))
-        row.addWidget(home_tile("주행시작", style.standardIcon(QStyle.StandardPixmap.SP_MediaPlay),
-                                self.show_start_confirmation, primary=True))
-        settings_icon = QIcon.fromTheme(
-            "preferences-system", style.standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView)
-        )
-        row.addWidget(home_tile("설정", settings_icon, self.show_settings))
+        row.addWidget(home_tile("녹화기록", theme.icon("folder"), self.show_records))
+        row.addWidget(home_tile("주행시작", theme.icon("record"), self.show_start_confirmation,
+                                primary=True))
+        row.addWidget(home_tile("설정", theme.icon("settings"), self.show_settings))
         row.addStretch()
         layout.addLayout(row)
         self.home_status = QLabel("")
+        self.home_status.setObjectName("caption")
+        self.home_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.home_status.setWordWrap(True)
         layout.addWidget(self.home_status)
         layout.addStretch()
@@ -150,7 +132,9 @@ class DashPiWindow(QMainWindow):
 
     def _build_confirmation(self):
         self.confirmation, layout = page("녹화 시작")
-        layout.addWidget(QLabel("카메라로 영상을 기록합니다. 주행 또는 수동 주차 녹화를 선택하세요."))
+        description = QLabel("카메라로 영상을 기록합니다. 주행 또는 수동 주차 녹화를 선택하세요.")
+        description.setObjectName("caption")
+        layout.addWidget(description)
         layout.addWidget(button("주행 녹화", lambda: self._begin("drive"), primary=True))
         layout.addWidget(button("주차 녹화", lambda: self._begin("parking")))
         layout.addStretch()
@@ -161,6 +145,7 @@ class DashPiWindow(QMainWindow):
         self.recording_page, layout = page("DashPi")
         self.record_heading = layout.itemAt(0).widget()
         self.record_clock = QLabel(time.strftime("%H:%M", time.localtime()))
+        self.record_clock.setObjectName("clock")
         layout.addWidget(self.record_clock)
         self.record_status = QLabel("카메라 준비 중")
         self.record_status.setObjectName("status")
@@ -212,23 +197,33 @@ class DashPiWindow(QMainWindow):
         self.brightness.setSingleStep(0.1)
         self.brightness.setValue(current.brightness)
         self.model = QLineEdit(current.ollama_model)
+        form = QFormLayout()
+        form.setHorizontalSpacing(24)
+        form.setVerticalSpacing(10)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         for name, control in (("녹화 화질", self.resolution), ("프레임", self.fps),
                               ("비트레이트", self.quality), ("화면 밝기", self.brightness),
                               ("로컬 AI 모델", self.model)):
-            layout.addWidget(QLabel(name))
-            layout.addWidget(control)
+            label = QLabel(name)
+            label.setMinimumHeight(52)
+            form.addRow(label, control)
+        layout.addLayout(form)
         self.settings_status = QLabel("")
+        self.settings_status.setObjectName("caption")
         layout.addWidget(self.settings_status)
         self.storage_usage = QLabel("")
+        self.storage_usage.setObjectName("caption")
         layout.addWidget(self.storage_usage)
         layout.addStretch()
-        self.save_settings_button = button("저장", self._save_settings, primary=True)
-        layout.addWidget(self.save_settings_button)
         actions = QHBoxLayout()
         actions.addWidget(button("뒤로", self.show_home))
         self.exit_button = button("앱 종료", self._confirm_exit)
         self.exit_button.setObjectName("danger")
         actions.addWidget(self.exit_button)
+        actions.addStretch()
+        self.save_settings_button = button("저장", self._save_settings, primary=True)
+        self.save_settings_button.setMinimumWidth(200)
+        actions.addWidget(self.save_settings_button)
         layout.addLayout(actions)
         self.pages.addWidget(self.settings_page)
 
@@ -264,9 +259,11 @@ class DashPiWindow(QMainWindow):
     def _build_optical(self):
         self.optical_page, layout = page("광학 리포트 전송")
         warning = QLabel("이 QR은 호환 수신기로 누구나 촬영할 수 있습니다. 휴대폰 DashPi 수신 PWA를 여세요.")
+        warning.setObjectName("caption")
         warning.setWordWrap(True)
         layout.addWidget(warning)
         self.optical_status = QLabel("")
+        self.optical_status.setObjectName("status")
         layout.addWidget(self.optical_status)
         self.qr_label = QLabel()
         self.qr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -409,7 +406,11 @@ class DashPiWindow(QMainWindow):
         self._jobs.append((self._executor.submit(work), callback))
 
     def _poll(self):
-        self.record_heading.setText("● REC" if self.session.recorder.recording else "DashPi")
+        recording = self.session.recorder.recording
+        self.record_heading.setText("● REC" if recording else "DashPi")
+        if self.record_heading.objectName() != ("rec" if recording else "title"):
+            self.record_heading.setObjectName("rec" if recording else "title")
+            self.record_heading.style().polish(self.record_heading)
         self.record_clock.setText(time.strftime("%H:%M", time.localtime()))
         for future, callback in list(self._jobs):
             if future.done():
