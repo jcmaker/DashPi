@@ -11,14 +11,14 @@ import secrets
 import shutil
 import time
 
-from PySide6.QtCore import Qt, QTimer, QUrl, QSize
+from PySide6.QtCore import Qt, QRect, QTimer, QUrl, QSize
 from PySide6.QtGui import QIcon, QImage, QPixmap
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
-    QStackedWidget, QToolButton, QVBoxLayout, QWidget,
+    QStackedWidget, QStyle, QStyleOptionToolButton, QStylePainter, QToolButton, QVBoxLayout, QWidget,
 )
 
 from dashpi.analysis_worker import AnalysisWorker
@@ -56,15 +56,35 @@ def page(title: str) -> tuple[QWidget, QVBoxLayout]:
     return widget, layout
 
 
+class HomeTile(QToolButton):
+    """Fills its share of the screen; the icon follows the tile so small LCDs and big displays both work."""
+
+    def resizeEvent(self, event):
+        side = min(96, int(min(self.width(), self.height()) * 0.35))  # 96px = bundled icon resolution
+        self.setIconSize(QSize(side, side))
+        super().resizeEvent(event)
+
+    def paintEvent(self, event):
+        # QToolButton pins the icon to the top; draw icon + label as one centered group instead.
+        option = QStyleOptionToolButton()
+        self.initStyleOption(option)
+        option.text, option.icon = "", QIcon()
+        painter = QStylePainter(self)
+        painter.drawComplexControl(QStyle.ComplexControl.CC_ToolButton, option)
+        side, line = self.iconSize().height(), self.fontMetrics().height()
+        top = (self.height() - side - side // 4 - line) // 2
+        self.icon().paint(painter, QRect((self.width() - side) // 2, top, side, side))
+        painter.drawText(QRect(0, top + side + side // 4, self.width(), line),
+                         Qt.AlignmentFlag.AlignCenter, self.text())
+
+
 def home_tile(text: str, icon: QIcon, callback, *, primary: bool = False) -> QToolButton:
-    result = QToolButton()
+    result = HomeTile()
     result.setText(text)
     result.setIcon(icon)
-    result.setIconSize(QSize(56, 56))
     result.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-    result.setMinimumSize(150, 180)
-    result.setMaximumWidth(230)
-    result.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    result.setMinimumSize(120, 140)  # smallest comfortable touch target; 3 tiles fit 480px wide
+    result.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
     if primary:
         result.setObjectName("primary")
     result.clicked.connect(callback)
@@ -112,22 +132,18 @@ class DashPiWindow(QMainWindow):
 
     def _build_home(self):
         self.home, layout = page("DashPi")
-        layout.addStretch()
         row = QHBoxLayout()
         row.setSpacing(16)
-        row.addStretch()
         row.addWidget(home_tile("녹화기록", theme.icon("folder"), self.show_records))
         row.addWidget(home_tile("주행시작", theme.icon("record"), self.show_start_confirmation,
                                 primary=True))
         row.addWidget(home_tile("설정", theme.icon("settings"), self.show_settings))
-        row.addStretch()
-        layout.addLayout(row)
+        layout.addLayout(row, 1)
         self.home_status = QLabel("")
         self.home_status.setObjectName("caption")
         self.home_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.home_status.setWordWrap(True)
         layout.addWidget(self.home_status)
-        layout.addStretch()
         self.pages.addWidget(self.home)
 
     def _build_confirmation(self):

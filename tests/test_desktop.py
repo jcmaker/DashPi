@@ -725,3 +725,20 @@ def test_camera_failure_stays_visible_instead_of_silently_returning_home(qapp, t
     finally:
         session.recorder.recording = False
         window.close()
+
+
+@pytest.mark.parametrize("size", [(480, 320), (800, 480), (1920, 1080)])
+def test_home_tiles_share_the_screen_at_any_lcd_size(qapp, tmp_path, size):
+    from dashpi.desktop import DashPiWindow
+
+    window = DashPiWindow(FakeSession(), IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        window.showNormal()
+        window.setFixedSize(*size)
+        qapp.processEvents()
+        tiles = window.home.findChildren(QToolButton)
+        width, height = size
+        assert all(tile.geometry().right() < width and tile.geometry().bottom() < height for tile in tiles)
+        assert all(tile.width() > width / 4 and tile.height() > height / 3 for tile in tiles)
+    finally:
+        window.close()

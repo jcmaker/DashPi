@@ -64,7 +64,7 @@ QPushButton#danger {{ background: {critical}; color: {text}; border: 1px solid {
 QPushButton#danger:hover {{ background: {critical_hover}; }}
 
 QToolButton {{
-  background: {card}; border-radius: {radius_card}; min-height: 180px; min-width: 150px;
+  background: {card}; border-radius: {radius_card}; min-height: 140px; min-width: 120px;
   font-size: {subtitle}; font-weight: 600; padding: 22px 12px 16px 12px;
 }}
 
