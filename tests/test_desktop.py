@@ -153,7 +153,7 @@ def test_external_video_analysis_opens_optical_report(qapp, tmp_path, monkeypatc
     session = FakeSession()
     session.worker = AnalysisWorker()
     session.settings = Settings(store.root, "test-model")
-    session.analyze = lambda _frames: {}
+    session.analyze = lambda *_: {}
     window = desktop.DashPiWindow(session, store, store.root / "settings.json")
     try:
         window.show_records()
@@ -791,6 +791,95 @@ def test_record_labels_read_as_local_date_and_korean_state():
     assert set(STATE_LABELS) == set(IncidentState)
 
 
+def test_awaiting_analysis_has_a_korean_label():
+    from dashpi.desktop import STATE_LABELS
+    from dashpi.models import IncidentState
+
+    assert STATE_LABELS[IncidentState.AWAITING_ANALYSIS] == "분석 대기"
+
+
+def test_settings_edit_both_models_and_show_key_status(qapp, tmp_path, monkeypatch):
+    import dashpi.desktop as desktop
+    from dashpi.device import load_settings
+
+    monkeypatch.setattr(desktop, "api_key_configured", lambda *_: False)
+    window = desktop.DashPiWindow(FakeSession(), IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        window.show_settings()
+        assert (window.model.text(), window.report_model.text()) == ("x-ai/grok-4.7", "x-ai/grok-4.20")
+        assert window.ai_key_status.text().startswith("API 키: 없음")
+        window.model.setText("fake")
+        window.report_model.setText("x-ai/grok-4.3")
+        window.save_settings_button.click()
+        saved = load_settings(tmp_path / "settings.json")
+        assert (saved.ai_model, saved.ai_report_model) == ("fake", "x-ai/grok-4.3")
+    finally:
+        window.close()
+
+
+def test_awaiting_incident_detail_explains_the_wait(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    store = IncidentStore(tmp_path)
+    item = IncidentMetadata.new("wait-1", datetime.now(UTC).isoformat(), 100.0, 15.0)
+    item.next_analysis_at = "2026-09-25T05:32:00+00:00"
+    item.transition(IncidentState.AWAITING_ANALYSIS, datetime.now(UTC).isoformat(), "인터넷 연결 없음")
+    store.save(item)
+    window = DashPiWindow(FakeSession(), store, tmp_path / "settings.json")
+    try:
+        window.show_records()
+        window._open_record(window.record_list.item(0))
+        assert "분석 대기" in window.report_text.text() and "인터넷 연결 없음" in window.report_text.text()
+        assert "다음 시도" in window.report_text.text()
+        assert not window.reanalyze_button.isVisible()
+    finally:
+        window.close()
+
+
+def test_failed_incident_can_be_queued_for_reanalysis(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    store = IncidentStore(tmp_path)
+    item = IncidentMetadata.new("fail-1", datetime.now(UTC).isoformat(), 100.0, 15.0)
+    item.analysis_attempts = 3
+    item.transition(IncidentState.ANALYSIS_FAILED, datetime.now(UTC).isoformat(), "API 키 확인 필요 (HTTP 401)")
+    store.save(item)
+    window = DashPiWindow(FakeSession(), store, tmp_path / "settings.json")
+    try:
+        window.showNormal()
+        window.show_records()
+        window._open_record(window.record_list.item(0))
+        assert window.reanalyze_button.isVisible()
+        window.reanalyze_button.click()
+        loaded = store.load("fail-1")
+        assert loaded.state is IncidentState.AWAITING_ANALYSIS
+        assert (loaded.analysis_attempts, loaded.next_analysis_at is not None) == (0, True)
+        assert not window.reanalyze_button.isVisible()
+    finally:
+        window.close()
+
+
+def test_reanalyze_handles_an_incident_that_vanished_before_the_click(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    store = IncidentStore(tmp_path)
+    item = IncidentMetadata.new("fail-vanished", datetime.now(UTC).isoformat(), 100.0, 15.0)
+    item.transition(IncidentState.ANALYSIS_FAILED, datetime.now(UTC).isoformat(), "API 키 확인 필요 (HTTP 401)")
+    store.save(item)
+    window = DashPiWindow(FakeSession(), store, tmp_path / "settings.json")
+    try:
+        window.showNormal()
+        window.show_records()
+        window._open_record(window.record_list.item(0))
+        assert window.reanalyze_button.isVisible()
+        (store.directory("fail-vanished") / "metadata.json").unlink()
+        window.reanalyze_button.click()
+        assert not window.reanalyze_button.isVisible()
+        assert window.report_text.text() == "사고 기록을 찾을 수 없습니다."
+    finally:
+        window.close()
+
+
 def test_log_file_records_screens_clicks_and_uncaught_errors(qapp, tmp_path, monkeypatch):
     import faulthandler
     import logging
@@ -818,3 +907,114 @@ def test_log_file_records_screens_clicks_and_uncaught_errors(qapp, tmp_path, mon
             handler.close()
         faulthandler.disable()
         qInstallMessageHandler(None)
+
+
+def test_retry_reuses_the_moment_marked_on_an_external_video(qapp, tmp_path, monkeypatch):
+    import dashpi.desktop as desktop
+    from concurrent.futures import Future
+    from dashpi.config import Settings
+
+    store = IncidentStore(tmp_path / "data")
+    incident = IncidentMetadata.new("marked", datetime.now(UTC).isoformat(), 5.0, 5.0, 5.0)
+    incident.manual_offset_seconds = 5.0
+    store.save(incident)
+    seen = []
+    monkeypatch.setattr(desktop.IncidentPipeline, "regenerate_report",
+                        lambda _self, incident_id, _analyze, incident_offset_override=None, *_a:
+                        seen.append((incident_id, incident_offset_override)))
+
+    class SyncWorker:
+        wait_for_capacity = staticmethod(lambda: None)
+
+        def submit(self, fn):
+            future = Future()
+            future.set_result(fn())
+            return future
+
+    session = FakeSession()
+    session.worker = SyncWorker()
+    session.settings = Settings(store.root, "fake")
+    window = desktop.DashPiWindow(session, store, store.root / "settings.json")
+    try:
+        window._run_retry("marked").result()
+        assert seen == [("marked", 5.0)]
+    finally:
+        window.close()
+
+
+def test_records_list_shows_why_an_incident_waits_or_failed(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow, local_time
+
+    store = IncidentStore(tmp_path)
+    now = datetime.now(UTC).isoformat()
+    for incident_id, state, reason in [("wait", IncidentState.AWAITING_ANALYSIS, "API 키 없음"),
+                                       ("fail", IncidentState.ANALYSIS_FAILED, "응답 형식 오류"),
+                                       ("done", IncidentState.READY, None)]:
+        item = IncidentMetadata.new(incident_id, now, 0, 1)
+        item.transition(state, now, reason)
+        store.save(item)
+    window = DashPiWindow(FakeSession(), store, tmp_path / "settings.json")
+    try:
+        window.record_filter.setCurrentText("사고")
+        window._refresh_records()
+        labels = {window.record_list.item(index).text() for index in range(window.record_list.count())}
+        when = local_time(now)
+        assert labels == {f"사고 · {when} · 분석 대기 (API 키 없음)",
+                          f"사고 · {when} · 분석 실패 (응답 형식 오류)",
+                          f"사고 · {when} · 분석 완료"}
+    finally:
+        window.close()
+
+
+def test_external_analysis_that_must_wait_says_so(qapp, tmp_path):
+    from concurrent.futures import Future
+    from dashpi.desktop import DashPiWindow
+
+    incident = IncidentMetadata.new("waiting", datetime.now(UTC).isoformat(), 0, 1)
+    incident.transition(IncidentState.AWAITING_ANALYSIS, datetime.now(UTC).isoformat(), "인터넷 연결 없음")
+    window = DashPiWindow(FakeSession(), IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        window.pages.setCurrentWidget(window.detail_page)
+        future = Future()
+        future.set_result(incident)
+        window._external_analysis_done(future, window._detail_generation)
+        assert window.report_text.text() == "분석 대기 · 인터넷 연결 없음 · 연결되면 자동으로 분석합니다."
+    finally:
+        window.close()
+
+
+def test_external_analysis_uses_the_freshly_saved_models(qapp, tmp_path, monkeypatch):
+    import dashpi.desktop as desktop
+    from concurrent.futures import Future
+    from dashpi.config import Settings
+    from dashpi.device import save_settings
+
+    source = tmp_path / "Videos" / "source.mp4"
+    source.parent.mkdir()
+    source.write_bytes(b"video")
+    monkeypatch.setattr(desktop.Path, "home", lambda: tmp_path)
+    store = IncidentStore(tmp_path / "data")
+    save_settings(store.root / "settings.json", VideoSettings(ai_model="fake", ai_report_model="new-report"))
+    seen = []
+    monkeypatch.setattr(desktop, "analyze_external_video",
+                        lambda _source, _position, settings, *_rest: seen.append(settings))
+
+    class SyncWorker:
+        wait_for_capacity = staticmethod(lambda: None)
+
+        def submit(self, fn):
+            future = Future()
+            future.set_result(fn())
+            return future
+
+    session = FakeSession()
+    session.worker = SyncWorker()
+    session.settings = Settings(store.root, "old-vision", "old-report")
+    window = desktop.DashPiWindow(session, store, store.root / "settings.json")
+    try:
+        window.show_records()
+        window._open_record(window.record_list.item(0))
+        window._analyze_external()
+        assert (seen[0].ai_model, seen[0].ai_report_model) == ("fake", "new-report")
+    finally:
+        window.close()

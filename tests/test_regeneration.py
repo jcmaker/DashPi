@@ -15,7 +15,7 @@ from tests.media_factory import make_video
 
 def run_server(monkeypatch, tmp_path, exercise, analyze):
     args = Namespace(data_root=tmp_path, host="127.0.0.1", port=8000,
-                     ollama_model="vision", detector_model=tmp_path / "yolo.pt",
+                     ai_model="vision", ai_report_model="summary", detector_model=tmp_path / "yolo.pt",
                      show_traffic_lights=False, show_lanes=False, show_traffic_signs=False)
     worker = AnalysisWorker()
     captured = {}
@@ -28,7 +28,7 @@ def run_server(monkeypatch, tmp_path, exercise, analyze):
     monkeypatch.setattr(server_module, "build_parser", lambda: type("Parser", (), {"parse_args": lambda self: args})())
     monkeypatch.setattr(server_module, "AnalysisWorker", lambda: worker)
     monkeypatch.setattr(server_module, "YoloDetector", lambda *_: None)
-    monkeypatch.setattr(server_module, "OllamaClient", lambda *_: type("Client", (), {"analyze": staticmethod(analyze)})())
+    monkeypatch.setattr(server_module, "build_analyzer", lambda *_: analyze)
     monkeypatch.setattr(server_module, "create_app", create_app)
     monkeypatch.setattr(server_module.uvicorn, "run", lambda *_a, **_kw: exercise(captured["regenerate"], worker))
     try:
@@ -65,7 +65,7 @@ def test_queued_regeneration_revalidates_clip_before_analysis(tmp_path, monkeypa
             pass  # A rejected trust-boundary check may fail the Future.
         assert sampled == []
 
-    run_server(monkeypatch, tmp_path, exercise, lambda _frames: {})
+    run_server(monkeypatch, tmp_path, exercise, lambda *_: {})
 
 
 def test_queued_regeneration_reloads_the_latest_completed_metadata(tmp_path, monkeypatch):
@@ -94,7 +94,7 @@ def test_queued_regeneration_reloads_the_latest_completed_metadata(tmp_path, mon
         assert saved.annotated == completed.annotated
         assert saved.transitions[:-2] == completed.transitions
 
-    run_server(monkeypatch, tmp_path, exercise, lambda _frames: next(reports))
+    run_server(monkeypatch, tmp_path, exercise, lambda *_: next(reports))
 
 
 @pytest.mark.parametrize("replacement", ["clip", "directory"])
@@ -128,7 +128,7 @@ def test_regeneration_media_reads_verified_snapshot_after_path_replacement(tmp_p
         assert result.failure_reason == "verified bytes: clip"
         assert all(not path.exists() for path in sources)
 
-    def analyze(frames):
+    def analyze(frames, *_args):
         raise ValueError("verified bytes: " + frames[0].decode())
 
     run_server(monkeypatch, tmp_path, exercise, analyze)
@@ -140,7 +140,7 @@ def test_regeneration_detects_in_place_evidence_changes_during_analysis(tmp_path
     item.clip = replace(atomic_write(item.clip.path, video.read_bytes()), duration=6.0)
     store.save(item)
 
-    def analyze(_frames):
+    def analyze(*_args):
         with item.clip.path.open("r+b") as source:
             source.write(b"evil")
         return {"incident_timestamp": 1.0, "summary": "new", "observations": [], "limitations": []}

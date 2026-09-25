@@ -68,7 +68,7 @@ def test_oversized_html_reencodes_only_derivative_once(long_pipeline_fixture, mo
         recording_transcode(pipeline_module.transcode_clip, calls),
     )
 
-    result = pipeline.process(incident, segments, lambda _frames: localized_analysis(22.5))
+    result = pipeline.process(incident, segments, lambda *_: localized_analysis(22.5))
 
     assert calls[-1][0].name == "annotated.mp4"
     assert calls[-1][4:] == (360, "450k")
@@ -80,7 +80,7 @@ def test_second_size_failure_keeps_ready_report_for_local_wifi(long_pipeline_fix
     pipeline, incident, segments, _detector = long_pipeline_fixture
     monkeypatch.setattr(pipeline_module, "render_report_html", lambda *args: "x" * (MAX_PAYLOAD + 1))
 
-    result = pipeline.process(incident, segments, lambda _frames: localized_analysis(22.5))
+    result = pipeline.process(incident, segments, lambda *_: localized_analysis(22.5))
 
     report = json.loads(result.report_json.path.read_text())
     assert result.state is IncidentState.READY
@@ -91,7 +91,7 @@ def test_second_size_failure_keeps_ready_report_for_local_wifi(long_pipeline_fix
 def test_pipeline_creates_ten_second_annotated_report_without_mutating_evidence(long_pipeline_fixture):
     pipeline, incident, segments, _detector = long_pipeline_fixture
 
-    result = pipeline.process(incident, segments, lambda _frames: localized_analysis(22.5))
+    result = pipeline.process(incident, segments, lambda *_: localized_analysis(22.5))
 
     assert result.state is IncidentState.READY
     assert result.annotated.path.name == "annotated.mp4"
@@ -112,7 +112,7 @@ def test_tracker_failure_creates_unannotated_ten_second_report_with_warning(
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("tracker failed")),
     )
 
-    result = pipeline.process(incident, segments, lambda _frames: localized_analysis(22.5))
+    result = pipeline.process(incident, segments, lambda *_: localized_analysis(22.5))
 
     assert result.state is IncidentState.READY
     assert 9.9 <= probe_duration(result.annotated.path) <= 10.1
@@ -138,7 +138,7 @@ def test_short_successful_annotation_uses_ten_second_tracking_fallback(
 
     monkeypatch.setattr("dashpi.pipeline.annotate_clip", short_annotation)
 
-    result = pipeline.process(incident, segments, lambda _frames: localized_analysis(22.5))
+    result = pipeline.process(incident, segments, lambda *_: localized_analysis(22.5))
 
     assert result.state is IncidentState.READY
     assert 9.9 <= probe_duration(result.annotated.path) <= 10.1
@@ -152,7 +152,7 @@ def test_pipeline_creates_clip_and_reports(pipeline_fixture):
     result = pipeline.process(
         incident,
         segments,
-        lambda frames: {"incident_timestamp": 3.0, "summary": "Stopped", "observations": [], "limitations": []},
+        lambda *_: {"incident_timestamp": 3.0, "summary": "Stopped", "observations": [], "limitations": []},
     )
 
     assert result.state.value == "ready"
@@ -162,7 +162,7 @@ def test_pipeline_creates_clip_and_reports(pipeline_fixture):
 def test_ai_failure_preserves_clip(pipeline_fixture):
     pipeline, incident, segments = pipeline_fixture
 
-    def fail(_frames):
+    def fail(*_args):
         raise TimeoutError("model timeout")
 
     result = pipeline.process(incident, segments, fail)
@@ -183,12 +183,12 @@ def test_pipeline_records_clip_and_report_metadata_from_configured_window(tmp_pa
     result = IncidentPipeline(settings, IncidentStore(settings.data_root)).process(
         incident,
         segments,
-        lambda _frames: {"incident_timestamp": 3.0, "summary": "Stopped", "observations": [], "limitations": []},
+        lambda *_: {"incident_timestamp": 3.0, "summary": "Stopped", "observations": [], "limitations": []},
     )
 
     assert (result.pre_seconds, result.post_seconds) == (2.0, 2.0)
     assert 3.8 <= result.clip.duration <= 4.2
-    assert result.report_model == "test-model"
+    assert result.report_model == "test-model + x-ai/grok-4.20"
     assert result.report_generated_at
     report = json.loads(result.report_json.path.read_text())
     assert report["generated_at"] == result.report_generated_at
@@ -204,7 +204,7 @@ def test_sampling_failure_persists_exposed_clip(pipeline_fixture, monkeypatch):
 
     monkeypatch.setattr("dashpi.pipeline.sample_frames", fail_sampling)
 
-    pipeline.process(incident, segments, lambda _frames: pytest.fail("analyzer should not run"))
+    pipeline.process(incident, segments, lambda *_: pytest.fail("analyzer should not run"))
     reloaded = pipeline.store.load(incident.incident_id)
 
     assert reloaded.state.value == "analysis_failed"
@@ -216,7 +216,7 @@ def test_pipeline_checks_recording_capacity_before_expensive_stages(long_pipelin
     pipeline, incident, segments, _detector = long_pipeline_fixture
     pipeline.wait_for_capacity = lambda: calls.append("capacity")
 
-    pipeline.process(incident, segments, lambda _frames: localized_analysis(22.5))
+    pipeline.process(incident, segments, lambda *_: localized_analysis(22.5))
 
     assert len(calls) >= 3
 
@@ -224,11 +224,58 @@ def test_pipeline_checks_recording_capacity_before_expensive_stages(long_pipelin
 def test_invalid_report_persists_exposed_clip(pipeline_fixture):
     pipeline, incident, segments = pipeline_fixture
 
-    pipeline.process(incident, segments, lambda _frames: {"summary": "missing lists"})
+    pipeline.process(incident, segments, lambda *_: {"summary": "missing lists"})
     reloaded = pipeline.store.load(incident.incident_id)
 
     assert reloaded.state.value == "analysis_failed"
     assert reloaded.clip.path.exists()
+
+
+def test_retryable_failure_waits_with_backoff_and_keeps_clip(pipeline_fixture):
+    from datetime import datetime
+    from dashpi.ai_client import RetryableAnalysisError
+
+    pipeline, incident, segments = pipeline_fixture
+
+    def offline(*_args):
+        raise RetryableAnalysisError("인터넷 연결 없음")
+
+    result = pipeline.process(incident, segments, offline)
+
+    assert result.state is IncidentState.AWAITING_ANALYSIS
+    assert (result.failure_reason, result.analysis_attempts) == ("인터넷 연결 없음", 1)
+    waited = datetime.fromisoformat(result.next_analysis_at) - datetime.fromisoformat(result.transitions[-1]["at"])
+    assert 55 <= waited.total_seconds() <= 65
+    assert result.clip.path.exists()
+
+
+def test_retry_at_from_the_error_wins(pipeline_fixture):
+    from datetime import UTC, datetime
+    from dashpi.ai_client import RetryableAnalysisError
+
+    pipeline, incident, segments = pipeline_fixture
+    tomorrow = datetime(2030, 1, 1, 0, 5, tzinfo=UTC)
+
+    def limited(*_args):
+        raise RetryableAnalysisError("오늘 분석 한도 도달", retry_at=tomorrow)
+
+    assert pipeline.process(incident, segments, limited).next_analysis_at == tomorrow.isoformat()
+
+
+def test_analyzer_receives_clip_and_its_extra_analysis_is_kept(pipeline_fixture):
+    pipeline, incident, segments = pipeline_fixture
+    seen = {}
+
+    def analyze(frames, clip_path, frame_dir, override):
+        seen.update(frames=len(frames), clip=clip_path.name, override=override)
+        return {"incident_timestamp": 3.0, "summary": "s", "observations": [], "limitations": [],
+                "analysis": {"models": {"observe": "m"}}}
+
+    result = pipeline.process(incident, segments, analyze)
+
+    assert seen == {"frames": 12, "clip": "clip.mp4", "override": None}
+    assert json.loads(result.report_json.path.read_text())["analysis"] == {"models": {"observe": "m"}}
+    assert result.next_analysis_at is None
 
 
 @pytest.mark.parametrize("previous", [False, True])
@@ -238,7 +285,7 @@ def test_report_write_failure_persists_exposed_clip(pipeline_fixture, monkeypatc
     from dashpi.storage import atomic_write as real_atomic_write
 
     if previous:
-        pipeline.process(incident, segments, lambda _frames: localized_analysis())
+        pipeline.process(incident, segments, lambda *_: localized_analysis())
         incident.annotated = real_atomic_write(incident.annotated.path, b"predecessor")
         pipeline.store.save(incident)
 
@@ -267,7 +314,7 @@ def test_report_write_failure_persists_exposed_clip(pipeline_fixture, monkeypatc
     pipeline.process(
         incident,
         segments,
-        lambda _frames: {"incident_timestamp": 3.0, "summary": "Stopped", "observations": [], "limitations": []},
+        lambda *_: {"incident_timestamp": 3.0, "summary": "Stopped", "observations": [], "limitations": []},
     )
     reloaded = pipeline.store.load(incident.incident_id)
 

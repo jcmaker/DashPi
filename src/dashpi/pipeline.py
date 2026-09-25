@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from dataclasses import replace
 import json
 from collections.abc import Callable
@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 from tempfile import TemporaryDirectory
 
+from dashpi.ai_client import RetryableAnalysisError, retry_delay
 from dashpi.config import OverlaySettings, Settings
 from dashpi.media import (
     build_clip,
@@ -118,14 +119,18 @@ class IncidentPipeline:
             frames = sample_frames(evidence_path, directory / "frames", self.settings.frame_sample_count)
             generated_at = datetime.now(UTC).isoformat()
             self.wait_for_capacity()
+            raw = analyze(frames, evidence_path, directory, incident_offset_override)
+            analysis = raw.pop("analysis", None) if isinstance(raw, dict) else None
             report = validate_report(
-                analyze(frames),
+                raw,
                 incident.clip.sha256,
-                self.settings.ollama_model,
+                self.settings.report_model_label,
                 generated_at,
                 incident.clip.duration,
                 incident_offset_override,
             )
+            if analysis is not None:
+                report["analysis"] = analysis
             incident_offset = report["incident_timestamp"]
             start, end = transfer_window(incident_offset, incident.clip.duration)
             active_overlays = overlays or self.settings.overlays
@@ -230,9 +235,16 @@ class IncidentPipeline:
                 raise ValueError("clip digest changed")
             incident.annotated = annotated
             incident.incident_offset_seconds = incident_offset
-            incident.report_model = self.settings.ollama_model
+            incident.report_model = self.settings.report_model_label
             incident.report_generated_at = generated_at
+            incident.next_analysis_at = None
             incident.transition(IncidentState.READY, datetime.now(UTC).isoformat())
+        except RetryableAnalysisError as error:
+            now = datetime.now(UTC)
+            incident.analysis_attempts += 1
+            retry_at = error.retry_at or now + retry_delay(incident.analysis_attempts)
+            incident.next_analysis_at = retry_at.isoformat()
+            incident.transition(IncidentState.AWAITING_ANALYSIS, now.isoformat(), str(error))
         except Exception as error:
             incident.transition(IncidentState.ANALYSIS_FAILED, datetime.now(UTC).isoformat(), str(error))
 

@@ -20,13 +20,25 @@ def test_video_settings_persist_and_reject_invalid_update(tmp_path):
 
     path = tmp_path / "settings.json"
     chosen = VideoSettings(width=1280, height=720, fps=24, bitrate_mbps=8, brightness=0.2,
-                           ollama_model="qwen2.5vl:3b")
+                           ai_model="x-ai/grok-4.7")
     save_settings(path, chosen)
 
     assert load_settings(path) == chosen
     with pytest.raises(ValueError):
         save_settings(path, VideoSettings(width=111, height=720))
     assert load_settings(path) == chosen
+
+
+def test_old_settings_file_with_ollama_model_loads_new_defaults(tmp_path):
+    import json
+    from dashpi.device import load_settings
+
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"width": 1280, "height": 720, "fps": 24, "bitrate_mbps": 8,
+                                "brightness": 0.0, "ollama_model": "gemma3:4b"}))
+    loaded = load_settings(path)
+
+    assert (loaded.width, loaded.ai_model, loaded.ai_report_model) == (1280, "x-ai/grok-4.7", "x-ai/grok-4.20")
 
 
 def test_recorder_preserves_duration_of_camera_segments(tmp_path):

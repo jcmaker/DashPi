@@ -17,7 +17,7 @@
 
 사고 증거가 가장 필요한 순간에 인터넷 연결이나 외부 서버를 신뢰할 수 없다면 어떻게 해야 할까요?
 
-DashPi는 사고 영상을 먼저 안전하게 보존하고, Raspberry Pi에서 실행되는 vision-capable Ollama 모델로 영상을 분석합니다. Pi에서는 네이티브 앱으로 녹화를 제어하며, 휴대폰에는 별도 네이티브 앱 없이 수신 PWA를 사용합니다. 기존 웹 프로토타입에는 다음 전송 경로가 있습니다.
+DashPi는 사고 영상을 먼저 안전하게 보존하고, AI 분석으로 사고 시점과 장면을 정리합니다. Pi에서는 네이티브 앱으로 녹화를 제어하며, 휴대폰에는 별도 네이티브 앱 없이 수신 PWA를 사용합니다. 기존 웹 프로토타입에는 다음 전송 경로가 있습니다.
 
 - **Local Wi-Fi:** 영상처럼 큰 파일을 HTTP Range 기반으로 재생·이어받기
 - **Optical QR:** 네트워크 없이 최대 16 MiB 파일을 애니메이션 QR로 전송
@@ -70,8 +70,8 @@ flowchart LR
         Segments --> Clip["사고 구간 Clip"]
         Incident --> Clip
         Clip --> Hash["SHA-256 + Atomic Storage"]
-        Hash --> Ollama["Local Ollama Vision"]
-        Ollama --> Report["JSON + HTML Report"]
+        Hash --> AI["AI 분석 (시점 탐지·장면 관찰·요약)"]
+        AI --> Report["JSON + HTML Report"]
         Report --> Store["Incident Store"]
         Hash --> Store
         Store --> API["FastAPI"]
@@ -99,6 +99,8 @@ stateDiagram-v2
     clipping --> clip_failed: clip 생성 실패
     analyzing --> ready: 리포트 검증 및 저장 완료
     analyzing --> analysis_failed: 모델 오류 또는 잘못된 출력
+    analyzing --> awaiting_analysis: 인터넷 없음·일시 오류
+    awaiting_analysis --> analyzing: 연결 후 자동 재시도
     ready --> [*]
     analysis_failed --> [*]: 유효한 clip은 보존
     clip_failed --> [*]
@@ -107,7 +109,7 @@ stateDiagram-v2
 1. 짧은 영상 세그먼트를 계속 생성합니다.
 2. 사고 trigger가 들어오면 앞·뒤 구간과 겹치는 세그먼트를 선택합니다.
 3. `clip.mp4.partial`을 완성하고 flush·hash 후 원자적으로 이름을 바꿉니다.
-4. 12개 프레임과 clip 기준 timestamp를 로컬 Ollama에 전달해 사고 시점을 찾습니다.
+4. 12개 프레임과 clip 기준 timestamp로 사고 시점을 찾고, 그 전후를 더 촘촘히 관찰합니다.
 5. 사고 시점 앞뒤 5초를 10초 파생 영상으로 만들고, 선택한 항목만 detection·tracking overlay로 표시합니다.
 6. 검증된 JSON과 자급형 HTML 리포트를 저장한 뒤 Local Wi-Fi 또는 Optical QR 전송 방식을 제공합니다.
 
@@ -129,7 +131,7 @@ Optical QR은 일반 카메라 앱만으로 복원할 수 없으므로, 수신 P
 ### 구현 및 자동 검증 완료
 
 - 샘플 MP4 기반 세그먼트 생성, 사고 구간 선택 및 clip 생성
-- 로컬 Ollama model 확인·분석 요청·출력 schema 검증
+- AI 분석 요청·출력 schema 검증, 인터넷이 없을 때 분석 대기와 자동 재시도, 하루 분석 한도
 - clip 기준 timestamp를 이용한 사고 시점 localization과 앞뒤 5초 annotated video 생성
 - 신호등·차선·표지판 독립 overlay 설정, object tracking 및 tracking 실패 fallback
 - 영상·핵심 장면·통계가 포함된 자급형 HTML 리포트와 브라우저 PDF 저장
@@ -147,7 +149,7 @@ Optical QR은 일반 카메라 앱만으로 복원할 수 없으므로, 수신 P
 - Pi 5 Picamera2 단일 카메라로 동시 Qt 프리뷰·MP4 녹화, 장시간 안정성 및 timestamp 정확도
 - LCD 터치 제어, 15초 후 자동 종료 및 바탕화면 실행 아이콘
 - 실제 화면 밝기·QR scale·FPS·휴대폰 decode rate 보정
-- Ollama latency, 메모리, 발열 및 전력 측정
+- AI 분석 응답 지연, 메모리, 발열 및 전력 측정
 - 갑작스러운 전원 차단 이후 저장소 복구
 
 현재 Pi 앱에는 물리 트리거와 핫스팟 제어가 없습니다. Local Wi-Fi 서버는 별도의 기존 웹 프로토타입이며 Pi 앱 실행에 필요하지 않습니다.
@@ -175,6 +177,7 @@ python -m pip install --no-deps -e .
 python -m pip install 'fastapi>=0.116,<1' 'uvicorn>=0.35,<1' 'PySide6>=6.7,<7' 'qrcode>=8,<9'
 python -c 'from picamera2 import Picamera2; from picamera2.encoders import LibavH264Encoder; from picamera2.outputs import PyavOutput, SplittableOutput; from picamera2.previews.qt import QGlSide6Picamera2; import cv2'
 dashpi-install-desktop
+mkdir -p ~/.config/dashpi && cp ai.env.example ~/.config/dashpi/ai.env && chmod 600 ~/.config/dashpi/ai.env
 dashpi-app
 ```
 
@@ -182,19 +185,19 @@ dashpi-app
 
 Pi의 `~/Videos`에 넣은 MP4는 **녹화기록 → 전체**에 외부 영상으로 보입니다. 영상을 재생하며 **사고 분석**을 누르면 재생 위치를 사고 시점으로 삼고, 실제로 존재하는 영상 범위 안에서 최대 30초 전·15초 후를 분석합니다. 결과가 준비되면 QR 화면이 자동으로 열리며 원본 MP4는 변경하지 않습니다. 카메라 녹화 없이도 이 경로를 사용할 수 있습니다.
 
-Pi 5에는 H.264 하드웨어 인코더가 없어 Picamera2의 소프트웨어 인코더를 사용합니다. 실제 장치에서 1080p30 동시 프리뷰/녹화, 사고 시점 오차, 앱 시작 시간, 버튼 반응, RAM·CPU 온도·Ollama 지연, QR 수신률을 측정해야 합니다. 무겁거나 스왑이 생기면 설정에서 720p/24 FPS로 낮춰 다시 측정하세요. 모델은 Pi RAM에 맞는 vision-capable Ollama 모델을 설치하고 설정의 모델명을 일치시켜야 합니다. 현재 이 실기 수락 시험은 수행되지 않았습니다.
+Pi 5에는 H.264 하드웨어 인코더가 없어 Picamera2의 소프트웨어 인코더를 사용합니다. 실제 장치에서 1080p30 동시 프리뷰/녹화, 사고 시점 오차, 앱 시작 시간, 버튼 반응, RAM·CPU 온도·AI 분석 응답 지연, QR 수신률을 측정해야 합니다. 무겁거나 스왑이 생기면 설정에서 720p/24 FPS로 낮춰 다시 측정하세요. AI 분석은 외부 API로 수행하므로 Pi RAM은 녹화·영상 처리·객체 추적에 사용합니다. 인터넷이 없으면 사고는 '분석 대기'로 남고 연결되면 자동 분석됩니다. 현재 이 실기 수락 시험은 수행되지 않았습니다.
 
 ### 요구사항
 
 - Python 3.11 이상
 - FFmpeg와 ffprobe
-- [Ollama](https://ollama.com/) 및 vision-capable model
+- AI 분석 API 키 (`ai.env.example`을 ~/.config/dashpi/ai.env로 복사)
 - Node.js — 웹 소스를 수정하거나 테스트할 때만 필요하며 현재 검증 환경은 v22입니다.
 
 macOS에서는 다음 명령으로 시스템 도구를 준비할 수 있습니다.
 
 ```bash
-brew install ffmpeg ollama
+brew install ffmpeg
 ```
 
 ### 설치
@@ -213,11 +216,7 @@ python -m pip install -e ".[dev]"
 먼저 45초 이상의 테스트 영상을 저장소 루트에 `input.mp4`라는 이름으로 준비합니다. 다음 예시는 30초 지점을 trigger로 사용하여 기본 `30초 전 + 15초 후` 구간을 처리합니다.
 
 ```bash
-ollama pull qwen2.5vl:3b
-dashpi simulate input.mp4 \
-  --trigger-seconds 30 \
-  --data-root ./demo-data \
-  --ollama-model qwen2.5vl:3b
+dashpi simulate input.mp4 --trigger-seconds 30 --data-root ./demo-data --ai-model fake
 ```
 
 성공하면 incident metadata가 JSON으로 출력되고 다음 결과가 `demo-data/incidents/<incident_id>/`에 생성됩니다.
@@ -234,7 +233,7 @@ dashpi simulate input.mp4 \
 dashpi simulate input.mp4 \
   --trigger-seconds 30 \
   --data-root ./demo-data \
-  --ollama-model qwen2.5vl:3b \
+  --ai-model fake \
   --detector-model yolov8n.onnx \
   --show-traffic-lights --show-lanes --show-traffic-signs
 ```
@@ -305,6 +304,8 @@ AI 리포트는 화면에 보이는 정황을 정리하는 **보조 자료**입�
 ```text
 <data-root>/
 ├── raw/
+├── ai-usage.json
+├── logs/
 └── incidents/
     └── <incident_id>/
         ├── clip.mp4

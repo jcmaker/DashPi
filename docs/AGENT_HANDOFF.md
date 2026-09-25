@@ -41,7 +41,7 @@
 - Trigger 전 30초 + 후 15초를 확보한 다음 로컬 분석 시작:
   - 사고 구간 영상 clip 추출
   - SHA-256으로 clip 무결성 보장
-  - 로컬 Ollama vision 모델로 사고 시점 분석
+  - AI 분석 API(기본 OpenRouter)로 사고 시점 분석. 오프라인이면 '분석 대기'로 남고 연결되면 자동 재시도
 
 ### 4️⃣ 분석 완료 후 — 광학(애니메이션 QR) 코드 Display
 - 기록 상세에서 **리포트 QR 전송**을 누르면 디바이스 화면에 Animated QR 코드를 표시:
@@ -62,7 +62,7 @@
 ### 6️⃣ 설정 화면
 - **카메라 해상도**: 1080p / 720p 선택
 - **프레임 속도·화질**: 지원 값만 선택
-- **로컬 AI 모델**: 설치된 Ollama 모델 지정
+- **비전/요약 모델명**: `~/.config/dashpi/ai.env`의 API 키 상태와 함께 모델명 확인·수정
 - 마이크·GPS·배터리 센서·스피커 관련 설정은 없음
 
 ### 7️⃣ 녹화기록 화면
@@ -83,7 +83,7 @@
 #### ✅ 구현 완료
 1. **시뮬레이션 기반 incident 생성**:
    ```bash
-   dashpi simulate input.mp4 --trigger-seconds 30 --data-root ./demo-data --ollama-model qwen2.5vl:3b
+   dashpi simulate input.mp4 --trigger-seconds 30 --data-root ./demo-data --ai-model fake
    ```
    - 샘플 MP4 파일에서 세그먼트 생성
    - `--trigger-seconds`로 사고 시점 지정
@@ -95,10 +95,13 @@
    - **Optical sender**: `http://127.0.0.1:8000/sender.html?incident=<incident_id>` — Animated QR 송신
    - **Optical receiver PWA**: `http://127.0.0.1:8000/receiver.html` — 오프라인 설치 가능한 수신기
 
-3. **로컬 AI 분석 파이프라인**:
+3. **AI 분석 파이프라인 (OpenAI 호환 API, 기본 OpenRouter)**:
    - `src/dashpi/pipeline.py`: incident 상태 전이 및 분석 orchestration
    - `src/dashpi/incidents.py`: incident coordinator, trigger 중복 병합
-   - Ollama vision 모델 (qwen2.5vl:3b 등)로 사고 시점 localization
+   - `src/dashpi/analysis.py`, `src/dashpi/ai_client.py`: 시점 탐지·장면 관찰·요약 세 역할을 순차 호출. 기본 모델은 비전(시점 탐지·장면 관찰) `x-ai/grok-4.7`, 요약 `x-ai/grok-4.20`
+   - 키는 `~/.config/dashpi/ai.env`의 `DASHPI_AI_API_KEY`(`DASHPI_AI_BASE_URL`, `DASHPI_AI_DAILY_LIMIT`도 같은 파일). `--ai-model fake`는 네트워크 없이 도는 오프라인 테스트용 가짜 분석기
+   - 오프라인·일시 오류·하루 한도 초과 시 `awaiting_analysis`('분석 대기')로 남고 연결/다음 날 자동 재시도. `src/dashpi/ai_budget.py`가 하루 한도를, `src/dashpi/analysis_retry.py`가 재시도 스케줄을 관리
+   - (2026-09 이전에는 로컬 Ollama vision 모델을 썼으나, Pi 5 4GB RAM을 녹화·ffmpeg·객체 추적에 남기기 위해 외부 API로 전환. 상세: [OpenRouter 분석 설계](superpowers/specs/2026-09-25-openrouter-ai-analysis-design.md))
    - JSON + HTML 리포트 생성 (자급형, data URL 포함)
    - YOLOv8 COCO ONNX detector로 신호등/차선/표지판 overlay (선택)
 
@@ -116,7 +119,7 @@
 #### ⚠️ 실제 Pi 하드웨어 수락 시험 대기
 - Picamera2/PySide6 API 제공 여부, 동시 프리뷰·녹화 및 timestamp 정확도
 - LCD 터치·영상 재생·QR 크기/프레임 속도와 휴대폰 수신률
-- Pi 5 소프트웨어 H.264 및 Ollama의 시작 속도·RAM·발열·반응성
+- Pi 5 소프트웨어 H.264 및 AI 분석 API 응답 지연·RAM·발열·반응성
 - 저장 공간 부족, 카메라 분리, 갑작스러운 전원 차단 후 원본 보존
 - GPIO 물리 버튼, 마이크, GPS, 배터리 감지, 핫스팟 제어는 현재 장치/범위에 없음
 
@@ -211,7 +214,8 @@ Pi 5 실기 수락 시험은 별도 단계입니다. 자동 테스트 성공을 
 | [`src/dashpi/storage.py`](../src/dashpi/storage.py) | Atomic write, SHA-256, incident store |
 | [`src/dashpi/models.py`](../src/dashpi/models.py) | IncidentMetadata, IncidentState, 데이터 모델 |
 | [`src/dashpi/config.py`](../src/dashpi/config.py) | Settings, OverlaySettings, 설정 관리 |
-| [`src/dashpi/vision.py`](../src/dashpi/vision.py) | Ollama 호출, 리포트 validation |
+| [`src/dashpi/vision.py`](../src/dashpi/vision.py) | YOLOv8 COCO ONNX object detection, overlay 렌더링, tracking |
+| [`src/dashpi/analysis.py`](../src/dashpi/analysis.py), [`src/dashpi/ai_client.py`](../src/dashpi/ai_client.py) | AI 분석 API 호출(OpenAI 호환, 기본 OpenRouter), 리포트 validation |
 | [`src/dashpi/media.py`](../src/dashpi/media.py) | FFmpeg 기반 clip 생성, transcode, frame 추출 |
 
 ### Optical Transfer
@@ -258,8 +262,8 @@ Pi 5 실기 수락 시험은 별도 단계입니다. 자동 테스트 성공을 
 - **Evidence-first 철학**: AI 실패가 증거 손실로 이어지지 않음
 
 ### 주요 기술 스택
-- **Backend**: Python 3.11+, FastAPI, Ollama
-- **Vision**: Ollama vision models (qwen2.5vl:3b, llama3.2-vision 등)
+- **Backend**: Python 3.11+, FastAPI, OpenAI 호환 API 클라이언트(기본 OpenRouter)
+- **Vision/요약**: 외부 API 모델 (기본 비전 `x-ai/grok-4.7`, 요약 `x-ai/grok-4.20`), 오프라인 테스트용 `fake` 모델
 - **Object Detection**: YOLOv8 COCO ONNX (선택)
 - **Frontend**: TypeScript, vanilla JS (no framework), PWA
 - **Media**: FFmpeg, ffprobe

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator
 from contextlib import contextmanager
 import hashlib
 import json
@@ -10,6 +10,15 @@ import stat
 from typing import BinaryIO
 
 from dashpi.models import FileArtifact, IncidentMetadata, IncidentState, Segment
+
+SUMMARY_STATES = frozenset(
+    {
+        IncidentState.READY,
+        IncidentState.CLIP_FAILED,
+        IncidentState.ANALYSIS_FAILED,
+        IncidentState.AWAITING_ANALYSIS,
+    }
+)
 
 
 def sha256_file(path: Path) -> str:
@@ -83,6 +92,9 @@ class IncidentStore:
             raw.setdefault("post_seconds", raw["post_deadline_mono"] - raw["trigger_mono"])
             raw.setdefault("annotated", None)
             raw.setdefault("incident_offset_seconds", None)
+            raw.setdefault("analysis_attempts", 0)
+            raw.setdefault("next_analysis_at", None)
+            raw.setdefault("manual_offset_seconds", None)
             for key in ("clip", "annotated", "report_json", "report_html"):
                 if raw.get(key):
                     raw[key] = FileArtifact(
@@ -95,7 +107,7 @@ class IncidentStore:
         except (AttributeError, KeyError, TypeError, ValueError) as error:
             raise ValueError("invalid incident metadata") from error
 
-    def list(self) -> list[IncidentMetadata]:
+    def list(self, states: Collection[IncidentState] = SUMMARY_STATES) -> list[IncidentMetadata]:
         parent = self.root / "incidents"
         try:
             parent_descriptor = _open_directory(parent)
@@ -107,18 +119,13 @@ class IncidentStore:
             incident_ids = os.listdir(parent_descriptor)
         finally:
             os.close(parent_descriptor)
-        summary_states = {
-            IncidentState.READY,
-            IncidentState.CLIP_FAILED,
-            IncidentState.ANALYSIS_FAILED,
-        }
         items = []
         for incident_id in incident_ids:
             try:
                 item = self.load(incident_id)
             except (FileNotFoundError, KeyError, OSError, TypeError, ValueError):
                 continue
-            if item.state in summary_states:
+            if item.state in states:
                 items.append(item)
         return sorted(
             items,

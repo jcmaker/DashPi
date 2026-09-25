@@ -25,7 +25,7 @@ def test_injected_analysis_pipeline_never_opens_network(pipeline_fixture, monkey
     result = pipeline.process(
         incident,
         segments,
-        lambda _frames: {"incident_timestamp": 3.0, "summary": "Offline", "observations": [], "limitations": []},
+        lambda *_: {"incident_timestamp": 3.0, "summary": "Offline", "observations": [], "limitations": []},
     )
 
     assert result.state.value == "ready"
@@ -66,7 +66,7 @@ def test_incident_report_survives_existing_optical_transport_offline(tmp_path, m
     assert recovered.payload.count(b"data:image/jpeg;base64,") == 3
 
 
-def deterministic_analysis(_frames):
+def deterministic_analysis(*_args):
     return {
         "incident_timestamp": 22.5,
         "summary": "급정지 뒤 접촉",

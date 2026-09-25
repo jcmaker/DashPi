@@ -1,4 +1,7 @@
+import json
+
 from dashpi.models import FileArtifact, IncidentMetadata, IncidentState
+from dashpi.storage import IncidentStore
 
 
 def test_new_incident_starts_collecting():
@@ -53,6 +56,9 @@ def test_incident_metadata_includes_configured_windows_and_artifact_contract(tmp
         },
         "report_model": "moondream",
         "report_generated_at": "2026-09-02T00:01:00Z",
+        "analysis_attempts": 0,
+        "next_analysis_at": None,
+        "manual_offset_seconds": None,
         "transitions": [
             {"state": "collecting_post_trigger", "at": "2026-09-02T00:00:00Z"},
             {"state": "ready", "at": "2026-09-02T00:01:01Z"},
@@ -69,3 +75,49 @@ def test_incident_metadata_serializes_derived_artifact_and_localized_time(tmp_pa
 
     assert raw["annotated"]["filename"] == "annotated.mp4"
     assert raw["incident_offset_seconds"] == 29.5
+
+
+def test_awaiting_analysis_round_trips_with_retry_fields(tmp_path):
+    store = IncidentStore(tmp_path)
+    item = IncidentMetadata.new("inc-1", "2026-09-25T00:00:00+00:00", 10.0, 15.0)
+    item.analysis_attempts = 2
+    item.next_analysis_at = "2026-09-25T00:05:00+00:00"
+    item.transition(IncidentState.AWAITING_ANALYSIS, "2026-09-25T00:03:00+00:00", "인터넷 연결 없음")
+    store.save(item)
+
+    loaded = store.load("inc-1")
+    assert loaded.state is IncidentState.AWAITING_ANALYSIS
+    assert (loaded.analysis_attempts, loaded.next_analysis_at) == (2, "2026-09-25T00:05:00+00:00")
+    assert loaded.failure_reason == "인터넷 연결 없음"
+
+
+def test_metadata_written_before_retry_fields_still_loads(tmp_path):
+    store = IncidentStore(tmp_path)
+    item = IncidentMetadata.new("old", "2026-09-24T00:00:00+00:00", 10.0, 15.0)
+    store.save(item)
+    path = store.directory("old") / "metadata.json"
+    raw = json.loads(path.read_text())
+    del raw["analysis_attempts"], raw["next_analysis_at"]
+    path.write_text(json.dumps(raw))
+
+    loaded = store.load("old")
+    assert (loaded.analysis_attempts, loaded.next_analysis_at) == (0, None)
+
+
+def test_list_includes_awaiting_analysis_incidents(tmp_path):
+    store = IncidentStore(tmp_path)
+    item = IncidentMetadata.new("inc-1", "2026-09-25T00:00:00+00:00", 10.0, 15.0)
+    item.transition(IncidentState.AWAITING_ANALYSIS, "2026-09-25T00:03:00+00:00", "인터넷 연결 없음")
+    store.save(item)
+
+    assert [item.incident_id for item in store.list()] == ["inc-1"]
+
+
+def test_list_can_be_filtered_to_any_state(tmp_path):
+    store = IncidentStore(tmp_path)
+    item = IncidentMetadata.new("inc-1", "2026-09-25T00:00:00+00:00", 10.0, 15.0)
+    item.transition(IncidentState.ANALYZING, "2026-09-25T00:01:00+00:00")
+    store.save(item)
+
+    assert store.list() == []
+    assert [item.incident_id for item in store.list(states=set(IncidentState))] == ["inc-1"]

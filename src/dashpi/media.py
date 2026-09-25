@@ -202,13 +202,26 @@ def extract_frame(source: Path, output: Path, timestamp: float) -> FileArtifact:
     return FileArtifact(output, byte_length, digest)
 
 
-def sample_frames(clip: Path, output_dir: Path, count: int) -> list[tuple[Path, float]]:
+def sample_frames(
+    clip: Path,
+    output_dir: Path,
+    count: int,
+    start: float = 0.0,
+    end: float | None = None,
+    max_edge: int = 1024,
+) -> list[tuple[Path, float]]:
     output_dir.mkdir(parents=True, exist_ok=True)
-    duration = probe_duration(clip)
+    stop = probe_duration(clip) if end is None else end
+    span = max(0.0, stop - start)
+    # Fit inside max_edge x max_edge, keep aspect, never upscale, even dimensions for JPEG encoders.
+    scale = (
+        f"scale='min({max_edge},iw)':'min({max_edge},ih)':force_original_aspect_ratio=decrease:"
+        "force_divisible_by=2"
+    )
     paths = []
     for index in range(count):
         target = output_dir / f"{index:02d}.jpg"
-        timestamp = duration * (index + 0.5) / count
+        timestamp = start + span * (index + 0.5) / count
         subprocess.run(
             [
                 "ffmpeg",
@@ -221,6 +234,8 @@ def sample_frames(clip: Path, output_dir: Path, count: int) -> list[tuple[Path, 
                 str(clip),
                 "-frames:v",
                 "1",
+                "-vf",
+                scale,
                 str(target),
             ],
             check=True,

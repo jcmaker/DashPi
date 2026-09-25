@@ -64,7 +64,7 @@ def make_session(tmp_path, recorder, monkeypatch, processed):
 
     monkeypatch.setattr("dashpi.device_session.IncidentPipeline", Pipeline)
     settings = Settings(tmp_path, "fake", pre_seconds=30, post_seconds=15)
-    return DeviceSession(recorder, settings, IncidentStore(tmp_path), InlineWorker(), lambda frames: {})
+    return DeviceSession(recorder, settings, IncidentStore(tmp_path), InlineWorker(), lambda *_: {})
 
 
 def test_stop_waits_for_post_window_and_submits_complete_window(tmp_path, monkeypatch):
