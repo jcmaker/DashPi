@@ -121,8 +121,47 @@ def test_control_character_in_api_key_fails_up_front():
 
 def test_unreachable_server_is_retryable():
     client = ChatClient("http://127.0.0.1:9", "sk-test", timeout=1)
-    with pytest.raises(RetryableAnalysisError, match="인터넷"):
+    with pytest.raises(RetryableAnalysisError, match="인터넷") as error:
         client.complete("m", [], "probe", SCHEMA, 10)
+    assert error.value.reached_provider is False
+
+
+def test_provider_errors_are_marked_as_reaching_the_provider():
+    server = serve(503, {"error": {"message": "busy"}}, [])
+    try:
+        with pytest.raises(RetryableAnalysisError) as error:
+            call(server)
+    finally:
+        server.shutdown()
+    assert error.value.reached_provider is True
+
+
+def test_read_timeout_counts_as_reaching_the_provider():
+    import socket
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    held = []
+    threading.Thread(target=lambda: held.append(listener.accept()), daemon=True).start()
+    client = ChatClient(f"http://127.0.0.1:{listener.getsockname()[1]}", "sk-test", timeout=0.5)
+    try:
+        with pytest.raises(RetryableAnalysisError) as error:
+            client.complete("m", [], "probe", SCHEMA, 10)
+    finally:
+        listener.close()
+    assert error.value.reached_provider is True
+
+
+def test_connect_timeout_counts_as_reaching_the_provider(monkeypatch):
+    import urllib.error
+    client = ChatClient("https://example.invalid/v1", "sk-test")
+
+    def timeout(*_args, **_kwargs):
+        raise urllib.error.URLError(TimeoutError("timed out"))
+    monkeypatch.setattr(client.opener, "open", timeout)
+    with pytest.raises(RetryableAnalysisError) as error:
+        client.complete("m", [], "probe", SCHEMA, 10)
+    assert error.value.reached_provider is True
 
 
 def test_config_file_tolerates_hand_editing(tmp_path):

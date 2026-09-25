@@ -16,15 +16,21 @@ class DailyBudget:
                  now: Callable[[], datetime] = lambda: datetime.now().astimezone()):
         self.path, self.limit, self.now = path, limit, now
 
-    def consume(self) -> None:
+    def _today_count(self) -> tuple[datetime, int]:
         now = self.now()
-        today = now.date().isoformat()
         try:
             raw = json.loads(self.path.read_text())
-            count = raw["count"] if raw.get("date") == today and isinstance(raw.get("count"), int) else 0
+            count = raw["count"] if raw.get("date") == now.date().isoformat() and isinstance(raw.get("count"), int) else 0
         except (OSError, ValueError, AttributeError):
             count = 0
+        return now, count
+
+    def check(self) -> None:
+        now, count = self._today_count()
         if count >= self.limit:
             resume = datetime.combine(now.date() + timedelta(days=1), time(0, 5), tzinfo=now.tzinfo)
             raise RetryableAnalysisError("오늘 분석 한도 도달", retry_at=resume)
-        atomic_write(self.path, json.dumps({"date": today, "count": count + 1}).encode())
+
+    def record(self) -> None:
+        now, count = self._today_count()
+        atomic_write(self.path, json.dumps({"date": now.date().isoformat(), "count": count + 1}).encode())

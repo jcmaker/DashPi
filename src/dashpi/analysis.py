@@ -111,7 +111,22 @@ class Analyzer:
     def __call__(self, frames, clip_path: Path, frame_dir: Path,
                  incident_offset_override: float | None = None) -> dict:
         config = load_ai_config(self.config_path)  # re-read so a key added later is picked up
-        DailyBudget(self.data_root / "ai-usage.json", config.daily_limit).consume()
+        budget = DailyBudget(self.data_root / "ai-usage.json", config.daily_limit)
+        budget.check()
+        try:
+            result = self._run_roles(config, frames, clip_path, frame_dir, incident_offset_override)
+        except RetryableAnalysisError as error:
+            if error.reached_provider:  # the cap guards spend, so offline attempts are free
+                budget.record()
+            raise
+        except AnalysisError:
+            budget.record()
+            raise
+        budget.record()
+        return result
+
+    def _run_roles(self, config, frames, clip_path: Path, frame_dir: Path,
+                   incident_offset_override: float | None) -> dict:
         client = self.client_factory(config.base_url, config.api_key)
         duration = probe_duration(clip_path)
         steps = []

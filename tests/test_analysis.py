@@ -119,3 +119,48 @@ def test_fake_model_needs_no_network_and_validates(tmp_path):
     result = fake([], clip, tmp_path / "w")
     raw = {key: result[key] for key in ("incident_timestamp", "summary", "observations", "limitations")}
     validate_report(raw, "0" * 64, "fake", "now", 6.0)
+
+
+def usage_count(tmp_path):
+    import json
+    path = tmp_path / "ai-usage.json"
+    return json.loads(path.read_text())["count"] if path.exists() else 0
+
+
+def test_offline_failure_does_not_spend_the_daily_cap(tmp_path):
+    clip = make_video(tmp_path / "clip.mp4", 8)
+    offline = RetryableAnalysisError("인터넷 연결 없음", reached_provider=False)
+    with pytest.raises(RetryableAnalysisError):
+        analyzer(tmp_path, ScriptedClient({**ANSWERS, "locate": offline}))(
+            frames_for(clip, tmp_path), clip, tmp_path / "w")
+    assert usage_count(tmp_path) == 0
+
+
+def test_provider_error_and_success_each_count_once(tmp_path):
+    clip = make_video(tmp_path / "clip.mp4", 8)
+    busy = RetryableAnalysisError("분석 서버 일시 오류 (HTTP 503)")
+    with pytest.raises(RetryableAnalysisError):
+        analyzer(tmp_path, ScriptedClient({**ANSWERS, "observe": busy}))(
+            frames_for(clip, tmp_path), clip, tmp_path / "w")
+    assert usage_count(tmp_path) == 1
+    analyzer(tmp_path, ScriptedClient(ANSWERS))(frames_for(clip, tmp_path), clip, tmp_path / "w")
+    assert usage_count(tmp_path) == 2
+
+
+def test_permanent_failure_counts_once(tmp_path):
+    clip = make_video(tmp_path / "clip.mp4", 8)
+    with pytest.raises(AnalysisError):
+        analyzer(tmp_path, ScriptedClient({**ANSWERS, "report": AnalysisError("응답 형식 오류")}))(
+            frames_for(clip, tmp_path), clip, tmp_path / "w")
+    assert usage_count(tmp_path) == 1
+
+
+def test_reached_cap_waits_before_any_call(tmp_path):
+    import json
+    from datetime import date
+    clip = make_video(tmp_path / "clip.mp4", 8)
+    (tmp_path / "ai-usage.json").write_text(json.dumps({"date": date.today().isoformat(), "count": 20}))
+    client = ScriptedClient(ANSWERS)
+    with pytest.raises(RetryableAnalysisError, match="한도"):
+        analyzer(tmp_path, client)(frames_for(clip, tmp_path), clip, tmp_path / "w")
+    assert client.calls == [] and usage_count(tmp_path) == 20

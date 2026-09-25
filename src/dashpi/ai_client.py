@@ -31,9 +31,10 @@ class AnalysisError(Exception):
 class RetryableAnalysisError(Exception):
     """Analysis could not run now (offline, provider busy, no key, daily limit); try again later."""
 
-    def __init__(self, message: str, retry_at: datetime | None = None):
+    def __init__(self, message: str, retry_at: datetime | None = None, reached_provider: bool = True):
         super().__init__(message)
-        self.retry_at = retry_at
+        # False only when the request never left the device, so it cannot have been billed
+        self.retry_at, self.reached_provider = retry_at, reached_provider
 
 
 @dataclass(frozen=True)
@@ -133,8 +134,14 @@ class ChatClient:
                 raw = json.loads(response.read())
         except urllib.error.HTTPError as error:
             raise _http_error(error.code) from error
-        except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as error:
+        except urllib.error.URLError as error:
+            if isinstance(error.reason, TimeoutError):
+                raise RetryableAnalysisError("인터넷 연결 없음") from error
+            raise RetryableAnalysisError("인터넷 연결 없음", reached_provider=False) from error
+        except TimeoutError as error:  # read timeout: the provider may already be working (and billing)
             raise RetryableAnalysisError("인터넷 연결 없음") from error
+        except (ConnectionError, OSError) as error:
+            raise RetryableAnalysisError("인터넷 연결 없음", reached_provider=False) from error
         except ValueError as error:
             raise AnalysisError("응답 형식 오류") from error
         return self._parse(raw)
