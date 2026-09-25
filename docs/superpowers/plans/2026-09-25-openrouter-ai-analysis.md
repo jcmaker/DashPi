@@ -1378,7 +1378,7 @@ git commit -m "feat: hand analyzers the evidence clip and wait on retryable fail
 - Test: `tests/test_analysis_retry.py`
 
 **Interfaces:**
-- Consumes: `IncidentStore.list()/load()/save()`, `IncidentState.AWAITING_ANALYSIS/ANALYZING/ANALYSIS_FAILED`, `IncidentMetadata.next_analysis_at` (Task 2).
+- Consumes: `IncidentStore.list(states=...)/load()/save()` (Task 2 fix: `list()` defaults to summary states; pass `states=set(IncidentState)` to see ANALYZING), `IncidentState.AWAITING_ANALYSIS/ANALYZING/ANALYSIS_FAILED`, `IncidentMetadata.next_analysis_at` (Task 2).
 - Produces: `AnalysisRetrier(store: IncidentStore, run: Callable[[str], Future], now: Callable[[], datetime] = lambda: datetime.now(UTC))` — `recover_interrupted() -> list[str]`(앱 시작 시 `analyzing` → 대기, 즉시 대상), `tick() -> str | None`(대상 하나를 `run(incident_id)`로 제출하고 id 반환; 실행 중이면 `None`). 직전 실행이 예외로 끝나면 그 사고를 `analysis_failed`로 바꾼다.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1490,7 +1490,7 @@ class AnalysisRetrier:
     def recover_interrupted(self) -> list[str]:
         recovered = []
         now = self.now().isoformat()
-        for item in self.store.list():
+        for item in self.store.list(states=set(IncidentState)):
             if item.state is IncidentState.ANALYZING:
                 item.next_analysis_at = now
                 item.transition(IncidentState.AWAITING_ANALYSIS, now, "분석 중 앱이 종료되어 다시 분석합니다")
@@ -1508,7 +1508,7 @@ class AnalysisRetrier:
                 self._mark_failed(incident_id, future.exception())
         now = self.now()
         due = [
-            item for item in self.store.list()
+            item for item in self.store.list(states=set(IncidentState))
             if item.state is IncidentState.AWAITING_ANALYSIS
             and (item.next_analysis_at is None or datetime.fromisoformat(item.next_analysis_at) <= now)
         ]
