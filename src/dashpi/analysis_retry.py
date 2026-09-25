@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from concurrent.futures import Future
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import logging
 
 from dashpi.models import IncidentState
@@ -50,10 +50,18 @@ class AnalysisRetrier:
         item = min(due, key=lambda entry: datetime.fromisoformat(entry.next_analysis_at)
                    if entry.next_analysis_at else earliest)
         log.info("분석 재시도: %s (%s)", item.incident_id, item.failure_reason)
+        original_reason = item.failure_reason
         item.transition(IncidentState.ANALYZING, now.isoformat())
         self.store.save(item)
-        self._running = (item.incident_id, self.run(item.incident_id))
-        return item.incident_id
+        try:
+            self._running = (item.incident_id, self.run(item.incident_id))
+            return item.incident_id
+        except Exception:
+            log.exception("분석 재시도 제출 실패: %s", item.incident_id)
+            item.next_analysis_at = (now + timedelta(minutes=1)).isoformat()
+            item.transition(IncidentState.AWAITING_ANALYSIS, now.isoformat(), original_reason)
+            self.store.save(item)
+            return None
 
     def _mark_failed(self, incident_id: str, error: BaseException) -> None:
         log.error("분석 재시도 실패: %s", incident_id, exc_info=error)

@@ -70,3 +70,21 @@ def test_run_that_raises_marks_the_incident_failed(tmp_path):
 
     loaded = store.load("broken")
     assert loaded.state is IncidentState.ANALYSIS_FAILED and "invalid evidence clip" in loaded.failure_reason
+
+
+def test_run_that_raises_synchronously_requeuees_with_delay(tmp_path):
+    store = IncidentStore(tmp_path)
+    awaiting(store, "submit_fails", NOW - timedelta(seconds=1))
+    original_reason = store.load("submit_fails").failure_reason
+
+    def raise_on_submit(_id):
+        raise RuntimeError("executor shut down")
+
+    retrier = AnalysisRetrier(store, raise_on_submit, lambda: NOW)
+
+    assert retrier.tick() is None
+
+    loaded = store.load("submit_fails")
+    assert loaded.state is IncidentState.AWAITING_ANALYSIS
+    assert loaded.next_analysis_at == (NOW + timedelta(minutes=1)).isoformat()
+    assert loaded.failure_reason == original_reason
