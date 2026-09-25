@@ -648,9 +648,11 @@ class DashPiWindow(QMainWindow):
                     self.record_list.addItem(item)
         if filter_name in {"전체", "사고"}:
             for incident in self.store.list():
-                item = QListWidgetItem(
-                    f"사고 · {local_time(incident.triggered_at)} · {STATE_LABELS[incident.state]}"
-                )
+                label = f"사고 · {local_time(incident.triggered_at)} · {STATE_LABELS[incident.state]}"
+                if incident.failure_reason and incident.state in (
+                        IncidentState.AWAITING_ANALYSIS, IncidentState.ANALYSIS_FAILED):
+                    label += f" ({incident.failure_reason})"
+                item = QListWidgetItem(label)
                 item.setData(Qt.ItemDataRole.UserRole, ("incident", incident))
                 self.record_list.addItem(item)
         if filter_name in {"전체", "주행", "주차"}:
@@ -746,8 +748,9 @@ class DashPiWindow(QMainWindow):
         self.external_analyze_button.setEnabled(False)
         self.report_text.setText("사고 영상 분석 중...")
         try:
-            model = load_settings(self.settings_path).ai_model
-            settings = replace(self.session.settings, ai_model=model)
+            current = load_settings(self.settings_path)
+            settings = replace(self.session.settings, ai_model=current.ai_model,
+                               ai_report_model=current.ai_report_model)
             analyze = build_analyzer(settings.ai_model, settings.ai_report_model, self.settings_path.parent)
             future = self.session.worker.submit(
                 lambda: analyze_external_video(source, position, settings, self.store, analyze)
@@ -767,6 +770,9 @@ class DashPiWindow(QMainWindow):
         except Exception as error:
             log.error("외부 영상 분석 실패", exc_info=error)
             self.report_text.setText(f"분석 실패: {error}. 원본 영상은 보존됩니다.")
+            return
+        if incident.state is IncidentState.AWAITING_ANALYSIS:
+            self.report_text.setText(f"분석 대기 · {incident.failure_reason} · 연결되면 자동으로 분석합니다.")
             return
         if incident.state is not IncidentState.READY:
             log.warning("외부 영상 분석 결과: %s (%s)", incident.state.value, incident.failure_reason)
