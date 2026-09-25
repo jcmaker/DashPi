@@ -798,6 +798,67 @@ def test_awaiting_analysis_has_a_korean_label():
     assert STATE_LABELS[IncidentState.AWAITING_ANALYSIS] == "분석 대기"
 
 
+def test_settings_edit_both_models_and_show_key_status(qapp, tmp_path, monkeypatch):
+    import dashpi.desktop as desktop
+    from dashpi.device import load_settings
+
+    monkeypatch.setattr(desktop, "api_key_configured", lambda *_: False)
+    window = desktop.DashPiWindow(FakeSession(), IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        window.show_settings()
+        assert (window.model.text(), window.report_model.text()) == ("x-ai/grok-4.7", "x-ai/grok-4.20")
+        assert window.ai_key_status.text().startswith("API 키: 없음")
+        window.model.setText("fake")
+        window.report_model.setText("x-ai/grok-4.3")
+        window.save_settings_button.click()
+        saved = load_settings(tmp_path / "settings.json")
+        assert (saved.ai_model, saved.ai_report_model) == ("fake", "x-ai/grok-4.3")
+    finally:
+        window.close()
+
+
+def test_awaiting_incident_detail_explains_the_wait(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    store = IncidentStore(tmp_path)
+    item = IncidentMetadata.new("wait-1", datetime.now(UTC).isoformat(), 100.0, 15.0)
+    item.next_analysis_at = "2026-09-25T05:32:00+00:00"
+    item.transition(IncidentState.AWAITING_ANALYSIS, datetime.now(UTC).isoformat(), "인터넷 연결 없음")
+    store.save(item)
+    window = DashPiWindow(FakeSession(), store, tmp_path / "settings.json")
+    try:
+        window.show_records()
+        window._open_record(window.record_list.item(0))
+        assert "분석 대기" in window.report_text.text() and "인터넷 연결 없음" in window.report_text.text()
+        assert "다음 시도" in window.report_text.text()
+        assert not window.reanalyze_button.isVisible()
+    finally:
+        window.close()
+
+
+def test_failed_incident_can_be_queued_for_reanalysis(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    store = IncidentStore(tmp_path)
+    item = IncidentMetadata.new("fail-1", datetime.now(UTC).isoformat(), 100.0, 15.0)
+    item.analysis_attempts = 3
+    item.transition(IncidentState.ANALYSIS_FAILED, datetime.now(UTC).isoformat(), "API 키 확인 필요 (HTTP 401)")
+    store.save(item)
+    window = DashPiWindow(FakeSession(), store, tmp_path / "settings.json")
+    try:
+        window.showNormal()
+        window.show_records()
+        window._open_record(window.record_list.item(0))
+        assert window.reanalyze_button.isVisible()
+        window.reanalyze_button.click()
+        loaded = store.load("fail-1")
+        assert loaded.state is IncidentState.AWAITING_ANALYSIS
+        assert (loaded.analysis_attempts, loaded.next_analysis_at is not None) == (0, True)
+        assert not window.reanalyze_button.isVisible()
+    finally:
+        window.close()
+
+
 def test_log_file_records_screens_clicks_and_uncaught_errors(qapp, tmp_path, monkeypatch):
     import faulthandler
     import logging

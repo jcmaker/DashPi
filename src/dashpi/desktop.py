@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import replace
-from datetime import datetime
+from datetime import UTC, datetime
 import faulthandler
 import json
 import logging
@@ -28,7 +28,8 @@ from PySide6.QtWidgets import (
     QStackedWidget, QStyle, QStyleOptionToolButton, QStylePainter, QToolButton, QVBoxLayout, QWidget,
 )
 
-from dashpi.analysis import build_analyzer
+from dashpi.analysis import api_key_configured, build_analyzer
+from dashpi.analysis_retry import AnalysisRetrier
 from dashpi.analysis_worker import AnalysisWorker
 from dashpi.config import Settings
 from dashpi.device import VideoSettings, load_settings, save_settings
@@ -38,6 +39,7 @@ from dashpi.offline_video import analyze_external_video
 from dashpi.optical.container import MAX_PAYLOAD
 from dashpi.optical.session import OpticalSession
 from dashpi.pi_camera import PiCameraRecorder
+from dashpi.pipeline import IncidentPipeline
 from dashpi.ranges import _open_verified_file
 from dashpi.storage import IncidentStore
 from dashpi import theme
@@ -187,6 +189,13 @@ class DashPiWindow(QMainWindow):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._poll)
         self.timer.start(100)
+        self.retrier = None
+        if hasattr(self.session, "worker") and hasattr(self.session, "settings"):
+            self.retrier = AnalysisRetrier(self.store, self._run_retry)
+            self.retry_timer = QTimer(self)
+            self.retry_timer.timeout.connect(self._retry_tick)
+            self.retry_timer.start(60_000)
+            QTimer.singleShot(0, self._start_retries)
         self.optical_timer = QTimer(self)
         self.optical_timer.timeout.connect(self._render_optical_frame)
         self.showFullScreen()
@@ -274,16 +283,20 @@ class DashPiWindow(QMainWindow):
         self.brightness.setSingleStep(0.1)
         self.brightness.setValue(current.brightness)
         self.model = QLineEdit(current.ai_model)
+        self.report_model = QLineEdit(current.ai_report_model)
         form = QFormLayout()
         form.setHorizontalSpacing(24)
         form.setVerticalSpacing(10)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         for name, control in (("녹화 화질", self.resolution), ("프레임", self.fps),
                               ("비트레이트", self.quality), ("화면 밝기", self.brightness),
-                              ("로컬 AI 모델", self.model)):
+                              ("비전 모델", self.model), ("요약 모델", self.report_model)):
             label = QLabel(name)
             label.setMinimumHeight(52)
             form.addRow(label, control)
+        self.ai_key_status = QLabel("")
+        self.ai_key_status.setObjectName("caption")
+        form.addRow(self.ai_key_status)
         self.storage_usage = QLabel("")
         self.storage_usage.setObjectName("caption")
         form.addRow(self.storage_usage)
@@ -332,6 +345,9 @@ class DashPiWindow(QMainWindow):
         self.external_analyze_button = button("사고 분석", self._analyze_external, primary=True)
         self.external_analyze_button.hide()
         layout.addWidget(self.external_analyze_button)
+        self.reanalyze_button = button("다시 분석", self._reanalyze, primary=True)
+        self.reanalyze_button.hide()
+        layout.addWidget(self.reanalyze_button)
         self.optical_button = button("리포트 QR 전송", self._open_selected_optical, primary=True)
         self.optical_button.hide()
         layout.addWidget(self.optical_button)
@@ -385,6 +401,9 @@ class DashPiWindow(QMainWindow):
             )
         except OSError:
             self.storage_usage.setText("저장 공간을 확인할 수 없습니다.")
+        self.ai_key_status.setText(
+            "API 키: 설정됨" if api_key_configured() else "API 키: 없음 (~/.config/dashpi/ai.env)"
+        )
         self.pages.setCurrentWidget(self.settings_page)
 
     def _begin(self, mode: str):
@@ -536,6 +555,52 @@ class DashPiWindow(QMainWindow):
             self.record_status.setText(str(error))
             return False
 
+    def _analyzer(self):
+        current = load_settings(self.settings_path)
+        return build_analyzer(current.ai_model, current.ai_report_model, self.settings_path.parent)
+
+    def _start_retries(self):
+        try:
+            self.retrier.recover_interrupted()
+        except Exception:
+            log.exception("중단된 분석 복구 실패")
+        self._retry_tick()
+
+    def _retry_tick(self):
+        if self.retrier is None:
+            return
+        try:
+            self.retrier.tick()
+        except Exception:
+            log.exception("분석 재시도 확인 실패")
+
+    def _run_retry(self, incident_id: str):
+        current = load_settings(self.settings_path)
+        settings = replace(self.session.settings, ai_model=current.ai_model,
+                           ai_report_model=current.ai_report_model)
+        pipeline = IncidentPipeline(settings, self.store, getattr(self.session, "detector", None),
+                                    wait_for_capacity=self.session.worker.wait_for_capacity)
+        return self.session.worker.submit(lambda: pipeline.regenerate_report(incident_id, self._analyzer()))
+
+    def _reanalyze(self):
+        incident = self._selected_incident
+        if incident is None:
+            return
+        try:
+            item = self.store.load(incident.incident_id)
+        except ValueError:
+            return
+        if item.state is not IncidentState.ANALYSIS_FAILED:
+            return
+        now = datetime.now(UTC).isoformat()
+        item.analysis_attempts, item.next_analysis_at = 0, now
+        item.transition(IncidentState.AWAITING_ANALYSIS, now, "다시 분석 요청")
+        self.store.save(item)
+        self._selected_incident = item
+        self.reanalyze_button.hide()
+        self.report_text.setText("분석 대기 · 곧 다시 분석합니다.")
+        self._retry_tick()
+
     def _save_settings(self):
         try:
             width, height = (1920, 1080) if self.resolution.currentText() == "1080p" else (1280, 720)
@@ -543,6 +608,7 @@ class DashPiWindow(QMainWindow):
                 width=width, height=height, fps=int(self.fps.currentText().split()[0]),
                 bitrate_mbps=int(self.quality.currentText().split()[0]),
                 brightness=self.brightness.value(), ai_model=self.model.text().strip(),
+                ai_report_model=self.report_model.text().strip(),
             )
             save_settings(self.settings_path, settings)
             self.settings_status.setText("저장했습니다. 다음 녹화부터 적용됩니다.")
@@ -606,6 +672,7 @@ class DashPiWindow(QMainWindow):
             kind == "incident" and value.state is IncidentState.READY
             and value.report_html is not None
         )
+        self.reanalyze_button.setVisible(kind == "incident" and value.state is IncidentState.ANALYSIS_FAILED)
         self.segment_list.clear()
         self.report_text.setText("")
         self.detail_title.setText(item.text())
@@ -624,8 +691,15 @@ class DashPiWindow(QMainWindow):
                     lambda: self._verified_clip_path(value),
                     lambda future: self._clip_checked(future, generation),
                 )
-            if value.state is IncidentState.ANALYSIS_FAILED:
-                self.report_text.setText("AI 분석에 실패했습니다. 원본 사고 영상은 보존됩니다.")
+            if value.state is IncidentState.AWAITING_ANALYSIS:
+                when = ""
+                if value.next_analysis_at:
+                    when = f" · 다음 시도 {datetime.fromisoformat(value.next_analysis_at).astimezone():%H:%M}"
+                self.report_text.setText(f"분석 대기 · {value.failure_reason or ''}{when}")
+            elif value.state is IncidentState.ANALYSIS_FAILED:
+                self.report_text.setText(
+                    f"AI 분석에 실패했습니다: {value.failure_reason or '알 수 없음'}. 원본 사고 영상은 보존됩니다."
+                )
             elif value.report_json is not None:
                 try:
                     with self.store.open_incident(value.incident_id) as (_item, descriptor, directory):
@@ -848,6 +922,8 @@ class DashPiWindow(QMainWindow):
             event.ignore()
             return
         self.timer.stop()
+        if self.retrier is not None:
+            self.retry_timer.stop()
         self.optical_timer.stop()
         self.player.stop()
         self._executor.shutdown(wait=False, cancel_futures=False)
