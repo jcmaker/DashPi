@@ -43,7 +43,7 @@ Raspberry Pi 5(4GB)의 RAM을 녹화·ffmpeg·객체 추적에 남기기 위해 
 - 외부 영상 분석처럼 사람이 사고 시점을 지정한 경우(`incident_offset_override`)에는 A를 건너뛰고 지정 시각을 쓴다.
 - 세 결과를 합쳐 기존 `validate_report()` 입력 형식(`incident_timestamp`, `summary`, `observations`, `limitations`)을 만든다. `confidence`와 `reason`은 리포트 JSON의 `analysis` 항목에 보존하되 기존 검증 스키마는 바꾸지 않는다.
 - 모든 프롬프트는 "화면에 보이는 사실만, 법적 과실을 판단하지 말 것"을 명시한다. 출력 언어는 한국어로 고정한다.
-- 기본 모델은 비전 역할(A·B)에 `x-ai/grok-4.7`, 요약 역할(C)에 `x-ai/grok-4.20`이다. 설정의 비전 모델·요약 모델 두 값으로 바꿀 수 있고, 하네스와 환경 변수로 A·B를 따로 바꿀 수도 있다.
+- 기본 모델은 비전 역할(A·B)에 `x-ai/grok-4.7`, 요약 역할(C)에 `x-ai/grok-4.20`이다. 설정의 비전 모델·요약 모델 두 값으로 바꿀 수 있다. 역할별(A·B·C) 모델 실험은 하네스 옵션으로만 한다.
 
 ### Grok 후보
 
@@ -89,7 +89,7 @@ OpenRouter의 Grok 중 블랙박스 영상 전용 모델은 없다. 모두 이�
 - 역할 A·B·C의 프롬프트와 JSON Schema를 한 파일에 둔다.
 - `Analyzer(client, models, frame_sampler)`는 `analyze(clip_path, work_dir, incident_offset_override=None) -> dict`로 A→B→C를 실행하고 `validate_report()` 입력 형식을 반환한다.
 - `FakeAnalyzer`: 네트워크 없이 클립 길이에 맞는 결정적 리포트를 반환한다. 설정 모델이 `fake`이면 사용한다.
-- `load_ai_config(path=~/.config/dashpi/ai.env)`: `KEY=VALUE` 형식을 읽는다. 키: `DASHPI_AI_API_KEY`(필수), `DASHPI_AI_BASE_URL`(기본 `https://openrouter.ai/api/v1`), 선택 `DASHPI_AI_MODEL_LOCATE`/`_OBSERVE`/`_REPORT`(설정 파일의 비전·요약 모델보다 우선). 같은 이름의 환경 변수가 파일보다 우선한다. 파일 권한이 그룹·기타 사용자에게 열려 있으면 경고를 로그에 남긴다.
+- `load_ai_config(path=~/.config/dashpi/ai.env)`: `KEY=VALUE` 형식을 읽는다. 키: `DASHPI_AI_API_KEY`(필수), `DASHPI_AI_BASE_URL`(기본 `https://openrouter.ai/api/v1`), 선택 `DASHPI_AI_DAILY_LIMIT`. 같은 이름의 환경 변수가 파일보다 우선한다. 파일 권한이 그룹·기타 사용자에게 열려 있으면 경고를 로그에 남긴다.
 
 ### 4.3 파이프라인 변경 (`pipeline.py`, `media.py`)
 
