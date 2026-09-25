@@ -12,7 +12,7 @@ from tests.media_factory import make_video
 def test_cli_accepts_detector_and_independent_overlay_flags(tmp_path):
     args = build_parser().parse_args([
         "simulate", "input.mp4", "--trigger-seconds", "40",
-        "--data-root", str(tmp_path), "--ollama-model", "m",
+        "--data-root", str(tmp_path), "--ai-model", "m",
         "--detector-model", "yolov8n.onnx", "--show-traffic-lights",
         "--show-traffic-signs",
     ])
@@ -42,7 +42,7 @@ def test_cli_validates_model_before_creating_media_artifacts(tmp_path, monkeypat
             "1",
             "--data-root",
             str(data_root),
-            "--ollama-model",
+            "--ai-model",
             "missing-model",
         ],
     )
@@ -78,7 +78,7 @@ def test_cli_records_configured_window_durations_in_metadata(tmp_path, monkeypat
             "3",
             "--data-root",
             str(data_root),
-            "--ollama-model",
+            "--ai-model",
             "test-model",
         ],
     )

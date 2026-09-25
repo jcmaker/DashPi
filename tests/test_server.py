@@ -15,12 +15,12 @@ def test_server_defaults_to_loopback():
 def test_server_accepts_optional_analysis_models_and_overlay_flags():
     args = build_parser().parse_args(
         [
-            "--data-root", "/tmp/dashpi", "--ollama-model", "vision", "--detector-model", "/tmp/yolo.pt",
+            "--data-root", "/tmp/dashpi", "--ai-model", "vision", "--detector-model", "/tmp/yolo.pt",
             "--show-traffic-lights", "--show-lanes", "--show-traffic-signs",
         ]
     )
 
-    assert args.ollama_model == "vision"
+    assert args.ai_model == "vision"
     assert args.detector_model.name == "yolo.pt"
     assert (args.show_traffic_lights, args.show_lanes, args.show_traffic_signs) == (True, True, True)
 
@@ -30,7 +30,7 @@ def test_server_wires_regeneration_through_the_single_analysis_worker(monkeypatc
         data_root=tmp_path,
         host="127.0.0.1",
         port=8000,
-        ollama_model="vision",
+        ai_model="vision",
         detector_model=tmp_path / "yolo.pt",
         show_traffic_lights=True,
         show_lanes=False,

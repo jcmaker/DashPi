@@ -28,7 +28,8 @@ class VideoSettings:
     fps: int = 30
     bitrate_mbps: int = 8
     brightness: float = 0.0
-    ollama_model: str = "qwen2.5vl:3b"
+    ai_model: str = "x-ai/grok-4.7"
+    ai_report_model: str = "x-ai/grok-4.20"
 
     def __post_init__(self) -> None:
         if (self.width, self.height) not in {(1280, 720), (1920, 1080)}:
@@ -39,8 +40,10 @@ class VideoSettings:
             raise ValueError("unsupported recording quality")
         if type(self.brightness) not in {int, float} or not math.isfinite(self.brightness) or not -1 <= self.brightness <= 1:
             raise ValueError("brightness must be between -1 and 1")
-        if not isinstance(self.ollama_model, str) or not self.ollama_model.strip():
-            raise ValueError("AI model is required")
+        for name in ("ai_model", "ai_report_model"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError("AI model is required")
 
 
 def load_settings(path: Path) -> VideoSettings:
@@ -49,6 +52,7 @@ def load_settings(path: Path) -> VideoSettings:
     raw = json.loads(path.read_text())
     if type(raw) is not dict:
         raise ValueError("invalid device settings")
+    raw.pop("ollama_model", None)  # pre-OpenRouter settings: fall back to the new default models
     return VideoSettings(**raw)
 
 

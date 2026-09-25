@@ -188,7 +188,7 @@ def test_pipeline_records_clip_and_report_metadata_from_configured_window(tmp_pa
 
     assert (result.pre_seconds, result.post_seconds) == (2.0, 2.0)
     assert 3.8 <= result.clip.duration <= 4.2
-    assert result.report_model == "test-model"
+    assert result.report_model == "test-model + x-ai/grok-4.20"
     assert result.report_generated_at
     report = json.loads(result.report_json.path.read_text())
     assert report["generated_at"] == result.report_generated_at

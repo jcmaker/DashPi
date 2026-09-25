@@ -272,7 +272,7 @@ class DashPiWindow(QMainWindow):
         self.brightness.setRange(-1, 1)
         self.brightness.setSingleStep(0.1)
         self.brightness.setValue(current.brightness)
-        self.model = QLineEdit(current.ollama_model)
+        self.model = QLineEdit(current.ai_model)
         form = QFormLayout()
         form.setHorizontalSpacing(24)
         form.setVerticalSpacing(10)
@@ -399,9 +399,11 @@ class DashPiWindow(QMainWindow):
             self.session.recorder.settings = load_settings(self.settings_path)
             if hasattr(self.session, "settings"):
                 self.session.settings = replace(
-                    self.session.settings, ollama_model=self.session.recorder.settings.ollama_model
+                    self.session.settings,
+                    ai_model=self.session.recorder.settings.ai_model,
+                    ai_report_model=self.session.recorder.settings.ai_report_model,
                 )
-                self.session.analyze = OllamaClient(self.session.settings.ollama_model).analyze
+                self.session.analyze = OllamaClient(self.session.settings.ai_model).analyze
             self._submit(self.session.recorder.prepare, self._prepared)
         except Exception as error:
             log.exception("녹화 시작 실패")
@@ -536,7 +538,7 @@ class DashPiWindow(QMainWindow):
             settings = VideoSettings(
                 width=width, height=height, fps=int(self.fps.currentText().split()[0]),
                 bitrate_mbps=int(self.quality.currentText().split()[0]),
-                brightness=self.brightness.value(), ollama_model=self.model.text().strip(),
+                brightness=self.brightness.value(), ai_model=self.model.text().strip(),
             )
             save_settings(self.settings_path, settings)
             self.settings_status.setText("저장했습니다. 다음 녹화부터 적용됩니다.")
@@ -660,8 +662,8 @@ class DashPiWindow(QMainWindow):
         self.external_analyze_button.setEnabled(False)
         self.report_text.setText("사고 영상 분석 중...")
         try:
-            model = load_settings(self.settings_path).ollama_model
-            settings = replace(self.session.settings, ollama_model=model)
+            model = load_settings(self.settings_path).ai_model
+            settings = replace(self.session.settings, ai_model=model)
             analyze = OllamaClient(model).analyze
             future = self.session.worker.submit(
                 lambda: analyze_external_video(source, position, settings, self.store, analyze)
@@ -859,9 +861,9 @@ def main():
     app = QApplication([])
     worker = AnalysisWorker()
     recorder = PiCameraRecorder(root, current)
-    settings = Settings(root, current.ollama_model)
+    settings = Settings(root, current.ai_model, current.ai_report_model)
     session = DeviceSession(recorder, settings, IncidentStore(root), worker,
-                            OllamaClient(settings.ollama_model).analyze)
+                            OllamaClient(settings.ai_model).analyze)
     window = DashPiWindow(session, IncidentStore(root), root / "settings.json")
     try:
         app.exec()

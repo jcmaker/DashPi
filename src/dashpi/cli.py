@@ -20,7 +20,7 @@ def build_parser() -> argparse.ArgumentParser:
     simulate.add_argument("video", type=Path)
     simulate.add_argument("--trigger-seconds", type=float, required=True)
     simulate.add_argument("--data-root", type=Path, required=True)
-    simulate.add_argument("--ollama-model", required=True)
+    simulate.add_argument("--ai-model", default="x-ai/grok-4.7")
     simulate.add_argument("--detector-model", type=Path)
     simulate.add_argument("--detection-confidence", type=float, default=0.45)
     simulate.add_argument("--show-traffic-lights", action="store_true")
@@ -33,7 +33,7 @@ def main() -> None:
     args = build_parser().parse_args()
     settings = Settings(
         args.data_root,
-        args.ollama_model,
+        args.ai_model,
         detector_model=args.detector_model,
         detection_confidence=args.detection_confidence,
         overlays=OverlaySettings(
@@ -42,7 +42,7 @@ def main() -> None:
             args.show_traffic_signs,
         ),
     )
-    client = OllamaClient(settings.ollama_model)
+    client = OllamaClient(settings.ai_model)
     client.validate_model()
     segments = segment_source(args.video, settings.data_root / "raw", settings.segment_seconds)
     incident = IncidentMetadata.new(

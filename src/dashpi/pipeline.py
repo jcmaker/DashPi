@@ -121,7 +121,7 @@ class IncidentPipeline:
             report = validate_report(
                 analyze(frames),
                 incident.clip.sha256,
-                self.settings.ollama_model,
+                self.settings.report_model_label,
                 generated_at,
                 incident.clip.duration,
                 incident_offset_override,
@@ -230,7 +230,7 @@ class IncidentPipeline:
                 raise ValueError("clip digest changed")
             incident.annotated = annotated
             incident.incident_offset_seconds = incident_offset
-            incident.report_model = self.settings.ollama_model
+            incident.report_model = self.settings.report_model_label
             incident.report_generated_at = generated_at
             incident.transition(IncidentState.READY, datetime.now(UTC).isoformat())
         except Exception as error:

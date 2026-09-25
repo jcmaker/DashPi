@@ -17,7 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--data-root", type=Path, required=True)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
-    parser.add_argument("--ollama-model")
+    parser.add_argument("--ai-model")
     parser.add_argument("--detector-model", type=Path)
     parser.add_argument("--show-traffic-lights", action="store_true")
     parser.add_argument("--show-lanes", action="store_true")
@@ -30,10 +30,10 @@ def main() -> None:
     store = IncidentStore(args.data_root)
     worker = None
     regenerate_report = None
-    if args.ollama_model and args.detector_model:
+    if args.ai_model and args.detector_model:
         settings = Settings(
             args.data_root,
-            args.ollama_model,
+            args.ai_model,
             detector_model=args.detector_model,
             overlays=OverlaySettings(
                 args.show_traffic_lights,
@@ -41,7 +41,7 @@ def main() -> None:
                 args.show_traffic_signs,
             ),
         )
-        client = OllamaClient(settings.ollama_model)
+        client = OllamaClient(settings.ai_model)
         detector = YoloDetector(settings.detector_model, settings.detection_confidence)
         worker = AnalysisWorker()
         pipeline = IncidentPipeline(settings, store, detector, wait_for_capacity=worker.wait_for_capacity)

@@ -15,7 +15,7 @@ from tests.media_factory import make_video
 
 def run_server(monkeypatch, tmp_path, exercise, analyze):
     args = Namespace(data_root=tmp_path, host="127.0.0.1", port=8000,
-                     ollama_model="vision", detector_model=tmp_path / "yolo.pt",
+                     ai_model="vision", detector_model=tmp_path / "yolo.pt",
                      show_traffic_lights=False, show_lanes=False, show_traffic_signs=False)
     worker = AnalysisWorker()
     captured = {}
