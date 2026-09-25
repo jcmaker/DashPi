@@ -100,6 +100,11 @@ def test_run_continues_after_a_failed_model_call(tmp_path):
     assert len(rows) == 3
     assert len(errors) == 2 and len(successes) == 1
     assert successes[0]["vision_model"] == "good-vision" and successes[0]["report_model"] == "good-report"
+    assert successes[0]["usage"] == {"locate": {"prompt_tokens": 10, "completion_tokens": 5},
+                                     "observe": {"prompt_tokens": 20, "completion_tokens": 10},
+                                     "report": {"prompt_tokens": 5, "completion_tokens": 5}}
+    assert set(successes[0]["seconds_by_role"]) == {"locate", "observe", "report"}
+    assert successes[0]["seconds"] == pytest.approx(sum(successes[0]["seconds_by_role"].values()), abs=0.03)
     bad_report_error = next(row for row in errors if row["vision_model"] == "good-vision")
     assert bad_report_error["report_model"] == "bad-report" and "응답 형식 오류" in bad_report_error["error"]
     bad_vision_error = next(row for row in errors if row["vision_model"] == "bad-vision")

@@ -117,12 +117,15 @@ def run(cases: list[Case], vision_models: list[str], report_models: list[str], c
                     except (AnalysisError, RetryableAnalysisError) as error:
                         emit(_error_row(case.case_id, vision, report_model, error))
                         continue
+                    roles = {"locate": located, "observe": observed, "report": reported}
                     row = {
                         "case": case.case_id, "vision_model": vision, "report_model": report_model,
                         "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                         "moment": moment, "locate": located.output,
                         "observations": observed.output["observations"], "report": reported.output,
                         "seconds": round(located.seconds + observed.seconds + reported.seconds, 2),
+                        "usage": {name: result.usage for name, result in roles.items()},
+                        "seconds_by_role": {name: round(result.seconds, 2) for name, result in roles.items()},
                         "cost": round(call_cost(located.usage, prices[vision]) + call_cost(observed.usage, prices[vision])
                                       + call_cost(reported.usage, prices[report_model]), 5),
                         **score(case.expected, moment, observed.output["observations"],
