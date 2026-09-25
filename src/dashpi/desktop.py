@@ -588,7 +588,9 @@ class DashPiWindow(QMainWindow):
             return
         try:
             item = self.store.load(incident.incident_id)
-        except ValueError:
+        except (FileNotFoundError, KeyError, OSError, TypeError, ValueError):
+            self.reanalyze_button.hide()
+            self.report_text.setText("사고 기록을 찾을 수 없습니다.")
             return
         if item.state is not IncidentState.ANALYSIS_FAILED:
             return

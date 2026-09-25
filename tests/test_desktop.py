@@ -859,6 +859,27 @@ def test_failed_incident_can_be_queued_for_reanalysis(qapp, tmp_path):
         window.close()
 
 
+def test_reanalyze_handles_an_incident_that_vanished_before_the_click(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    store = IncidentStore(tmp_path)
+    item = IncidentMetadata.new("fail-vanished", datetime.now(UTC).isoformat(), 100.0, 15.0)
+    item.transition(IncidentState.ANALYSIS_FAILED, datetime.now(UTC).isoformat(), "API 키 확인 필요 (HTTP 401)")
+    store.save(item)
+    window = DashPiWindow(FakeSession(), store, tmp_path / "settings.json")
+    try:
+        window.showNormal()
+        window.show_records()
+        window._open_record(window.record_list.item(0))
+        assert window.reanalyze_button.isVisible()
+        (store.directory("fail-vanished") / "metadata.json").unlink()
+        window.reanalyze_button.click()
+        assert not window.reanalyze_button.isVisible()
+        assert window.report_text.text() == "사고 기록을 찾을 수 없습니다."
+    finally:
+        window.close()
+
+
 def test_log_file_records_screens_clicks_and_uncaught_errors(qapp, tmp_path, monkeypatch):
     import faulthandler
     import logging
