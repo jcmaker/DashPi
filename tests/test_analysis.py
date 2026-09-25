@@ -95,6 +95,13 @@ def test_locate_answer_outside_the_clip_fails(tmp_path):
         analyzer(tmp_path, client)(frames_for(clip, tmp_path), clip, tmp_path / "w")
 
 
+def test_role_answer_missing_required_field_fails(tmp_path):
+    clip = make_video(tmp_path / "clip.mp4", 8)
+    client = ScriptedClient({**ANSWERS, "observe": {}})
+    with pytest.raises(AnalysisError, match="observations 누락"):
+        analyzer(tmp_path, client)(frames_for(clip, tmp_path), clip, tmp_path / "w")
+
+
 @pytest.mark.parametrize("moment,duration,expected", [
     (4.0, 8.0, (1.0, 7.0)),
     (0.2, 8.0, (0.0, 3.2)),

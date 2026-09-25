@@ -71,6 +71,9 @@ def _run(client, model: str, name: str, schema: dict, content) -> RoleResult:
         model, [{"role": "system", "content": RULES}, {"role": "user", "content": content}],
         name, schema, MAX_TOKENS[name],
     )
+    missing = [key for key in schema["required"] if key not in output]
+    if missing:
+        raise AnalysisError(f"응답 형식 오류: {', '.join(missing)} 누락")
     return RoleResult(output, usage, time.monotonic() - started, model)
 
 
