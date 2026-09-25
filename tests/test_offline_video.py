@@ -17,7 +17,7 @@ def test_short_external_video_uses_available_footage_and_keeps_original(tmp_path
 
     result = analyze_external_video(
         source, 5.0, settings, store,
-        lambda _frames: {
+        lambda *_: {
             "incident_timestamp": 5.0,
             "summary": "사고 장면",
             "observations": [],
@@ -40,5 +40,5 @@ def test_external_video_rejects_missing_file_without_incident(tmp_path):
     settings = Settings(tmp_path / "data", "test-model")
     store = IncidentStore(settings.data_root)
     with pytest.raises(FileNotFoundError):
-        analyze_external_video(tmp_path / "gone.mp4", 2.0, settings, store, lambda _: {})
+        analyze_external_video(tmp_path / "gone.mp4", 2.0, settings, store, lambda *_: {})
     assert store.list() == []

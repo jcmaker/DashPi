@@ -42,7 +42,7 @@ def test_server_wires_regeneration_through_the_single_analysis_worker(monkeypatc
         def __init__(self, model):
             self.model = model
 
-        def analyze(self, _frames):
+        def analyze(self, *_args):
             return {"summary": "report"}
 
     class Pipeline:

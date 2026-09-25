@@ -65,7 +65,7 @@ def test_queued_regeneration_revalidates_clip_before_analysis(tmp_path, monkeypa
             pass  # A rejected trust-boundary check may fail the Future.
         assert sampled == []
 
-    run_server(monkeypatch, tmp_path, exercise, lambda _frames: {})
+    run_server(monkeypatch, tmp_path, exercise, lambda *_: {})
 
 
 def test_queued_regeneration_reloads_the_latest_completed_metadata(tmp_path, monkeypatch):
@@ -94,7 +94,7 @@ def test_queued_regeneration_reloads_the_latest_completed_metadata(tmp_path, mon
         assert saved.annotated == completed.annotated
         assert saved.transitions[:-2] == completed.transitions
 
-    run_server(monkeypatch, tmp_path, exercise, lambda _frames: next(reports))
+    run_server(monkeypatch, tmp_path, exercise, lambda *_: next(reports))
 
 
 @pytest.mark.parametrize("replacement", ["clip", "directory"])
@@ -128,7 +128,7 @@ def test_regeneration_media_reads_verified_snapshot_after_path_replacement(tmp_p
         assert result.failure_reason == "verified bytes: clip"
         assert all(not path.exists() for path in sources)
 
-    def analyze(frames):
+    def analyze(frames, *_args):
         raise ValueError("verified bytes: " + frames[0].decode())
 
     run_server(monkeypatch, tmp_path, exercise, analyze)
@@ -140,7 +140,7 @@ def test_regeneration_detects_in_place_evidence_changes_during_analysis(tmp_path
     item.clip = replace(atomic_write(item.clip.path, video.read_bytes()), duration=6.0)
     store.save(item)
 
-    def analyze(_frames):
+    def analyze(*_args):
         with item.clip.path.open("r+b") as source:
             source.write(b"evil")
         return {"incident_timestamp": 1.0, "summary": "new", "observations": [], "limitations": []}

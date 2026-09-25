@@ -53,7 +53,7 @@ class OllamaClient:
         if self.model not in names:
             raise ValueError(f"Ollama model not installed: {self.model}")
 
-    def analyze(self, frames: list[tuple[Path, float]]) -> dict:
+    def analyze(self, frames: list[tuple[Path, float]], *_context) -> dict:
         images = [base64.b64encode(path.read_bytes()).decode() for path, _timestamp in frames]
         body = json.dumps(
             {

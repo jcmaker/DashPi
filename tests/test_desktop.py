@@ -153,7 +153,7 @@ def test_external_video_analysis_opens_optical_report(qapp, tmp_path, monkeypatc
     session = FakeSession()
     session.worker = AnalysisWorker()
     session.settings = Settings(store.root, "test-model")
-    session.analyze = lambda _frames: {}
+    session.analyze = lambda *_: {}
     window = desktop.DashPiWindow(session, store, store.root / "settings.json")
     try:
         window.show_records()
