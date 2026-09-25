@@ -3,10 +3,12 @@ import json
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
-from dashpi.ai_client import load_ai_config
+from dashpi.ai_client import ChatClient, load_ai_config
 from dashpi.analysis import FAKE_MODEL, build_analyzer
 from dashpi.config import OverlaySettings, Settings
+from dashpi.evaluation import fetch_prices, load_cases, max_cost, run as run_evaluation, summary_table
 from dashpi.media import segment_source
 from dashpi.models import IncidentMetadata
 from dashpi.pipeline import IncidentPipeline
@@ -28,11 +30,36 @@ def build_parser() -> argparse.ArgumentParser:
     simulate.add_argument("--show-traffic-lights", action="store_true")
     simulate.add_argument("--show-lanes", action="store_true")
     simulate.add_argument("--show-traffic-signs", action="store_true")
+
+    evaluate = subcommands.add_parser("eval")
+    evaluate.add_argument("--cases", type=Path, required=True)
+    evaluate.add_argument("--vision-model", action="append", required=True)
+    evaluate.add_argument("--report-model", action="append", required=True)
+    evaluate.add_argument("--out", type=Path, required=True)
+    evaluate.add_argument("--yes", action="store_true")
     return parser
+
+
+def run_eval(args) -> None:
+    cases = load_cases(args.cases)
+    if not cases:
+        raise SystemExit(f"사례가 없습니다: {args.cases}")
+    config = load_ai_config()
+    prices = fetch_prices(sorted(set(args.vision_model + args.report_model)))
+    ceiling = max_cost(len(cases), args.vision_model, args.report_model, prices)
+    print(f"사례 {len(cases)}건 × 비전 {len(args.vision_model)} × 요약 {len(args.report_model)} · 예상 최대 비용 ${ceiling:.2f}")
+    if not args.yes and input("계속할까요? [y/N] ").strip().lower() != "y":
+        raise SystemExit(1)
+    with TemporaryDirectory(prefix="dashpi-eval-") as work:
+        rows = run_evaluation(cases, args.vision_model, args.report_model,
+                              ChatClient(config.base_url, config.api_key), prices, args.out, Path(work))
+    print(summary_table(rows))
 
 
 def main() -> None:
     args = build_parser().parse_args()
+    if args.command == "eval":
+        return run_eval(args)
     settings = Settings(
         args.data_root,
         args.ai_model,
