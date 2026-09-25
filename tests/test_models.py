@@ -101,3 +101,22 @@ def test_metadata_written_before_retry_fields_still_loads(tmp_path):
 
     loaded = store.load("old")
     assert (loaded.analysis_attempts, loaded.next_analysis_at) == (0, None)
+
+
+def test_list_includes_awaiting_analysis_incidents(tmp_path):
+    store = IncidentStore(tmp_path)
+    item = IncidentMetadata.new("inc-1", "2026-09-25T00:00:00+00:00", 10.0, 15.0)
+    item.transition(IncidentState.AWAITING_ANALYSIS, "2026-09-25T00:03:00+00:00", "인터넷 연결 없음")
+    store.save(item)
+
+    assert [item.incident_id for item in store.list()] == ["inc-1"]
+
+
+def test_list_can_be_filtered_to_any_state(tmp_path):
+    store = IncidentStore(tmp_path)
+    item = IncidentMetadata.new("inc-1", "2026-09-25T00:00:00+00:00", 10.0, 15.0)
+    item.transition(IncidentState.ANALYZING, "2026-09-25T00:01:00+00:00")
+    store.save(item)
+
+    assert store.list() == []
+    assert [item.incident_id for item in store.list(states=set(IncidentState))] == ["inc-1"]
