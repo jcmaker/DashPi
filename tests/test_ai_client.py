@@ -195,3 +195,53 @@ def test_retry_delays_follow_the_schedule():
     assert [retry_delay(n) for n in (1, 2, 3, 4, 5, 9)] == [
         timedelta(minutes=m) for m in (1, 2, 5, 10, 30, 30)
     ]
+
+
+def test_connection_dropped_mid_response_is_retryable():
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers["Content-Length"]))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", "1000")
+            self.end_headers()
+            self.wfile.write(b'{"choices": [')
+            self.wfile.flush()
+            self.close_connection = True
+
+        def log_message(self, *_args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        with pytest.raises(RetryableAnalysisError) as error:
+            call(server)
+    finally:
+        server.shutdown()
+    assert error.value.reached_provider is True
+
+
+@pytest.mark.parametrize("body", [{"choices": ["x"]}, {"choices": [{"message": "x"}]}])
+def test_odd_reply_shapes_fail_cleanly(body):
+    server = serve(200, body, [])
+    try:
+        with pytest.raises(AnalysisError, match="형식"):
+            call(server)
+    finally:
+        server.shutdown()
+
+
+def test_key_file_with_utf8_bom_loads(tmp_path):
+    path = tmp_path / "ai.env"
+    path.write_bytes("﻿DASHPI_AI_API_KEY=sk-bom\n".encode())
+    path.chmod(0o600)
+    assert load_ai_config(path, environ={}).api_key == "sk-bom"
+
+
+def test_unreadable_key_path_counts_as_no_key(tmp_path, caplog):
+    from dashpi.analysis import api_key_configured
+    path = tmp_path / "ai.env"
+    path.mkdir()
+    assert api_key_configured(path) is False
+    assert str(path) in caplog.text

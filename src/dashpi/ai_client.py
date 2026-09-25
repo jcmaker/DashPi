@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+import http.client
 import ipaddress
 import json
 import logging
@@ -50,10 +51,14 @@ def retry_delay(attempt: int) -> timedelta:
 
 def _read_env_file(path: Path) -> dict[str, str]:
     try:
-        text = path.read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8-sig")
+        loose = path.stat().st_mode & 0o077
     except FileNotFoundError:
         return {}
-    if path.stat().st_mode & 0o077:
+    except (OSError, UnicodeDecodeError) as error:  # never log the content, only where it failed
+        log.warning("AI 키 파일을 읽을 수 없습니다: %s (%s)", path, type(error).__name__)
+        return {}
+    if loose:
         log.warning("AI 키 파일 권한이 넓습니다: chmod 600 %s", path)
     values = {}
     for line in text.splitlines():
@@ -134,6 +139,8 @@ class ChatClient:
                 raw = json.loads(response.read())
         except urllib.error.HTTPError as error:
             raise _http_error(error.code) from error
+        except http.client.HTTPException as error:  # dropped mid-response; must precede ConnectionError
+            raise RetryableAnalysisError("인터넷 연결 없음") from error
         except urllib.error.URLError as error:
             if isinstance(error.reason, TimeoutError):
                 raise RetryableAnalysisError("인터넷 연결 없음") from error
@@ -158,6 +165,8 @@ class ChatClient:
             message = choice["message"]
         except (KeyError, IndexError, TypeError) as error:
             raise AnalysisError("응답 형식 오류") from error
+        if not isinstance(choice, dict) or not isinstance(message, dict):
+            raise AnalysisError("응답 형식 오류")
         if message.get("refusal"):
             raise AnalysisError("모델이 분석을 거부했습니다")
         if choice.get("finish_reason") == "length":
