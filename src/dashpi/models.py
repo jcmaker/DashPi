@@ -7,6 +7,7 @@ class IncidentState(StrEnum):
     COLLECTING_POST_TRIGGER = "collecting_post_trigger"
     CLIPPING = "clipping"
     ANALYZING = "analyzing"
+    AWAITING_ANALYSIS = "awaiting_analysis"
     READY = "ready"
     CLIP_FAILED = "clip_failed"
     ANALYSIS_FAILED = "analysis_failed"
@@ -45,6 +46,8 @@ class IncidentMetadata:
     pre_seconds: float = 30.0
     post_seconds: float = 15.0
     incident_offset_seconds: float | None = None
+    analysis_attempts: int = 0
+    next_analysis_at: str | None = None
 
     @classmethod
     def new(

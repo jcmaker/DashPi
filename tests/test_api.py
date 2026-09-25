@@ -49,6 +49,15 @@ def ready_store_with_clip(tmp_path, duration):
     return store, item
 
 
+def test_clip_is_served_while_analysis_is_awaiting(tmp_path):
+    store, item = ready_store_with_clip(tmp_path, 6.0)
+    item.transition(IncidentState.AWAITING_ANALYSIS, "2026-09-25T00:00:00+00:00", "인터넷 연결 없음")
+    store.save(item)
+
+    response = TestClient(create_app(store)).get(f"/api/incidents/{item.incident_id}/clip")
+    assert response.status_code in (200, 206)
+
+
 def test_list_reports_optical_availability_from_verified_html_size(client_with_ready_incident):
     client, _payload, _clip, _store = client_with_ready_incident
 

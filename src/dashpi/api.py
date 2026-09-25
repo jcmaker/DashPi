@@ -19,6 +19,8 @@ from dashpi.optical.session import OpticalSession
 from dashpi.ranges import _open_verified_file, range_response
 from dashpi.storage import IncidentStore
 
+CLIP_AVAILABLE = {IncidentState.READY, IncidentState.ANALYSIS_FAILED, IncidentState.AWAITING_ANALYSIS}
+
 
 class OpticalStart(BaseModel):
     artifact: Literal["clip", "report"]
@@ -91,7 +93,7 @@ def create_app(
                 "triggered_at": item.triggered_at,
                 "state": item.state,
                 "failure_reason": item.failure_reason,
-                "has_clip": item.state in {IncidentState.READY, IncidentState.ANALYSIS_FAILED}
+                "has_clip": item.state in CLIP_AVAILABLE
                 and item.clip is not None,
                 "has_report": item.state is IncidentState.READY
                 and item.report_json is not None
@@ -221,7 +223,7 @@ def create_app(
                     raise HTTPException(409)
                 clip_path = directory / "clip.mp4"
                 if (
-                    item.state not in {IncidentState.READY, IncidentState.ANALYSIS_FAILED}
+                    item.state not in CLIP_AVAILABLE
                     or item.clip is None
                     or item.clip.path != clip_path
                 ):
@@ -256,7 +258,7 @@ def create_app(
                 if item.incident_id != incident_id:
                     raise HTTPException(409)
                 if request.artifact == "clip":
-                    if item.state not in {IncidentState.READY, IncidentState.ANALYSIS_FAILED}:
+                    if item.state not in CLIP_AVAILABLE:
                         raise HTTPException(409)
                     artifact = item.clip
                     basename, media_type = "clip.mp4", "video/mp4"

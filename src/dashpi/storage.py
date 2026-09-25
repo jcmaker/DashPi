@@ -83,6 +83,8 @@ class IncidentStore:
             raw.setdefault("post_seconds", raw["post_deadline_mono"] - raw["trigger_mono"])
             raw.setdefault("annotated", None)
             raw.setdefault("incident_offset_seconds", None)
+            raw.setdefault("analysis_attempts", 0)
+            raw.setdefault("next_analysis_at", None)
             for key in ("clip", "annotated", "report_json", "report_html"):
                 if raw.get(key):
                     raw[key] = FileArtifact(

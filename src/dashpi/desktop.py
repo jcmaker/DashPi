@@ -76,6 +76,7 @@ STATE_LABELS = {
     IncidentState.COLLECTING_POST_TRIGGER: "수집 중",
     IncidentState.CLIPPING: "영상 저장 중",
     IncidentState.ANALYZING: "분석 중",
+    IncidentState.AWAITING_ANALYSIS: "분석 대기",
     IncidentState.READY: "분석 완료",
     IncidentState.CLIP_FAILED: "영상 저장 실패",
     IncidentState.ANALYSIS_FAILED: "분석 실패",

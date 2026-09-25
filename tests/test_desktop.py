@@ -791,6 +791,13 @@ def test_record_labels_read_as_local_date_and_korean_state():
     assert set(STATE_LABELS) == set(IncidentState)
 
 
+def test_awaiting_analysis_has_a_korean_label():
+    from dashpi.desktop import STATE_LABELS
+    from dashpi.models import IncidentState
+
+    assert STATE_LABELS[IncidentState.AWAITING_ANALYSIS] == "분석 대기"
+
+
 def test_log_file_records_screens_clicks_and_uncaught_errors(qapp, tmp_path, monkeypatch):
     import faulthandler
     import logging
