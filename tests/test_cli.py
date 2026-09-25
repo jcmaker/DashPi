@@ -31,9 +31,24 @@ def test_cli_stops_before_media_work_when_the_api_key_is_missing(tmp_path, monke
     monkeypatch.setattr(sys, "argv", ["dashpi", "simulate", str(video), "--trigger-seconds", "1",
                                       "--data-root", str(data_root)])
 
-    with pytest.raises(RetryableAnalysisError, match="API 키 없음"):
+    with pytest.raises(SystemExit, match="AI 설정 오류: API 키 없음"):
         main()
     assert not data_root.exists()
+
+
+def test_eval_reports_invalid_ai_config_without_a_traceback(tmp_path, monkeypatch):
+    from dashpi.ai_client import AnalysisError
+
+    cases = tmp_path / "cases"
+    cases.mkdir()
+    monkeypatch.setattr("dashpi.cli.load_cases", lambda _path: ["case"])
+    monkeypatch.setattr("dashpi.cli.load_ai_config",
+                        lambda *_: (_ for _ in ()).throw(AnalysisError("AI base URL은 https여야 합니다")))
+    monkeypatch.setattr(sys, "argv", ["dashpi", "eval", "--cases", str(cases), "--vision-model", "v",
+                                      "--report-model", "r", "--out", str(tmp_path / "out.jsonl")])
+
+    with pytest.raises(SystemExit, match="AI 설정 오류: AI base URL"):
+        main()
 
 
 def test_cli_fake_model_runs_offline_and_records_window(tmp_path, monkeypatch, capsys):

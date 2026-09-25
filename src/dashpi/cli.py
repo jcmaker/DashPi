@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from dashpi.ai_client import ChatClient, load_ai_config
+from dashpi.ai_client import AnalysisError, ChatClient, RetryableAnalysisError, load_ai_config
 from dashpi.analysis import FAKE_MODEL, build_analyzer
 from dashpi.config import OverlaySettings, Settings
 from dashpi.evaluation import fetch_prices, load_cases, max_cost, run as run_evaluation, summary_table
@@ -40,11 +40,18 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _ai_config():
+    try:
+        return load_ai_config()
+    except (RetryableAnalysisError, AnalysisError) as error:
+        raise SystemExit(f"AI 설정 오류: {error}")
+
+
 def run_eval(args) -> None:
     cases = load_cases(args.cases)
     if not cases:
         raise SystemExit(f"사례가 없습니다: {args.cases}")
-    config = load_ai_config()
+    config = _ai_config()
     try:
         prices = fetch_prices(sorted(set(args.vision_model + args.report_model)))
     except ValueError as error:
@@ -76,7 +83,7 @@ def main() -> None:
         ),
     )
     if settings.ai_model != FAKE_MODEL:
-        load_ai_config()  # fail before creating media artifacts when no key is configured
+        _ai_config()  # fail before creating media artifacts when no key is configured
     analyzer = build_analyzer(settings.ai_model, settings.ai_report_model, settings.data_root)
     segments = segment_source(args.video, settings.data_root / "raw", settings.segment_seconds)
     incident = IncidentMetadata.new(
