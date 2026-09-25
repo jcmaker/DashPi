@@ -109,6 +109,16 @@ def test_unusable_answers_fail(body, message):
         server.shutdown()
 
 
+def test_malformed_base_url_fails_up_front():
+    with pytest.raises(AnalysisError, match="base URL"):
+        ChatClient("not-a-valid-url", "sk")
+
+
+def test_control_character_in_api_key_fails_up_front():
+    with pytest.raises(AnalysisError, match="API 키 형식"):
+        ChatClient("https://openrouter.ai/api/v1", "sk\nx")
+
+
 def test_unreachable_server_is_retryable():
     client = ChatClient("http://127.0.0.1:9", "sk-test", timeout=1)
     with pytest.raises(RetryableAnalysisError, match="인터넷"):

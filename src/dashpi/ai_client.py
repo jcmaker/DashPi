@@ -106,7 +106,10 @@ def _http_error(status: int) -> Exception:
 
 class ChatClient:
     def __init__(self, base_url: str, api_key: str, timeout: float = 60.0):
-        self.base_url, self.api_key, self.timeout = base_url.rstrip("/"), api_key, timeout
+        self.base_url = _valid_base_url(base_url)
+        if not api_key or any(ord(char) < 32 or ord(char) == 127 for char in api_key):
+            raise AnalysisError("API 키 형식 오류")
+        self.api_key, self.timeout = api_key, timeout
         self.opener = urllib.request.build_opener(_NoRedirect())  # env proxies still apply
 
     def complete(self, model: str, messages: list[dict], schema_name: str, schema: dict,
