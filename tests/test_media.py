@@ -85,3 +85,22 @@ def test_extract_frame_is_atomic(tmp_path):
 
     assert frame.path.read_bytes().startswith(b"\xff\xd8")
     assert not (tmp_path / "moment.jpg.partial").exists()
+
+
+def test_sample_frames_covers_a_window_and_limits_the_long_edge(tmp_path):
+    import cv2
+
+    clip = make_video(tmp_path / "clip.mp4", 6)
+    frames = sample_frames(clip, tmp_path / "window", 4, start=2.0, end=4.0, max_edge=64)
+
+    assert [round(timestamp, 2) for _path, timestamp in frames] == [2.25, 2.75, 3.25, 3.75]
+    height, width = cv2.imread(str(frames[0][0])).shape[:2]
+    assert max(height, width) == 64
+
+
+def test_sample_frames_never_upscales(tmp_path):
+    import cv2
+
+    clip = make_video(tmp_path / "clip.mp4", 2)
+    original = cv2.imread(str(sample_frames(clip, tmp_path / "a", 1, max_edge=100000)[0][0])).shape[:2]
+    assert max(original) < 100000
