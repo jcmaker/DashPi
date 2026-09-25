@@ -98,6 +98,7 @@
 3. **로컬 AI 분석 파이프라인**:
    - `src/dashpi/pipeline.py`: incident 상태 전이 및 분석 orchestration
    - `src/dashpi/incidents.py`: incident coordinator, trigger 중복 병합
+   - AI 분석 백엔드: [OpenRouter 분석 설계](superpowers/specs/2026-09-25-openrouter-ai-analysis-design.md)
    - Ollama vision 모델 (qwen2.5vl:3b 등)로 사고 시점 localization
    - JSON + HTML 리포트 생성 (자급형, data URL 포함)
    - YOLOv8 COCO ONNX detector로 신호등/차선/표지판 overlay (선택)

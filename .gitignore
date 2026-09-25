@@ -7,3 +7,6 @@ web/dist/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+ai.env
+eval/cases/*/clip.mp4
+eval/results/
