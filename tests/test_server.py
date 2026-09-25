@@ -10,17 +10,20 @@ def test_server_defaults_to_loopback():
     args = build_parser().parse_args(["--data-root", "/tmp/dashpi"])
 
     assert (args.host, args.port) == ("127.0.0.1", 8000)
+    assert args.ai_report_model == "x-ai/grok-4.20"
 
 
 def test_server_accepts_optional_analysis_models_and_overlay_flags():
     args = build_parser().parse_args(
         [
-            "--data-root", "/tmp/dashpi", "--ai-model", "vision", "--detector-model", "/tmp/yolo.pt",
+            "--data-root", "/tmp/dashpi", "--ai-model", "vision", "--ai-report-model", "summary",
+            "--detector-model", "/tmp/yolo.pt",
             "--show-traffic-lights", "--show-lanes", "--show-traffic-signs",
         ]
     )
 
     assert args.ai_model == "vision"
+    assert args.ai_report_model == "summary"
     assert args.detector_model.name == "yolo.pt"
     assert (args.show_traffic_lights, args.show_lanes, args.show_traffic_signs) == (True, True, True)
 
@@ -31,19 +34,13 @@ def test_server_wires_regeneration_through_the_single_analysis_worker(monkeypatc
         host="127.0.0.1",
         port=8000,
         ai_model="vision",
+        ai_report_model="summary",
         detector_model=tmp_path / "yolo.pt",
         show_traffic_lights=True,
         show_lanes=False,
         show_traffic_signs=True,
     )
     captured = {}
-
-    class Client:
-        def __init__(self, model):
-            self.model = model
-
-        def analyze(self, *_args):
-            return {"summary": "report"}
 
     class Pipeline:
         def __init__(self, settings, store, detector, wait_for_capacity):
@@ -74,7 +71,8 @@ def test_server_wires_regeneration_through_the_single_analysis_worker(monkeypatc
             captured["shutdown"]()
 
     monkeypatch.setattr(server_module, "build_parser", lambda: type("Parser", (), {"parse_args": lambda self: args})())
-    monkeypatch.setattr(server_module, "OllamaClient", Client)
+    monkeypatch.setattr(server_module, "build_analyzer",
+                        lambda vision, report, root: captured.setdefault("analyzer", (vision, report, root)) and "analyzer")
     monkeypatch.setattr(server_module, "YoloDetector", lambda model, confidence: (model, confidence))
     monkeypatch.setattr(server_module, "IncidentPipeline", Pipeline)
     monkeypatch.setattr(server_module, "create_app", lambda store, regenerate_report: captured.update(regenerate=regenerate_report) or App())
@@ -83,7 +81,8 @@ def test_server_wires_regeneration_through_the_single_analysis_worker(monkeypatc
     server_module.main()
 
     assert captured["settings"].overlays == OverlaySettings(True, False, True)
+    assert captured["analyzer"] == ("vision", "summary", tmp_path)
     assert captured["report"][0] == "incident"
-    assert callable(captured["report"][1])
+    assert captured["report"][1] == "analyzer"
     assert captured["report"][2] == 4.0
     assert captured["report"][3] == OverlaySettings(True, False, True)

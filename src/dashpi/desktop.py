@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QStackedWidget, QStyle, QStyleOptionToolButton, QStylePainter, QToolButton, QVBoxLayout, QWidget,
 )
 
+from dashpi.analysis import build_analyzer
 from dashpi.analysis_worker import AnalysisWorker
 from dashpi.config import Settings
 from dashpi.device import VideoSettings, load_settings, save_settings
@@ -38,7 +39,6 @@ from dashpi.optical.container import MAX_PAYLOAD
 from dashpi.optical.session import OpticalSession
 from dashpi.pi_camera import PiCameraRecorder
 from dashpi.ranges import _open_verified_file
-from dashpi.reports import OllamaClient
 from dashpi.storage import IncidentStore
 from dashpi import theme
 
@@ -404,7 +404,10 @@ class DashPiWindow(QMainWindow):
                     ai_model=self.session.recorder.settings.ai_model,
                     ai_report_model=self.session.recorder.settings.ai_report_model,
                 )
-                self.session.analyze = OllamaClient(self.session.settings.ai_model).analyze
+                self.session.analyze = build_analyzer(
+                    self.session.settings.ai_model, self.session.settings.ai_report_model,
+                    self.settings_path.parent,
+                )
             self._submit(self.session.recorder.prepare, self._prepared)
         except Exception as error:
             log.exception("녹화 시작 실패")
@@ -665,7 +668,7 @@ class DashPiWindow(QMainWindow):
         try:
             model = load_settings(self.settings_path).ai_model
             settings = replace(self.session.settings, ai_model=model)
-            analyze = OllamaClient(model).analyze
+            analyze = build_analyzer(settings.ai_model, settings.ai_report_model, self.settings_path.parent)
             future = self.session.worker.submit(
                 lambda: analyze_external_video(source, position, settings, self.store, analyze)
             )
@@ -864,7 +867,7 @@ def main():
     recorder = PiCameraRecorder(root, current)
     settings = Settings(root, current.ai_model, current.ai_report_model)
     session = DeviceSession(recorder, settings, IncidentStore(root), worker,
-                            OllamaClient(settings.ai_model).analyze)
+                            build_analyzer(settings.ai_model, settings.ai_report_model, root))
     window = DashPiWindow(session, IncidentStore(root), root / "settings.json")
     try:
         app.exec()

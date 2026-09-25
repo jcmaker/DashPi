@@ -15,7 +15,7 @@ from tests.media_factory import make_video
 
 def run_server(monkeypatch, tmp_path, exercise, analyze):
     args = Namespace(data_root=tmp_path, host="127.0.0.1", port=8000,
-                     ai_model="vision", detector_model=tmp_path / "yolo.pt",
+                     ai_model="vision", ai_report_model="summary", detector_model=tmp_path / "yolo.pt",
                      show_traffic_lights=False, show_lanes=False, show_traffic_signs=False)
     worker = AnalysisWorker()
     captured = {}
@@ -28,7 +28,7 @@ def run_server(monkeypatch, tmp_path, exercise, analyze):
     monkeypatch.setattr(server_module, "build_parser", lambda: type("Parser", (), {"parse_args": lambda self: args})())
     monkeypatch.setattr(server_module, "AnalysisWorker", lambda: worker)
     monkeypatch.setattr(server_module, "YoloDetector", lambda *_: None)
-    monkeypatch.setattr(server_module, "OllamaClient", lambda *_: type("Client", (), {"analyze": staticmethod(analyze)})())
+    monkeypatch.setattr(server_module, "build_analyzer", lambda *_: analyze)
     monkeypatch.setattr(server_module, "create_app", create_app)
     monkeypatch.setattr(server_module.uvicorn, "run", lambda *_a, **_kw: exercise(captured["regenerate"], worker))
     try:

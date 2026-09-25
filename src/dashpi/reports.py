@@ -1,79 +1,7 @@
 import base64
 import html
-import ipaddress
 import json
 import math
-import urllib.parse
-import urllib.request
-from pathlib import Path
-
-
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *_args, **_kwargs):
-        return None
-
-
-def _validated_loopback_origin(base_url: str) -> str:
-    parsed = urllib.parse.urlsplit(base_url)
-    try:
-        valid = (
-            parsed.scheme == "http"
-            and parsed.hostname is not None
-            and ipaddress.ip_address(parsed.hostname).is_loopback
-            and parsed.username is None
-            and parsed.password is None
-            and parsed.path in ("", "/")
-            and not parsed.query
-            and not parsed.fragment
-        )
-    except ValueError:
-        valid = False
-    if not valid:
-        raise ValueError("base_url must be a numeric loopback HTTP origin")
-    return base_url.rstrip("/")
-
-
-class OllamaClient:
-    def __init__(
-        self,
-        model: str,
-        base_url: str = "http://127.0.0.1:11434",
-        timeout: float = 120.0,
-    ):
-        self.model = model
-        self.base_url = _validated_loopback_origin(base_url)
-        self.timeout = timeout
-        self.opener = urllib.request.build_opener(
-            urllib.request.ProxyHandler({}), _NoRedirect()
-        )
-
-    def validate_model(self) -> None:
-        with self.opener.open(self.base_url + "/api/tags", timeout=5.0) as response:
-            names = {item["name"] for item in json.loads(response.read())["models"]}
-        if self.model not in names:
-            raise ValueError(f"Ollama model not installed: {self.model}")
-
-    def analyze(self, frames: list[tuple[Path, float]], *_context) -> dict:
-        images = [base64.b64encode(path.read_bytes()).decode() for path, _timestamp in frames]
-        body = json.dumps(
-            {
-                "model": self.model,
-                "stream": False,
-                "format": "json",
-                "prompt": "Return JSON with incident_timestamp (seconds from first frame), summary, observations, and limitations. Describe evidence only; do not determine legal fault."
-                "\nThe first frame means the evidence clip origin (0 seconds). Image timestamps in image order, in seconds from that origin: "
-                + json.dumps([timestamp for _path, timestamp in frames])
-                + ". Use this clip-relative timebase for all timestamps.",
-                "images": images,
-            }
-        ).encode()
-        request = urllib.request.Request(
-            self.base_url + "/api/generate",
-            data=body,
-            headers={"Content-Type": "application/json"},
-        )
-        with self.opener.open(request, timeout=self.timeout) as response:
-            return json.loads(json.loads(response.read())["response"])
 
 
 def validate_report(
