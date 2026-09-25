@@ -48,6 +48,7 @@ class IncidentMetadata:
     incident_offset_seconds: float | None = None
     analysis_attempts: int = 0
     next_analysis_at: str | None = None
+    manual_offset_seconds: float | None = None  # moment the user marked; retries skip locating
 
     @classmethod
     def new(

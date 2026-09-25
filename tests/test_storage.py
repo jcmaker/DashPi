@@ -61,6 +61,19 @@ def test_store_round_trips_derived_artifact_and_overlay_era_fields(tmp_path):
     assert loaded.incident_offset_seconds == 30.0
 
 
+def test_store_round_trips_manual_offset_and_defaults_it_for_old_metadata(tmp_path):
+    store = IncidentStore(tmp_path)
+    item = IncidentMetadata.new("inc-1", "2026-09-06T00:00:00Z", 40.0, 15.0)
+    item.manual_offset_seconds = 12.5
+    store.save(item)
+    assert store.load("inc-1").manual_offset_seconds == 12.5
+    path = store.directory("inc-1") / "metadata.json"
+    raw = json.loads(path.read_text())
+    raw.pop("manual_offset_seconds")
+    path.write_text(json.dumps(raw))
+    assert store.load("inc-1").manual_offset_seconds is None
+
+
 def test_store_loads_metadata_written_before_derived_fields(tmp_path):
     store = IncidentStore(tmp_path)
     item = IncidentMetadata.new("inc-old", "2026-09-02T00:00:00Z", 40.0, 15.0)

@@ -42,3 +42,20 @@ def test_external_video_rejects_missing_file_without_incident(tmp_path):
     with pytest.raises(FileNotFoundError):
         analyze_external_video(tmp_path / "gone.mp4", 2.0, settings, store, lambda *_: {})
     assert store.list() == []
+
+
+def test_marked_moment_is_saved_so_a_later_retry_can_reuse_it(tmp_path):
+    from dashpi.ai_client import RetryableAnalysisError
+    from dashpi.offline_video import analyze_external_video
+
+    source = make_video(tmp_path / "source.mp4", 12)
+    settings = Settings(tmp_path / "data", "test-model", frame_sample_count=3)
+    store = IncidentStore(settings.data_root)
+
+    def offline(*_args):
+        raise RetryableAnalysisError("인터넷 연결 없음", reached_provider=False)
+
+    result = analyze_external_video(source, 5.0, settings, store, offline)
+
+    assert result.state is IncidentState.AWAITING_ANALYSIS
+    assert store.load(result.incident_id).manual_offset_seconds == 5.0

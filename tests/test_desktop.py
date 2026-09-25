@@ -907,3 +907,36 @@ def test_log_file_records_screens_clicks_and_uncaught_errors(qapp, tmp_path, mon
             handler.close()
         faulthandler.disable()
         qInstallMessageHandler(None)
+
+
+def test_retry_reuses_the_moment_marked_on_an_external_video(qapp, tmp_path, monkeypatch):
+    import dashpi.desktop as desktop
+    from concurrent.futures import Future
+    from dashpi.config import Settings
+
+    store = IncidentStore(tmp_path / "data")
+    incident = IncidentMetadata.new("marked", datetime.now(UTC).isoformat(), 5.0, 5.0, 5.0)
+    incident.manual_offset_seconds = 5.0
+    store.save(incident)
+    seen = []
+    monkeypatch.setattr(desktop.IncidentPipeline, "regenerate_report",
+                        lambda _self, incident_id, _analyze, incident_offset_override=None, *_a:
+                        seen.append((incident_id, incident_offset_override)))
+
+    class SyncWorker:
+        wait_for_capacity = staticmethod(lambda: None)
+
+        def submit(self, fn):
+            future = Future()
+            future.set_result(fn())
+            return future
+
+    session = FakeSession()
+    session.worker = SyncWorker()
+    session.settings = Settings(store.root, "fake")
+    window = desktop.DashPiWindow(session, store, store.root / "settings.json")
+    try:
+        window._run_retry("marked").result()
+        assert seen == [("marked", 5.0)]
+    finally:
+        window.close()

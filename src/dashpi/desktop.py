@@ -580,7 +580,11 @@ class DashPiWindow(QMainWindow):
                            ai_report_model=current.ai_report_model)
         pipeline = IncidentPipeline(settings, self.store, getattr(self.session, "detector", None),
                                     wait_for_capacity=self.session.worker.wait_for_capacity)
-        return self.session.worker.submit(lambda: pipeline.regenerate_report(incident_id, self._analyzer()))
+
+        def run():
+            manual = self.store.load(incident_id).manual_offset_seconds
+            return pipeline.regenerate_report(incident_id, self._analyzer(), manual)
+        return self.session.worker.submit(run)
 
     def _reanalyze(self):
         incident = self._selected_incident

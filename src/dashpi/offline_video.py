@@ -29,6 +29,7 @@ def analyze_external_video(source: Path, position: float, settings: Settings,
     incident = IncidentMetadata.new(
         uuid.uuid4().hex, datetime.now(UTC).isoformat(), position, after, before,
     )
+    incident.manual_offset_seconds = before
     return IncidentPipeline(settings, store).process(
         incident, [Segment(source, 0.0, duration)], analyze,
         incident_offset_override=before,
