@@ -22,7 +22,7 @@ Raspberry Pi 5(4GB)의 RAM을 녹화·ffmpeg·객체 추적에 남기기 위해 
 | --- | --- |
 | 제공 경로 | OpenRouter, OpenAI 호환 Chat Completions (`POST {base_url}/chat/completions`) |
 | HTTP | 표준 라이브러리 `urllib`. 새 의존성 없음 |
-| 기본 모델 | `openai/gpt-6-sol` (설정에서 변경 가능) |
+| 기본 모델 | 비전(A·B) `x-ai/grok-4.7`, 요약(C) `x-ai/grok-4.20` — 사고 1건 약 $0.056 (설정에서 변경 가능) |
 | 입력 | 영상 전체가 아니라 추출 프레임(JPEG). 긴 변 1024px로 축소 |
 | 출력 | JSON Schema 강제 (`response_format` = `json_schema`, `strict: true`) |
 | 데이터 경로 | `provider: {"data_collection": "deny"}`로 데이터를 수집할 수 있는 제공사 제외 |
@@ -43,7 +43,7 @@ Raspberry Pi 5(4GB)의 RAM을 녹화·ffmpeg·객체 추적에 남기기 위해 
 - 외부 영상 분석처럼 사람이 사고 시점을 지정한 경우(`incident_offset_override`)에는 A를 건너뛰고 지정 시각을 쓴다.
 - 세 결과를 합쳐 기존 `validate_report()` 입력 형식(`incident_timestamp`, `summary`, `observations`, `limitations`)을 만든다. `confidence`와 `reason`은 리포트 JSON의 `analysis` 항목에 보존하되 기존 검증 스키마는 바꾸지 않는다.
 - 모든 프롬프트는 "화면에 보이는 사실만, 법적 과실을 판단하지 말 것"을 명시한다. 출력 언어는 한국어로 고정한다.
-- 호출별 모델은 기본적으로 같은 설정 모델을 쓰고, 하네스와 환경 변수로 역할별 모델을 바꿀 수 있다.
+- 기본 모델은 비전 역할(A·B)에 `x-ai/grok-4.7`, 요약 역할(C)에 `x-ai/grok-4.20`이다. 설정의 비전 모델·요약 모델 두 값으로 바꿀 수 있고, 하네스와 환경 변수로 A·B를 따로 바꿀 수도 있다.
 
 ### Grok 후보
 
@@ -55,7 +55,20 @@ OpenRouter의 Grok 중 블랙박스 영상 전용 모델은 없다. 모두 이�
 | `x-ai/grok-4.20` | $1.25 / $2.5 | C (및 A) | "가장 낮은 환각률과 엄격한 지시 준수"를 내세움 → 사실만 요약해야 하는 C에 적합 |
 | `x-ai/grok-4.3` | $1.25 / $2.5 | C 대안 | 사실 정확성·지시 준수 지향의 추론 모델 |
 
-`grok-build-0.1`(코딩 전용), `grok-4.20-multi-agent`(연구용 병렬 에이전트, 느리고 비쌈)은 제외한다. 기본값은 하네스 결과로 확정한다.
+`grok-build-0.1`(코딩 전용), `grok-4.20-multi-agent`(연구용 병렬 에이전트, 느리고 비쌈)은 제외한다.
+
+### 기본값과 비교 후보 (2026-09-25 OpenRouter 가격)
+
+사고 1건 = 호출 3회, 이미지 24장(1024px), 입력 약 22.4k·출력 약 5k 토큰(추론 포함) 기준 추정. 이미지 토큰 산정이 제공사마다 달라 ±30% 오차가 있으며, 하네스가 실제 `usage`로 기록한다.
+
+| 구분 | 모델 | 사고 1건 |
+| --- | --- | --- |
+| **기본 (비전 A·B + 요약 C)** | `x-ai/grok-4.7` + `x-ai/grok-4.20` | **약 $0.056** |
+| 비전 비교 후보 | `openai/gpt-6-sol`, `anthropic/claude-sonnet-5` | 단독 약 $0.095 |
+| 요약 비교 후보 | `openai/gpt-6-luna`, `anthropic/claude-haiku-4.5`, `x-ai/grok-4.3` | C 호출만 $0.0004–0.01 |
+| 고품질 기준선(하네스 전용) | `anthropic/claude-opus-5.5` | 약 $0.19 |
+
+첫 하네스 실행에서 비전 3종 × 요약 3종을 비교하고, 결과가 기본값보다 나은 조합이 있으면 기본값을 바꾼다.
 
 ## 4. 구성 요소
 
@@ -76,7 +89,7 @@ OpenRouter의 Grok 중 블랙박스 영상 전용 모델은 없다. 모두 이�
 - 역할 A·B·C의 프롬프트와 JSON Schema를 한 파일에 둔다.
 - `Analyzer(client, models, frame_sampler)`는 `analyze(clip_path, work_dir, incident_offset_override=None) -> dict`로 A→B→C를 실행하고 `validate_report()` 입력 형식을 반환한다.
 - `FakeAnalyzer`: 네트워크 없이 클립 길이에 맞는 결정적 리포트를 반환한다. 설정 모델이 `fake`이면 사용한다.
-- `load_ai_config(path=~/.config/dashpi/ai.env)`: `KEY=VALUE` 형식을 읽는다. 키: `DASHPI_AI_API_KEY`(필수), `DASHPI_AI_BASE_URL`(기본 `https://openrouter.ai/api/v1`), 선택 `DASHPI_AI_MODEL_LOCATE`/`_OBSERVE`/`_REPORT`. 같은 이름의 환경 변수가 파일보다 우선한다. 파일 권한이 그룹·기타 사용자에게 열려 있으면 경고를 로그에 남긴다.
+- `load_ai_config(path=~/.config/dashpi/ai.env)`: `KEY=VALUE` 형식을 읽는다. 키: `DASHPI_AI_API_KEY`(필수), `DASHPI_AI_BASE_URL`(기본 `https://openrouter.ai/api/v1`), 선택 `DASHPI_AI_MODEL_LOCATE`/`_OBSERVE`/`_REPORT`(설정 파일의 비전·요약 모델보다 우선). 같은 이름의 환경 변수가 파일보다 우선한다. 파일 권한이 그룹·기타 사용자에게 열려 있으면 경고를 로그에 남긴다.
 
 ### 4.3 파이프라인 변경 (`pipeline.py`, `media.py`)
 
@@ -84,7 +97,7 @@ OpenRouter의 Grok 중 블랙박스 영상 전용 모델은 없다. 모두 이�
 - `sample_frames(clip, output_dir, count, start=0.0, end=None, max_edge=1024)`: 구간과 축소를 지원한다(`ffmpeg -vf scale`).
 - `generate_report()`에서 `RetryableAnalysisError`는 `AWAITING_ANALYSIS`로 전이하고 `failure_reason`에 사유를, 새 필드 `analysis_attempts`, `next_analysis_at`(ISO 시각)에 재시도 정보를 저장한다. 다른 예외는 지금처럼 `ANALYSIS_FAILED`.
 - `report_model` 기록은 실제 사용 모델(역할별이 다르면 `locate/observe/report` 모델 목록)로 한다.
-- `Settings.ollama_model` → `Settings.ai_model`, `VideoSettings.ollama_model` → `VideoSettings.ai_model`(기본 `openai/gpt-6-sol`). `load_settings()`는 기존 `ollama_model` 키를 무시하고 기본값을 쓴다.
+- `Settings.ollama_model` → `Settings.ai_model`(비전) + `Settings.ai_report_model`(요약). `VideoSettings`도 같은 두 필드(기본 `x-ai/grok-4.7`, `x-ai/grok-4.20`). `load_settings()`는 기존 `ollama_model` 키를 무시하고 기본값을 쓴다.
 
 ### 4.4 상태 (`models.py`)
 
@@ -110,7 +123,7 @@ OpenRouter의 Grok 중 블랙박스 영상 전용 모델은 없다. 모두 이�
 
 ### 4.7 Pi 앱 (`desktop.py`)
 
-- 설정 화면의 "로컬 AI 모델" → "AI 모델"(자유 입력, `fake` 허용). 아래에 캡션 "API 키: 설정됨 / 없음"(키 값은 표시하지 않음).
+- 설정 화면의 "로컬 AI 모델" → "비전 모델"과 "요약 모델" 두 칸(자유 입력, 비전 모델에 `fake`를 넣으면 가짜 분석기). 아래에 캡션 "API 키: 설정됨 / 없음"(키 값은 표시하지 않음).
 - 녹화기록 목록과 상세에 "분석 대기" 상태와 사유(예: "인터넷 연결 없음 · 다음 시도 14:32")를 보인다.
 - `OllamaClient` 사용 지점(녹화 세션, 외부 영상 분석)을 분석기 생성 함수 하나로 바꾼다.
 - 상세 화면: `analysis_failed` 사고에도 **사고 분석** 버튼을 보여 재분석할 수 있게 한다(키·크레딧 문제를 고친 뒤 경로). 누르면 `awaiting_analysis`로 바꾸고 즉시 재시도 대상에 넣는다.
@@ -118,7 +131,7 @@ OpenRouter의 Grok 중 블랙박스 영상 전용 모델은 없다. 모두 이�
 
 ### 4.8 CLI와 웹 서버
 
-- `dashpi simulate`: `--ollama-model` → `--ai-model`(기본 `openai/gpt-6-sol`). `validate_model()` 호출 제거.
+- `dashpi simulate`: `--ollama-model` → `--ai-model`(기본 `x-ai/grok-4.7`), `--ai-report-model`(기본 `x-ai/grok-4.20`). `validate_model()` 호출 제거.
 - `dashpi-server`: `--ollama-model` → `--ai-model`. 수동 재생성은 같은 분석기를 사용한다.
 - `reports.py`에서 `OllamaClient`와 관련 헬퍼를 제거한다. `validate_report()`와 `render_report_html()`은 유지한다.
 
@@ -132,7 +145,7 @@ OpenRouter의 Grok 중 블랙박스 영상 전용 모델은 없다. 모두 이�
 
 - 사례 폴더: `eval/cases/<case_id>/clip.mp4`(저장소에 올리지 않음, `.gitignore`) + `expected.json`(커밋).
 - `expected.json`: `incident_timestamp`, `timestamp_tolerance`(기본 1.0초), `must_observe`(관찰에 있어야 할 사실 키워드 목록), `must_not_claim`(없는 사실·과실 표현 목록).
-- 실행: `dashpi eval --cases eval/cases --model openai/gpt-6-sol --model x-ai/grok-4.7 [--locate-model …] [--observe-model …] [--report-model …] --out eval/results/<날짜>.jsonl`.
+- 실행: `dashpi eval --cases eval/cases --vision-model x-ai/grok-4.7 --vision-model openai/gpt-6-sol --report-model x-ai/grok-4.20 --report-model openai/gpt-6-luna`(비전 × 요약 조합을 모두 실행) --out eval/results/<날짜>.jsonl`.
 - 사례·모델 조합마다 역할별 출력, 소요 시간, 토큰 수, 추정 비용(OpenRouter `/models` 가격 기준, 실행 시 조회)을 JSONL로 저장하고 요약 표를 출력한다.
 - 채점:
   - A: `|예측 − 정답| ≤ tolerance`면 통과, 오차(초) 기록.
@@ -171,7 +184,7 @@ OpenRouter의 Grok 중 블랙박스 영상 전용 모델은 없다. 모두 이�
 
 1. OpenRouter 계정에 선불 크레딧을 충전하고 **자동 충전을 끈다**.
 2. 계정 설정에서 학습 가능 제공사로의 라우팅을 끈다(요청의 `data_collection: "deny"`와 이중 방어).
-3. 용도별 API 키를 만들고 키마다 사용 한도를 건다: `dashpi-pi`($5), `dashpi-junhyeong`($5), 팀원별(`$2`).
+3. 용도별 API 키를 만들고 키마다 사용 한도를 건다: `dashpi-pi`($5 ≈ 기본 모델 약 90건), `dashpi-junhyeong`($5, 하네스 포함), 팀원별 $2(약 35건). 하네스를 자주 돌리면 준형 키 한도를 따로 올린다.
 4. 키는 각자 `~/.config/dashpi/ai.env`에 두고 `chmod 600`. 저장소에는 `ai.env.example`만 둔다.
 5. 키 유출·오사용 시 해당 키만 비활성화한다.
 
@@ -179,7 +192,7 @@ OpenRouter의 Grok 중 블랙박스 영상 전용 모델은 없다. 모두 이�
 
 1. `main`을 Pi의 `~/DashPi-native`로 `git pull`, 앱 재시작.
 2. 준형이 Pi용 키를 `~/.config/dashpi/ai.env`에 넣는다(`chmod 600`).
-3. 설정 화면에서 "API 키: 설정됨" 확인, AI 모델 기본값 확인.
+3. 설정 화면에서 "API 키: 설정됨" 확인, 비전 모델 `x-ai/grok-4.7`·요약 모델 `x-ai/grok-4.20` 확인.
 4. 수락 시험:
    - 인터넷 연결 상태에서 주행 녹화 → 사고 분석 → 15초 후 종료 → **분석 완료** → 리포트 QR 전송.
    - Wi-Fi를 끈 상태에서 같은 흐름 → **분석 대기** 표시 → Wi-Fi 복구 → 사람 조작 없이 **분석 완료**.
