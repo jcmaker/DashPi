@@ -7,8 +7,10 @@ import json
 from pathlib import Path
 import re
 import time
+import urllib.error
 import urllib.request
 
+from dashpi.ai_client import AnalysisError, RetryableAnalysisError
 from dashpi.analysis import FRAME_COUNT, MAX_TOKENS, locate, observe, observe_window, summarize
 from dashpi.media import probe_duration, sample_frames
 
@@ -70,12 +72,20 @@ def max_cost(case_count: int, vision_models: list[str], report_models: list[str]
 
 
 def fetch_prices(models: list[str]) -> dict[str, tuple[float, float]]:
-    with urllib.request.urlopen(PRICES_URL, timeout=30) as response:
-        listing = {item["id"]: item["pricing"] for item in json.loads(response.read())["data"]}
+    try:
+        with urllib.request.urlopen(PRICES_URL, timeout=30) as response:
+            listing = {item["id"]: item["pricing"] for item in json.loads(response.read())["data"]}
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError) as error:
+        raise ValueError(f"가격 정보를 가져오지 못했습니다: {error}") from error
     missing = [model for model in models if model not in listing]
     if missing:
         raise ValueError(f"가격을 찾을 수 없는 모델: {', '.join(missing)}")
     return {model: (float(listing[model]["prompt"]), float(listing[model]["completion"])) for model in models}
+
+
+def _error_row(case_id: str, vision_model: str, report_model: str, error: Exception) -> dict:
+    return {"case": case_id, "vision_model": vision_model, "report_model": report_model,
+            "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "error": str(error)}
 
 
 def run(cases: list[Case], vision_models: list[str], report_models: list[str], client,
@@ -83,17 +93,30 @@ def run(cases: list[Case], vision_models: list[str], report_models: list[str], c
     rows = []
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("a", encoding="utf-8") as out:
+        def emit(row: dict) -> None:
+            out.write(json.dumps(row, ensure_ascii=False) + "\n")
+            rows.append(row)
+
         for case in cases:
             duration = probe_duration(case.clip)
             frames = sample_frames(case.clip, work_root / case.case_id / "locate", FRAME_COUNT)
             for vision in vision_models:
-                located = locate(client, vision, frames)
-                moment = min(max(float(located.output["incident_timestamp"]), 0.0), duration)
-                start, end = observe_window(moment, duration)
-                dense = sample_frames(case.clip, work_root / case.case_id / f"observe-{start:.2f}", FRAME_COUNT, start, end)
-                observed = observe(client, vision, dense)
+                try:
+                    located = locate(client, vision, frames)
+                    moment = min(max(float(located.output["incident_timestamp"]), 0.0), duration)
+                    start, end = observe_window(moment, duration)
+                    dense = sample_frames(case.clip, work_root / case.case_id / f"observe-{start:.2f}",
+                                          FRAME_COUNT, start, end)
+                    observed = observe(client, vision, dense)
+                except (AnalysisError, RetryableAnalysisError) as error:
+                    emit(_error_row(case.case_id, vision, "-", error))
+                    continue
                 for report_model in report_models:
-                    reported = summarize(client, report_model, observed.output["observations"])
+                    try:
+                        reported = summarize(client, report_model, observed.output["observations"])
+                    except (AnalysisError, RetryableAnalysisError) as error:
+                        emit(_error_row(case.case_id, vision, report_model, error))
+                        continue
                     row = {
                         "case": case.case_id, "vision_model": vision, "report_model": report_model,
                         "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -105,14 +128,20 @@ def run(cases: list[Case], vision_models: list[str], report_models: list[str], c
                         **score(case.expected, moment, observed.output["observations"],
                                 reported.output["summary"], reported.output["limitations"]),
                     }
-                    out.write(json.dumps(row, ensure_ascii=False) + "\n")
-                    rows.append(row)
+                    emit(row)
     return rows
 
 
 def summary_table(rows: list[dict]) -> str:
     lines = ["case\tvision\treport\tlocate\trecall\tviolations\tseconds\tcost"]
     for row in rows:
+        if "error" in row:
+            message = row["error"].replace("\n", " ")
+            lines.append(
+                f"{row['case']}\t{row['vision_model']}\t{row['report_model']}\t"
+                f"ERROR\t-\t-\t-\t-\t{message}"
+            )
+            continue
         lines.append(
             f"{row['case']}\t{row['vision_model']}\t{row['report_model']}\t"
             f"{'OK' if row['locate_pass'] else 'X'}\t{row['observe_recall']:.2f}\t"

@@ -45,7 +45,10 @@ def run_eval(args) -> None:
     if not cases:
         raise SystemExit(f"사례가 없습니다: {args.cases}")
     config = load_ai_config()
-    prices = fetch_prices(sorted(set(args.vision_model + args.report_model)))
+    try:
+        prices = fetch_prices(sorted(set(args.vision_model + args.report_model)))
+    except ValueError as error:
+        raise SystemExit(str(error))
     ceiling = max_cost(len(cases), args.vision_model, args.report_model, prices)
     print(f"사례 {len(cases)}건 × 비전 {len(args.vision_model)} × 요약 {len(args.report_model)} · 예상 최대 비용 ${ceiling:.2f}")
     if not args.yes and input("계속할까요? [y/N] ").strip().lower() != "y":
