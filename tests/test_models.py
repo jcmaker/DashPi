@@ -58,6 +58,7 @@ def test_incident_metadata_includes_configured_windows_and_artifact_contract(tmp
         "report_generated_at": "2026-09-02T00:01:00Z",
         "analysis_attempts": 0,
         "next_analysis_at": None,
+        "manual_offset_seconds": None,
         "transitions": [
             {"state": "collecting_post_trigger", "at": "2026-09-02T00:00:00Z"},
             {"state": "ready", "at": "2026-09-02T00:01:01Z"},
