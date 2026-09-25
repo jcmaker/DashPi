@@ -987,6 +987,15 @@ def test_observe_frames_come_from_the_window_around_the_moment(tmp_path):
     assert len(stamps) == 12 and min(stamps) >= 1.0 and max(stamps) <= 7.0
 
 
+def test_role_timing_and_tokens_are_logged_without_the_key(tmp_path, caplog):
+    import logging
+    caplog.set_level(logging.INFO, logger="dashpi")
+    clip = make_video(tmp_path / "clip.mp4", 8)
+    analyzer(tmp_path, ScriptedClient(ANSWERS), key="sk-secret")(frames_for(clip, tmp_path), clip, tmp_path / "w")
+    assert "AI observe: vision-m" in caplog.text and "토큰 100/10" in caplog.text
+    assert "sk-secret" not in caplog.text
+
+
 def test_manual_moment_skips_locating(tmp_path):
     clip = make_video(tmp_path / "clip.mp4", 8)
     client = ScriptedClient(ANSWERS)
@@ -1045,6 +1054,7 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass
 import json
+import logging
 import math
 from pathlib import Path
 import time
@@ -1055,6 +1065,7 @@ from dashpi.ai_client import (
 )
 from dashpi.media import probe_duration, sample_frames
 
+log = logging.getLogger("dashpi")
 FAKE_MODEL = "fake"
 OBSERVE_SECONDS = 3.0
 FRAME_COUNT = 12
@@ -1164,6 +1175,9 @@ class Analyzer:
         observed = observe(client, self.vision_model, dense)
         reported = summarize(client, self.report_model, observed.output["observations"])
         steps += [("observe", observed), ("report", reported)]
+        for name, result in steps:  # never log the key or image content
+            log.info("AI %s: %s %.1fs 토큰 %s/%s", name, result.model, result.seconds,
+                     result.usage.get("prompt_tokens"), result.usage.get("completion_tokens"))
         analysis = {
             "models": {name: result.model for name, result in steps},
             "usage": {name: result.usage for name, result in steps},
