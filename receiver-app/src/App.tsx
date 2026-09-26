@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import {
   Camera,
   CameraOff,
@@ -90,7 +90,18 @@ function VerifiedCard({ file, onReset }: { file: VerifiedFile; onReset: () => vo
 
 export default function App() {
   const { installed, accepted, canPrompt, isIos, install } = useInstallPrompt()
-  if (!installed) return <InstallLanding accepted={accepted} canPrompt={canPrompt} isIos={isIos} install={install} />
+  const [browserCamera, setBrowserCamera] = useState(false)
+  if (!installed && !browserCamera) {
+    return (
+      <InstallLanding
+        accepted={accepted}
+        canPrompt={canPrompt}
+        isIos={isIos}
+        install={install}
+        onOpenInBrowser={() => setBrowserCamera(true)}
+      />
+    )
+  }
   return <Receiver />
 }
 
@@ -137,11 +148,12 @@ function Receiver() {
                 ref={video}
                 playsInline
                 muted
+                autoPlay
                 aria-label="광학 QR 스캐너 카메라"
-                className={cameraOn ? 'size-full object-cover' : 'hidden'}
+                className="size-full object-cover"
               />
               {!cameraOn && (
-                <div className="text-muted-foreground absolute inset-0 flex items-center justify-center">
+                <div className="text-muted-foreground absolute inset-0 flex items-center justify-center bg-muted">
                   <Camera className="size-10" />
                 </div>
               )}

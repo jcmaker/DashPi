@@ -12,7 +12,7 @@ const steps = [
   {
     icon: Smartphone,
     title: '설치된 앱을 열기',
-    body: '브라우저는 설치만 합니다. 수신은 홈 화면 아이콘에서 합니다.',
+    body: '홈 화면 앱으로 열거나, 이 브라우저에서 바로 카메라를 켭니다.',
   },
   {
     icon: Camera,
@@ -26,11 +26,13 @@ export function InstallLanding({
   canPrompt,
   isIos,
   install,
+  onOpenInBrowser,
 }: {
   accepted: boolean
   canPrompt: boolean
   isIos: boolean
   install: () => Promise<void>
+  onOpenInBrowser: () => void
 }) {
   const download = () => {
     if (canPrompt) {
@@ -68,6 +70,10 @@ export function InstallLanding({
           DashPi 화면의 QR을 홈 화면 앱이 읽습니다. 인터넷 없이도 되고, 받은 파일은 이 기기 밖으로 나가지 않습니다.
         </p>
         {action}
+        <Button className="w-full" size="lg" variant="outline" onClick={onOpenInBrowser}>
+          <Camera />
+          브라우저에서 카메라 열기
+        </Button>
         <p className="text-muted-foreground text-xs leading-5">{hint}</p>
       </header>
 

@@ -30,7 +30,7 @@ const initialState: ReceiverState = { phase: 'idle', recovered: 0, total: 0, cam
 const blockedState = (): ReceiverState => ({
   ...initialState,
   cameraBlocked: true,
-  error: '브라우저의 카메라 허용 창을 다시 띄울 수 없습니다. 휴대폰의 앱 설정에는 이 항목이 없습니다. 브라우저에서 이 사이트의 카메라 차단을 해제한 뒤 다시 누르세요.',
+  error: '브라우저가 카메라 허용 창을 다시 띄우지 않습니다. 주소창의 사이트 설정에서 이 페이지의 카메라를 허용으로 바꾼 뒤 다시 누르세요.',
 })
 
 export function useOpticalReceiver(video: RefObject<HTMLVideoElement | null>) {
