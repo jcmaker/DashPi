@@ -7,7 +7,6 @@ import {
   RotateCcw,
   Share2,
   ShieldCheck,
-  Smartphone,
   WifiOff,
 } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -15,6 +14,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
+import { InstallLanding } from '@/components/install-landing'
 import { useInstallPrompt } from '@/hooks/use-install-prompt'
 import { useOpticalReceiver, type ReceiverState, type VerifiedFile } from '@/hooks/use-optical-receiver'
 
@@ -31,58 +31,6 @@ function formatBytes(size: number): string {
   if (size < 1024) return `${size} B`
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
   return `${(size / 1024 / 1024).toFixed(1)} MB`
-}
-
-function InstallScreen({
-  accepted,
-  canPrompt,
-  isIos,
-  install,
-}: {
-  accepted: boolean
-  canPrompt: boolean
-  isIos: boolean
-  install: () => Promise<void>
-}) {
-  const download = () => {
-    if (canPrompt) {
-      void install()
-      return
-    }
-    if (isIos && typeof navigator.share === 'function') {
-      void navigator.share({ title: 'DashPi 수신', url: window.location.href }).catch(() => undefined)
-    }
-  }
-
-  return (
-    <main className="mx-auto flex min-h-svh w-full max-w-md flex-col justify-center gap-4 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]">
-      <header>
-        <p className="text-muted-foreground text-xs">DashPi · Optical Receiver</p>
-        <h1 className="font-heading text-xl font-semibold">사고 리포트 받기</h1>
-      </header>
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Smartphone />
-            앱을 설치하세요
-          </CardTitle>
-          <CardDescription>
-            {accepted
-              ? '설치되었습니다. 브라우저를 닫고 홈 화면의 DashPi 수신을 여세요.'
-              : '홈 화면에 설치한 뒤, 그 앱에서 리포트를 받으세요.'}
-          </CardDescription>
-        </CardHeader>
-        {!accepted && (
-          <CardFooter>
-            <Button className="w-full" onClick={download}>
-              <Download />
-              다운로드
-            </Button>
-          </CardFooter>
-        )}
-      </Card>
-    </main>
-  )
 }
 
 function VerifiedCard({ file, onReset }: { file: VerifiedFile; onReset: () => void }) {
@@ -142,7 +90,7 @@ function VerifiedCard({ file, onReset }: { file: VerifiedFile; onReset: () => vo
 
 export default function App() {
   const { installed, accepted, canPrompt, isIos, install } = useInstallPrompt()
-  if (!installed) return <InstallScreen accepted={accepted} canPrompt={canPrompt} isIos={isIos} install={install} />
+  if (!installed) return <InstallLanding accepted={accepted} canPrompt={canPrompt} isIos={isIos} install={install} />
   return <Receiver />
 }
 
