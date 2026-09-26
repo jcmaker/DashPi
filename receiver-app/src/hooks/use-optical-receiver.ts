@@ -30,7 +30,7 @@ const initialState: ReceiverState = { phase: 'idle', recovered: 0, total: 0, cam
 const blockedState = (): ReceiverState => ({
   ...initialState,
   cameraBlocked: true,
-  error: '카메라 권한이 꺼져 있습니다. 이 앱은 설정 화면을 열 수 없습니다. 휴대폰 설정에서 DashPi 수신의 카메라를 허용한 뒤 다시 누르세요.',
+  error: '브라우저의 카메라 허용 창을 다시 띄울 수 없습니다. 휴대폰의 앱 설정에는 이 항목이 없습니다. 브라우저에서 이 사이트의 카메라 차단을 해제한 뒤 다시 누르세요.',
 })
 
 export function useOpticalReceiver(video: RefObject<HTMLVideoElement | null>) {
