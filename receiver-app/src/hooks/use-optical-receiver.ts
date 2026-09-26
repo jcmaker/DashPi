@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { FrameCollector, messageForFrameError, qrPayload } from '@optical/collector.ts'
 import { unpackContainer } from '@optical/container.ts'
 import { parseFrame } from '@optical/protocol.ts'
+import { isCameraPermissionError, requestCamera } from '@/lib/camera-permission'
 
 export type VerifiedFile = {
   name: string
@@ -21,9 +22,16 @@ export type ReceiverState = {
   total: number
   file?: VerifiedFile
   error?: string
+  cameraBlocked: boolean
 }
 
-const initialState: ReceiverState = { phase: 'idle', recovered: 0, total: 0 }
+const initialState: ReceiverState = { phase: 'idle', recovered: 0, total: 0, cameraBlocked: false }
+
+const blockedState = (): ReceiverState => ({
+  ...initialState,
+  cameraBlocked: true,
+  error: '카메라 권한이 없습니다. 설정에서 카메라를 허용하세요.',
+})
 
 export function useOpticalReceiver(video: RefObject<HTMLVideoElement | null>) {
   const [state, setState] = useState<ReceiverState>(initialState)
@@ -67,7 +75,7 @@ export function useOpticalReceiver(video: RefObject<HTMLVideoElement | null>) {
       if (!packed) {
         setState((current) =>
           current.phase === 'scanning' || current.phase === 'receiving'
-            ? { phase: 'receiving', recovered, total }
+            ? { phase: 'receiving', recovered, total, cameraBlocked: false }
             : current,
         )
         return
@@ -75,7 +83,7 @@ export function useOpticalReceiver(video: RefObject<HTMLVideoElement | null>) {
       if (completedIdentity.current === frames.identity) return
       completedIdentity.current = frames.identity
       const verifiedIdentity = frames.identity
-      setState({ phase: 'verifying', recovered, total })
+      setState({ phase: 'verifying', recovered, total, cameraBlocked: false })
       void unpackContainer(packed)
         .then((file) => {
           if (frames.identity !== verifiedIdentity) return
@@ -89,6 +97,7 @@ export function useOpticalReceiver(video: RefObject<HTMLVideoElement | null>) {
             phase: 'verified',
             recovered,
             total,
+            cameraBlocked: false,
             file: { name: file.name, mediaType: file.mediaType, size: blob.size, url: fileUrl.current, blob },
           })
         })
@@ -98,6 +107,7 @@ export function useOpticalReceiver(video: RefObject<HTMLVideoElement | null>) {
             phase: 'scanning',
             recovered: 0,
             total: 0,
+            cameraBlocked: false,
             error: '파일 무결성 검증에 실패했습니다. 저장할 수 없습니다.',
           })
         })
@@ -112,26 +122,33 @@ export function useOpticalReceiver(video: RefObject<HTMLVideoElement | null>) {
     collector.current = new FrameCollector()
     completedIdentity.current = ''
     releaseFile()
-    setState({ phase: 'starting', recovered: 0, total: 0 })
-    new BrowserQRCodeReader()
-      .decodeFromConstraints({ video: { facingMode: 'environment' }, audio: false }, element, (result) => {
-        const payload = qrPayload(result?.getResultMetadata()?.get(ResultMetadataType.BYTE_SEGMENTS))
-        if (payload && generation.current === runId) handleFrame(payload)
+    setState({ phase: 'starting', recovered: 0, total: 0, cameraBlocked: false })
+    void requestCamera()
+      .then((stream) => {
+        if (generation.current !== runId) {
+          stream.getTracks().forEach((track) => track.stop())
+          return undefined
+        }
+        return new BrowserQRCodeReader().decodeFromStream(stream, element, (result) => {
+          const payload = qrPayload(result?.getResultMetadata()?.get(ResultMetadataType.BYTE_SEGMENTS))
+          if (payload && generation.current === runId) handleFrame(payload)
+        })
       })
       .then((scannerControls) => {
-        if (generation.current !== runId) {
-          scannerControls.stop()
+        if (!scannerControls || generation.current !== runId) {
+          scannerControls?.stop()
           return
         }
         controls.current = scannerControls
         setState((current) => (current.phase === 'starting' ? { ...current, phase: 'scanning' } : current))
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (generation.current !== runId) return
-        setState({
-          ...initialState,
-          error: '카메라를 시작하지 못했습니다. 카메라 권한을 허용했는지 확인하세요.',
-        })
+        setState(
+          isCameraPermissionError(error)
+            ? blockedState()
+            : { ...initialState, error: '카메라를 시작하지 못했습니다. 다른 앱이 카메라를 쓰고 있는지 확인하세요.' },
+        )
       })
   }, [handleFrame, releaseFile, video])
 
@@ -155,6 +172,31 @@ export function useOpticalReceiver(video: RefObject<HTMLVideoElement | null>) {
       releaseFile()
     }
   }, [releaseFile, stop])
+
+  useEffect(() => {
+    if (navigator.permissions?.query === undefined) return undefined
+    let permission: PermissionStatus | undefined
+    let cancelled = false
+    const apply = () => {
+      if (cancelled || permission === undefined) return
+      if (permission.state === 'denied') setState((current) => (current.phase === 'idle' ? blockedState() : current))
+      if (permission.state === 'granted') {
+        setState((current) => (current.cameraBlocked ? { ...current, cameraBlocked: false, error: undefined } : current))
+      }
+    }
+    void navigator.permissions
+      .query({ name: 'camera' })
+      .then((status) => {
+        permission = status
+        status.addEventListener('change', apply)
+        apply()
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+      permission?.removeEventListener('change', apply)
+    }
+  }, [])
 
   return { state, start, stop, reset }
 }
