@@ -33,30 +33,47 @@ function formatBytes(size: number): string {
   return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
 
-function InstallCard() {
-  const { installed, canPrompt, isIos, install } = useInstallPrompt()
-  if (installed) return null
+function InstallScreen({
+  accepted,
+  canPrompt,
+  isIos,
+  install,
+}: {
+  accepted: boolean
+  canPrompt: boolean
+  isIos: boolean
+  install: () => Promise<void>
+}) {
   return (
-    <Card size="sm">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Smartphone />
-          홈 화면에 설치
-        </CardTitle>
-        <CardDescription>
-          {isIos
-            ? 'Safari 하단의 공유 버튼을 누르고 "홈 화면에 추가"를 선택하세요. 설치 후에는 인터넷 없이 열립니다.'
-            : '설치하면 인터넷 없이도 수신기를 열 수 있습니다.'}
-        </CardDescription>
-      </CardHeader>
-      {canPrompt && (
-        <CardFooter>
-          <Button className="w-full" onClick={() => void install()}>
-            앱 설치
-          </Button>
-        </CardFooter>
-      )}
-    </Card>
+    <main className="mx-auto flex min-h-svh w-full max-w-md flex-col gap-4 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]">
+      <header>
+        <p className="text-muted-foreground text-xs">DashPi · Optical Receiver</p>
+        <h1 className="font-heading text-xl font-semibold">사고 리포트 받기</h1>
+      </header>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Smartphone />
+            앱을 설치하세요
+          </CardTitle>
+          <CardDescription>
+            {accepted
+              ? '설치되었습니다. 브라우저를 닫고 홈 화면의 DashPi 수신을 여세요.'
+              : isIos
+                ? 'Safari 하단의 공유 버튼을 누르고 "홈 화면에 추가"를 선택하세요. 수신은 설치된 앱에서만 할 수 있습니다.'
+                : '홈 화면에 설치한 뒤, 설치된 앱에서 카메라를 켜세요. 브라우저에서는 받을 수 없습니다.'}
+          </CardDescription>
+        </CardHeader>
+        {canPrompt && !accepted && (
+          <CardFooter>
+            <Button className="w-full" onClick={() => void install()}>
+              <Download />
+              앱 설치
+            </Button>
+          </CardFooter>
+        )}
+      </Card>
+    </main>
   )
 }
 
@@ -116,6 +133,12 @@ function VerifiedCard({ file, onReset }: { file: VerifiedFile; onReset: () => vo
 }
 
 export default function App() {
+  const { installed, accepted, canPrompt, isIos, install } = useInstallPrompt()
+  if (!installed) return <InstallScreen accepted={accepted} canPrompt={canPrompt} isIos={isIos} install={install} />
+  return <Receiver />
+}
+
+function Receiver() {
   const video = useRef<HTMLVideoElement>(null)
   const { state, start, stop, reset } = useOpticalReceiver(video)
   const cameraOn = state.phase === 'starting' || state.phase === 'scanning' || state.phase === 'receiving'
@@ -133,8 +156,6 @@ export default function App() {
           오프라인 작동
         </Badge>
       </header>
-
-      <InstallCard />
 
       {state.error && (
         <Alert variant="destructive">
