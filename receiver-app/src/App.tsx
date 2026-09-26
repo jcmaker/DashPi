@@ -46,8 +46,18 @@ function InstallScreen({
   isIos: boolean
   install: () => Promise<void>
 }) {
+  const download = () => {
+    if (canPrompt) {
+      void install()
+      return
+    }
+    if (isIos && typeof navigator.share === 'function') {
+      void navigator.share({ title: 'DashPi 수신', url: window.location.href }).catch(() => undefined)
+    }
+  }
+
   return (
-    <main className="mx-auto flex min-h-svh w-full max-w-md flex-col gap-4 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]">
+    <main className="mx-auto flex min-h-svh w-full max-w-md flex-col justify-center gap-4 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]">
       <header>
         <p className="text-muted-foreground text-xs">DashPi · Optical Receiver</p>
         <h1 className="font-heading text-xl font-semibold">사고 리포트 받기</h1>
@@ -61,16 +71,14 @@ function InstallScreen({
           <CardDescription>
             {accepted
               ? '설치되었습니다. 브라우저를 닫고 홈 화면의 DashPi 수신을 여세요.'
-              : isIos
-                ? 'Safari 하단의 공유 버튼을 누르고 "홈 화면에 추가"를 선택하세요. 수신은 설치된 앱에서만 할 수 있습니다.'
-                : '홈 화면에 설치한 뒤, 설치된 앱에서 카메라를 켜세요. 브라우저에서는 받을 수 없습니다.'}
+              : '홈 화면에 설치한 뒤, 그 앱에서 리포트를 받으세요.'}
           </CardDescription>
         </CardHeader>
-        {canPrompt && !accepted && (
+        {!accepted && (
           <CardFooter>
-            <Button className="w-full" onClick={() => void install()}>
+            <Button className="w-full" onClick={download}>
               <Download />
-              앱 설치
+              다운로드
             </Button>
           </CardFooter>
         )}

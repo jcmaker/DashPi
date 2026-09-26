@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 type InstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> }
 
-const INSTALLED_DISPLAY_MODES = ['standalone', 'minimal-ui', 'fullscreen', 'window-controls-overlay']
+const INSTALLED_DISPLAY_MODES = ['standalone', 'window-controls-overlay']
 
 export function isInstalledDisplay(matches: (query: string) => boolean, iosStandalone: boolean): boolean {
+  if (matches('(display-mode: browser)')) return false
   return iosStandalone || INSTALLED_DISPLAY_MODES.some((mode) => matches(`(display-mode: ${mode})`))
 }
 
@@ -19,12 +20,13 @@ export function useInstallPrompt() {
   const [installed, setInstalled] = useState(readInstalled)
   const [accepted, setAccepted] = useState(false)
   const [promptEvent, setPromptEvent] = useState<InstallPromptEvent | undefined>(undefined)
+  const waiting = useRef(false)
   const isIos =
     /iPad|iPhone|iPod/.test(navigator.userAgent) ||
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 
   useEffect(() => {
-    const queries = INSTALLED_DISPLAY_MODES.map((mode) => window.matchMedia(`(display-mode: ${mode})`))
+    const queries = ['browser', ...INSTALLED_DISPLAY_MODES].map((mode) => window.matchMedia(`(display-mode: ${mode})`))
     const refresh = () => setInstalled(readInstalled())
     for (const query of queries) query.addEventListener('change', refresh)
 
@@ -46,12 +48,20 @@ export function useInstallPrompt() {
   }, [])
 
   const install = useCallback(async () => {
-    if (!promptEvent) return
+    if (!promptEvent) {
+      waiting.current = true
+      return
+    }
+    waiting.current = false
     await promptEvent.prompt()
     const choice = await promptEvent.userChoice
     setPromptEvent(undefined)
     if (choice.outcome === 'accepted') setAccepted(true)
   }, [promptEvent])
+
+  useEffect(() => {
+    if (promptEvent && waiting.current) void install()
+  }, [install, promptEvent])
 
   return { installed, accepted, canPrompt: promptEvent !== undefined, isIos, install }
 }
