@@ -317,11 +317,13 @@ process.stdout.write(JSON.stringify(context.result));
     def test_script_is_linked(self) -> None:
         self.assertIn("script.js", self.parser().assets)
 
-    def test_pages_workflow_publishes_landing_directory(self) -> None:
+    def test_pages_workflow_publishes_landing_and_receiver(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "pages.yml").read_text(encoding="utf-8")
         self.assertIn("actions/configure-pages@v5", workflow)
         self.assertIn("actions/upload-pages-artifact@v3", workflow)
         self.assertIn("actions/deploy-pages@v4", workflow)
-        self.assertIn("path: landing", workflow)
+        self.assertIn("cp -R landing/. _site/", workflow)
+        self.assertIn("cp -R receiver-app/dist _site/receiver", workflow)
+        self.assertIn("path: _site", workflow)
         self.assertIn("pages: write", workflow)
         self.assertIn("id-token: write", workflow)

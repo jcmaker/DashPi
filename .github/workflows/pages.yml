@@ -1,4 +1,4 @@
-name: Deploy landing page
+name: Deploy landing page and receiver
 
 on:
   push:
@@ -6,6 +6,9 @@ on:
     paths:
       - landing/**
       - tests/test_landing.py
+      - receiver-app/**
+      - web/src/optical/**
+      - tests/fixtures/optical-e2e.json
       - .github/workflows/pages.yml
   workflow_dispatch:
 
@@ -28,10 +31,26 @@ jobs:
       - uses: actions/checkout@v4
       - name: Verify landing page
         run: python -m unittest discover -s tests -p 'test_landing.py'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: receiver-app/package-lock.json
+      - name: Test and build receiver
+        working-directory: receiver-app
+        run: |
+          npm ci
+          npm test
+          npm run build
+      - name: Assemble site
+        run: |
+          mkdir _site
+          cp -R landing/. _site/
+          cp -R receiver-app/dist _site/receiver
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: landing
+          path: _site
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4

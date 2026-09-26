@@ -94,6 +94,10 @@ export class FountainDecoder {
     this.peel();
   }
 
+  get recoveredBlocks(): number {
+    return this.blocks.size;
+  }
+
   result(): Uint8Array | undefined {
     if (this.blocks.size !== this.blockCount) return undefined;
 

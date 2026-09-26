@@ -1,30 +1,10 @@
 import { BrowserQRCodeReader, type IScannerControls } from '@zxing/browser';
-import { FountainDecoder } from './optical/fountain.ts';
-import { parseFrame, type OpticalFrame } from './optical/protocol.ts';
+import { ResultMetadataType } from '@zxing/library';
+import { FrameCollector, messageForFrameError, qrPayload } from './optical/collector.ts';
+import { parseFrame } from './optical/protocol.ts';
 import { unpackContainer } from './optical/container.ts';
 
-export function messageForFrameError(problem: unknown): string | undefined {
-  return String(problem).includes('unsupported protocol')
-    ? '이 송신 형식을 읽으려면 수신기를 업데이트하세요.'
-    : undefined;
-}
-
-export class FrameCollector {
-  private decoder: FountainDecoder | undefined;
-  private currentIdentity = '';
-
-  get identity(): string { return this.currentIdentity; }
-
-  add(frame: OpticalFrame): Uint8Array | undefined {
-    const identity = `${frame.sessionId}:${frame.blockCount}:${frame.blockSize}:${frame.totalLength}`;
-    if (identity !== this.currentIdentity) {
-      this.currentIdentity = identity;
-      this.decoder = new FountainDecoder(frame.blockCount, frame.blockSize, frame.totalLength);
-    }
-    this.decoder!.add(frame);
-    return this.decoder!.result();
-  }
-}
+export { FrameCollector, messageForFrameError };
 
 if (typeof document !== 'undefined') {
   const reader = new BrowserQRCodeReader();
@@ -117,7 +97,8 @@ if (typeof document !== 'undefined') {
     stopButton.disabled = false;
     showStatus('카메라 권한을 확인하고 있습니다.');
     void reader.decodeFromVideoDevice(undefined, camera, (result) => {
-      if (result) handleFrame(Uint8Array.from(result.getRawBytes()));
+      const payload = qrPayload(result?.getResultMetadata()?.get(ResultMetadataType.BYTE_SEGMENTS));
+      if (payload) handleFrame(payload);
     }).then((scannerControls) => {
       if (generation !== runId) {
         scannerControls.stop();
