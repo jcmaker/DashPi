@@ -19,7 +19,7 @@ import { useInstallPrompt } from '@/hooks/use-install-prompt'
 import { useOpticalReceiver, type ReceiverState, type VerifiedFile } from '@/hooks/use-optical-receiver'
 
 const statusText: Record<ReceiverState['phase'], string> = {
-  idle: '카메라를 시작하면 DashPi 화면의 QR을 읽습니다.',
+  idle: '카메라 시작을 누르면 브라우저 허용 창이 뜹니다.',
   starting: '카메라 권한을 확인하고 있습니다.',
   scanning: 'DashPi QR 화면을 카메라 안에 맞추세요.',
   receiving: '수신 중입니다. 화면을 계속 비추세요.',
