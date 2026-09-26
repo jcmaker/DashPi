@@ -2,30 +2,44 @@ import { useCallback, useEffect, useState } from 'react'
 
 type InstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> }
 
-function isStandalone(): boolean {
-  return (
-    window.matchMedia('(display-mode: standalone)').matches ||
-    (navigator as Navigator & { standalone?: boolean }).standalone === true
+const INSTALLED_DISPLAY_MODES = ['standalone', 'minimal-ui', 'fullscreen', 'window-controls-overlay']
+
+export function isInstalledDisplay(matches: (query: string) => boolean, iosStandalone: boolean): boolean {
+  return iosStandalone || INSTALLED_DISPLAY_MODES.some((mode) => matches(`(display-mode: ${mode})`))
+}
+
+function readInstalled(): boolean {
+  return isInstalledDisplay(
+    (query) => window.matchMedia(query).matches,
+    (navigator as Navigator & { standalone?: boolean }).standalone === true,
   )
 }
 
 export function useInstallPrompt() {
-  const [installed, setInstalled] = useState(isStandalone)
+  const [installed, setInstalled] = useState(readInstalled)
+  const [accepted, setAccepted] = useState(false)
   const [promptEvent, setPromptEvent] = useState<InstallPromptEvent | undefined>(undefined)
-  const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  const isIos =
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 
   useEffect(() => {
+    const queries = INSTALLED_DISPLAY_MODES.map((mode) => window.matchMedia(`(display-mode: ${mode})`))
+    const refresh = () => setInstalled(readInstalled())
+    for (const query of queries) query.addEventListener('change', refresh)
+
     const onPrompt = (event: Event) => {
       event.preventDefault()
       setPromptEvent(event as InstallPromptEvent)
     }
     const onInstalled = () => {
-      setInstalled(true)
+      setAccepted(true)
       setPromptEvent(undefined)
     }
     window.addEventListener('beforeinstallprompt', onPrompt)
     window.addEventListener('appinstalled', onInstalled)
     return () => {
+      for (const query of queries) query.removeEventListener('change', refresh)
       window.removeEventListener('beforeinstallprompt', onPrompt)
       window.removeEventListener('appinstalled', onInstalled)
     }
@@ -34,9 +48,10 @@ export function useInstallPrompt() {
   const install = useCallback(async () => {
     if (!promptEvent) return
     await promptEvent.prompt()
-    await promptEvent.userChoice
+    const choice = await promptEvent.userChoice
     setPromptEvent(undefined)
+    if (choice.outcome === 'accepted') setAccepted(true)
   }, [promptEvent])
 
-  return { installed, canPrompt: promptEvent !== undefined, isIos, install }
+  return { installed, accepted, canPrompt: promptEvent !== undefined, isIos, install }
 }
