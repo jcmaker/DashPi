@@ -3,7 +3,6 @@ import {
   Camera,
   CameraOff,
   CircleAlert,
-  Settings,
   Download,
   RotateCcw,
   Share2,
@@ -18,7 +17,6 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Progress } from '@/components/ui/progress'
 import { useInstallPrompt } from '@/hooks/use-install-prompt'
 import { useOpticalReceiver, type ReceiverState, type VerifiedFile } from '@/hooks/use-optical-receiver'
-import { cameraSettingsUrl } from '@/lib/camera-permission'
 
 const statusText: Record<ReceiverState['phase'], string> = {
   idle: '카메라를 시작하면 DashPi 화면의 QR을 읽습니다.',
@@ -182,7 +180,7 @@ function Receiver() {
           <CardHeader>
             <CardTitle>카메라로 QR 읽기</CardTitle>
             <CardDescription role="status" aria-live="polite">
-              {state.cameraBlocked ? '카메라 권한이 꺼져 있습니다.' : statusText[state.phase]}
+              {statusText[state.phase]}
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
@@ -214,16 +212,6 @@ function Receiver() {
               <Button variant="outline" className="w-full" onClick={stop}>
                 <CameraOff />
                 카메라 중지
-              </Button>
-            ) : state.cameraBlocked ? (
-              <Button
-                className="w-full"
-                onClick={() => {
-                  window.location.assign(cameraSettingsUrl(navigator.userAgent, window.location.origin))
-                }}
-              >
-                <Settings />
-                권한 설정 열기
               </Button>
             ) : (
               <Button className="w-full" onClick={start} disabled={state.phase === 'verifying'}>
