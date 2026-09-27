@@ -1039,3 +1039,31 @@ def test_second_launch_exits_while_first_holds_the_lock(tmp_path, monkeypatch):
     finally:
         first.unlock()
         qInstallMessageHandler(None)
+
+
+@pytest.mark.parametrize("size", [(480, 320), (800, 480)])
+def test_optical_qr_and_back_button_fit_on_small_lcd(qapp, tmp_path, size):
+    from PySide6.QtWidgets import QPushButton
+    from dashpi.desktop import DashPiWindow
+
+    window = DashPiWindow(FakeSession(), IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        window.showNormal()
+        window.setFixedSize(*size)
+        window.pages.setCurrentWidget(window.optical_page)
+        window.optical_status.setText("휴대폰 수신 PWA로 QR 프레임을 계속 비추세요.")
+        window.optical_session = OpticalSession.from_bytes("report.html", bytes(range(256)) * 16, "text/html", 512, 123)
+        window.qr_label.resize(640, 480)  # the first frame can land before the page is laid out
+        window._render_optical_frame()
+        for _ in range(3):  # later frames must shrink back into the laid-out space
+            qapp.processEvents()
+            window._render_optical_frame()
+        qapp.processEvents()
+        label = window.qr_label
+        pixmap = label.pixmap()
+        assert pixmap.width() <= label.width() and pixmap.height() <= label.height()
+        back = [b for b in window.optical_page.findChildren(QPushButton) if b.text() == "뒤로"][0]
+        bottom = back.mapTo(window, back.rect().bottomRight())
+        assert back.isVisible() and bottom.x() < size[0] and bottom.y() < size[1]
+    finally:
+        window.close()
