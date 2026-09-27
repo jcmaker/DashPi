@@ -17,7 +17,7 @@ import sys
 import threading
 import time
 
-from PySide6.QtCore import Qt, QtMsgType, QRect, QTimer, QUrl, QSize, qInstallMessageHandler
+from PySide6.QtCore import Qt, QtMsgType, QLockFile, QRect, QTimer, QUrl, QSize, qInstallMessageHandler
 from PySide6.QtGui import QIcon, QImage, QPixmap
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -948,6 +948,12 @@ def main():
     args = parser.parse_args()
     root = args.data_root
     setup_logging(root)
+    # 원격 접속처럼 느린 화면에서 아이콘을 여러 번 누르면 전체화면 창이 겹쳐 떠서
+    # 종료해도 아래 창이 남아 보이고, 분석 재시도도 서로 충돌한다.
+    lock = QLockFile(str(root / "dashpi.lock"))
+    if not lock.tryLock(0):
+        log.info("DashPi 이미 실행 중 — 새 실행을 건너뜀")
+        return
     log.info("DashPi 시작 (data root: %s)", root)
     current = load_settings(root / "settings.json")
     app = QApplication([])
