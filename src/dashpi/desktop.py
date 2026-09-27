@@ -366,6 +366,9 @@ class DashPiWindow(QMainWindow):
         layout.addWidget(self.optical_status)
         self.qr_label = QLabel()
         self.qr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # The pixmap must not size the label: otherwise one frame drawn before layout pins the
+        # label (and the page) larger than the LCD, cutting off the QR and pushing 뒤로 off-screen.
+        self.qr_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         layout.addWidget(self.qr_label, 1)
         layout.addWidget(button("뒤로", self._leave_optical))
         self.pages.addWidget(self.optical_page)
@@ -886,7 +889,7 @@ class DashPiWindow(QMainWindow):
             for x, dark in enumerate(row):
                 if dark:
                     image.setPixel(x, y, 0xFF000000)
-        size = max(180, min(self.qr_label.width(), self.qr_label.height(), 480))
+        size = max(1, min(self.qr_label.width(), self.qr_label.height(), 480))
         self.qr_label.setPixmap(
             QPixmap.fromImage(image).scaled(
                 size, size, Qt.AspectRatioMode.KeepAspectRatio,
