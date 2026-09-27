@@ -361,6 +361,7 @@ class DashPiWindow(QMainWindow):
 
     def _build_optical(self):
         self.optical_page, layout = page("광학 리포트 전송")
+        layout.itemAt(0).widget().hide()  # the QR needs the height; the title stays for the screen log
         warning = QLabel("이 QR은 호환 수신기로 누구나 촬영할 수 있습니다. 휴대폰 DashPi 수신 PWA를 여세요.")
         warning.setObjectName("caption")
         warning.setWordWrap(True)
