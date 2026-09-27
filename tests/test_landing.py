@@ -87,6 +87,17 @@ class LandingPageTests(unittest.TestCase):
         self.assertEqual(png[:8], b"\x89PNG\r\n\x1a\n")
         self.assertEqual(struct.unpack(">II", png[16:24]), (1200, 630))
 
+    def test_hero_downloads_the_android_apk_and_marks_ios_as_not_ready(self) -> None:
+        page = self.page()
+        self.assertIn(
+            'href="https://jcmaker.github.io/DashPi/receiver/DashPi.apk" download="DashPi.apk"',
+            page,
+        )
+        self.assertIn(">안드로이드</span>", page)
+        self.assertIn('class="download download--soon" type="button" disabled', page)
+        self.assertIn(">iOS (준비중)</span>", page)
+        self.assertNotIn('href="receiver/"', page)
+
     def test_hero_art_has_a_korean_no_javascript_label(self) -> None:
         self.assertIn(
             'role="img" aria-label="녹화 중 사고 순간을 포착하고, 화면의 애니메이션 QR로 네트워크 없이 휴대폰에 검증된 리포트를 넘기는 과정"',
@@ -324,6 +335,10 @@ process.stdout.write(JSON.stringify(context.result));
         self.assertIn("actions/deploy-pages@v4", workflow)
         self.assertIn("cp -R landing/. _site/", workflow)
         self.assertIn("cp -R receiver-app/dist _site/receiver", workflow)
+        self.assertIn(
+            "cp receiver-native/android/app/build/outputs/apk/debug/app-debug.apk _site/receiver/DashPi.apk",
+            workflow,
+        )
         self.assertIn("path: _site", workflow)
         self.assertIn("pages: write", workflow)
         self.assertIn("id-token: write", workflow)

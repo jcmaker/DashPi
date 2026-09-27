@@ -7,6 +7,7 @@ on:
       - landing/**
       - tests/test_landing.py
       - receiver-app/**
+      - receiver-native/**
       - web/src/optical/**
       - tests/fixtures/optical-e2e.json
       - .github/workflows/pages.yml
@@ -42,11 +43,24 @@ jobs:
           npm ci
           npm test
           npm run build
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - name: Build Android test APK
+        working-directory: receiver-native
+        run: |
+          npm ci
+          npx expo prebuild --platform android --no-install
+          cd android
+          ./gradlew assembleDebug --no-daemon
       - name: Assemble site
         run: |
           mkdir _site
           cp -R landing/. _site/
           cp -R receiver-app/dist _site/receiver
+          cp receiver-native/android/app/build/outputs/apk/debug/app-debug.apk _site/receiver/DashPi.apk
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
