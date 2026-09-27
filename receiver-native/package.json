@@ -1,0 +1,30 @@
+{
+  "name": "receiver-native",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "dependencies": {
+    "expo": "~57.0.25",
+    "expo-camera": "~57.0.5",
+    "expo-crypto": "~57.0.3",
+    "expo-file-system": "~57.0.7",
+    "expo-sharing": "~57.0.22",
+    "expo-status-bar": "~57.0.1",
+    "pako": "^3.0.2",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-webview": "13.16.1"
+  },
+  "devDependencies": {
+    "@types/pako": "^2.0.4",
+    "@types/react": "~19.2.2",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "test": "node --experimental-strip-types --test tests/*.test.ts"
+  },
+  "private": true
+}

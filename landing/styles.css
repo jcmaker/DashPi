@@ -98,6 +98,24 @@ button:focus-visible,
 .hero__type .display { margin-block-end: var(--space-5); }
 .hero__type .label { max-width: 44ch; margin-block-start: var(--space-3); padding-inline-end: var(--space-4); font-size: 16px; font-weight: 400; letter-spacing: 0; text-transform: none; word-break: keep-all; overflow-wrap: anywhere; }
 .hero__type [data-i18n="hero.description"] { max-width: 25em; font-size: 24px; font-weight: 500; color: var(--color-ink); }
+.downloads { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-block-start: var(--space-5); }
+.download {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding-inline: var(--space-4);
+  border: var(--rule-hairline) solid var(--color-ink);
+  background: var(--color-ink);
+  color: var(--color-paper);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+.download:hover { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-accent-ink); text-decoration: none; }
+.download--soon,
+.download--soon:hover { background: transparent; border-color: var(--color-rule); color: var(--color-muted); text-decoration: none; cursor: not-allowed; }
 .hero__composition { grid-column: 8 / 13; grid-row: 1; position: relative; aspect-ratio: 5 / 3; }
 .viewfinder { background: linear-gradient(var(--color-ink) 0 0) left top / 24% var(--rule-section) no-repeat, linear-gradient(var(--color-ink) 0 0) left top / var(--rule-section) 36% no-repeat, linear-gradient(var(--color-ink) 0 0) right top / 24% var(--rule-section) no-repeat, linear-gradient(var(--color-ink) 0 0) right top / var(--rule-section) 36% no-repeat, linear-gradient(var(--color-ink) 0 0) left bottom / 24% var(--rule-section) no-repeat, linear-gradient(var(--color-ink) 0 0) left bottom / var(--rule-section) 36% no-repeat, linear-gradient(var(--color-ink) 0 0) right bottom / 24% var(--rule-section) no-repeat, linear-gradient(var(--color-ink) 0 0) right bottom / var(--rule-section) 36% no-repeat; }
 .recording-indicator { position: absolute; inset-block-start: 12%; inset-inline-start: 10%; width: 7%; aspect-ratio: 1; border-radius: 50%; background: var(--color-accent); }
@@ -241,6 +259,8 @@ tbody th { color: var(--color-muted); font-size: 12px; font-weight: 600; }
   .hero { padding-block: var(--space-7); }
   .display { font-size: clamp(52px, 18vw, 80px); }
   .hero__type [data-i18n="hero.description"] { font-size: 20px; }
+  .downloads { width: 100%; }
+  .download { flex: 1; }
   .index__meta { display: none; }
   .flow__row > a { grid-template-columns: 24px minmax(0, 1fr) 16px; gap: var(--space-2); padding-block: var(--space-4); }
   .flow__name { grid-column: 2; font-size: clamp(15px, 3.8vw, 20px); letter-spacing: -0.04em; }
