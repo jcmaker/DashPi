@@ -1018,3 +1018,24 @@ def test_external_analysis_uses_the_freshly_saved_models(qapp, tmp_path, monkeyp
         assert (seen[0].ai_model, seen[0].ai_report_model) == ("fake", "new-report")
     finally:
         window.close()
+
+
+def test_second_launch_exits_while_first_holds_the_lock(tmp_path, monkeypatch):
+    import sys
+    import threading
+    from PySide6.QtCore import QLockFile, qInstallMessageHandler
+    from dashpi import desktop
+
+    monkeypatch.setattr(sys, "excepthook", sys.excepthook)
+    monkeypatch.setattr(threading, "excepthook", threading.excepthook)
+    monkeypatch.setattr(sys, "argv", ["dashpi", "--data-root", str(tmp_path)])
+    monkeypatch.setattr(desktop, "QApplication", lambda *a: (_ for _ in ()).throw(AssertionError("started twice")))
+    tmp_path.mkdir(exist_ok=True)
+    first = QLockFile(str(tmp_path / "dashpi.lock"))
+    assert first.tryLock(0)
+    try:
+        desktop.main()
+        assert "이미 실행 중" in (tmp_path / "logs" / "dashpi.log").read_text(encoding="utf-8")
+    finally:
+        first.unlock()
+        qInstallMessageHandler(None)
