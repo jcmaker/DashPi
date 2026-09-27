@@ -1067,3 +1067,23 @@ def test_optical_qr_and_back_button_fit_on_small_lcd(qapp, tmp_path, size):
         assert back.isVisible() and bottom.x() < size[0] and bottom.y() < size[1]
     finally:
         window.close()
+
+
+def test_detail_with_all_actions_still_fits_the_800x480_lcd(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    window = DashPiWindow(FakeSession(), IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        window.detail_title.setText("외부 영상 · test.mp4")
+        window.report_text.setText("요약\n" * 12)
+        for n in range(3):
+            window.segment_list.addItem(f"segment {n}")
+        window.external_analyze_button.show()
+        window.optical_button.show()
+        window.pages.setCurrentWidget(window.detail_page)
+        qapp.processEvents()
+        # The window can never be shorter than its tallest page, so one tall page pushes every
+        # page (the optical QR's 뒤로 included) below the LCD.
+        assert window.minimumSizeHint().height() <= 480
+    finally:
+        window.close()

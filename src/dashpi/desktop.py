@@ -342,17 +342,21 @@ class DashPiWindow(QMainWindow):
         report_scroll.setMaximumHeight(160)
         report_scroll.setWidget(self.report_text)
         layout.addWidget(report_scroll)
+        # One row: stacked, these buttons made the page taller than the 480px LCD, and the window
+        # grows to its tallest page, so every page (including the optical QR) spilled off-screen.
+        actions = QHBoxLayout()
+        actions.addWidget(button("뒤로", self.show_records))
+        actions.addWidget(button("재생 / 일시정지", self._toggle_playback))
         self.external_analyze_button = button("사고 분석", self._analyze_external, primary=True)
         self.external_analyze_button.hide()
-        layout.addWidget(self.external_analyze_button)
+        actions.addWidget(self.external_analyze_button)
         self.reanalyze_button = button("다시 분석", self._reanalyze, primary=True)
         self.reanalyze_button.hide()
-        layout.addWidget(self.reanalyze_button)
+        actions.addWidget(self.reanalyze_button)
         self.optical_button = button("리포트 QR 전송", self._open_selected_optical, primary=True)
         self.optical_button.hide()
-        layout.addWidget(self.optical_button)
-        layout.addWidget(button("재생 / 일시정지", self._toggle_playback))
-        layout.addWidget(button("뒤로", self.show_records))
+        actions.addWidget(self.optical_button)
+        layout.addLayout(actions)
         self.pages.addWidget(self.detail_page)
 
     def _build_optical(self):
