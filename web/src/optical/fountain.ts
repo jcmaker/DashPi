@@ -1,4 +1,4 @@
-import type { OpticalFrame } from './protocol.ts';
+import { MAX_FRAME_LENGTH, type OpticalFrame } from './protocol.ts';
 
 type Equation = { indices: Set<number>; value: Uint8Array };
 
@@ -15,6 +15,7 @@ function isGeometry(blockCount: unknown, blockSize: unknown, totalLength: unknow
     (blockCount as number) <= 0xffff &&
     (blockSize as number) > 0 &&
     (blockSize as number) <= 0xffff &&
+    (totalLength as number) <= MAX_FRAME_LENGTH &&
     (totalLength as number) > ((blockCount as number) - 1) * (blockSize as number) &&
     (totalLength as number) <= (blockCount as number) * (blockSize as number)
   );
@@ -101,11 +102,13 @@ export class FountainDecoder {
   result(): Uint8Array | undefined {
     if (this.blocks.size !== this.blockCount) return undefined;
 
-    const output = new Uint8Array(this.blockCount * this.blockSize);
+    const output = new Uint8Array(this.totalLength);
     for (let index = 0; index < this.blockCount; index += 1) {
-      output.set(this.blocks.get(index)!, index * this.blockSize);
+      const offset = index * this.blockSize;
+      const length = Math.min(this.blockSize, this.totalLength - offset);
+      output.set(this.blocks.get(index)!.subarray(0, length), offset);
     }
-    return output.slice(0, this.totalLength);
+    return output;
   }
 
   private store(equation: Equation): void {
