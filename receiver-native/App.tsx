@@ -10,7 +10,7 @@ import { bytesFromBarcode } from './src/barcode'
 import { cameraGate } from './src/camera-gate'
 import { unpackNativeContainer } from './src/native-container'
 import type { OpticalFile } from './src/unpack'
-import { checkForUpdate } from './src/update-check'
+import { checkForUpdate, updateCooldown } from './src/update-check'
 import { FrameCollector, messageForFrameError } from '../web/src/optical/collector.ts'
 import { parseFrame } from '../web/src/optical/protocol.ts'
 
@@ -187,23 +187,28 @@ function Receiver() {
   )
 }
 
-const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
-
 function useUpdatePrompt() {
-  const lastCheck = useRef(0)
+  const shownAt = useRef(0)
+  const checking = useRef(false)
   const check = useCallback(async () => {
-    if (Date.now() - lastCheck.current < UPDATE_CHECK_INTERVAL_MS) return
-    lastCheck.current = Date.now()
-    const update = await checkForUpdate(Application.nativeApplicationVersion)
-    if (!update) return
-    Alert.alert(
-      '새 버전이 있어요',
-      `DashPi ${update.version}이 나왔어요. 지금 받아서 설치할까요?`,
-      [
-        { text: '나중에', style: 'cancel' },
-        { text: '업데이트', onPress: () => void Linking.openURL(update.url) },
-      ],
-    )
+    const now = Date.now()
+    if (checking.current || !updateCooldown(shownAt.current, now, false).due) return
+    checking.current = true
+    try {
+      const update = await checkForUpdate(Application.nativeApplicationVersion)
+      if (!update) return
+      shownAt.current = updateCooldown(shownAt.current, now, true).shownAt
+      Alert.alert(
+        '새 버전이 있어요',
+        `DashPi ${update.version}이 나왔어요. 지금 받아서 설치할까요?`,
+        [
+          { text: '나중에', style: 'cancel' },
+          { text: '업데이트', onPress: () => void Linking.openURL(update.url) },
+        ],
+      )
+    } finally {
+      checking.current = false
+    }
   }, [])
   return check
 }

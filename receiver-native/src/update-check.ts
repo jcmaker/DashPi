@@ -12,6 +12,22 @@ export type Release = {
 
 export type Update = { version: string; url: string }
 
+export const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
+
+export type UpdateCooldown = { shownAt: number; due: boolean }
+
+// The interval starts only after the update dialog is shown. A failure or a
+// check that finds nothing leaves shownAt alone, so the next foreground can retry.
+export function updateCooldown(
+  shownAt: number,
+  now: number,
+  dialogShown: boolean,
+  intervalMs = UPDATE_CHECK_INTERVAL_MS,
+): UpdateCooldown {
+  const nextShownAt = dialogShown ? now : shownAt
+  return { shownAt: nextShownAt, due: now - nextShownAt >= intervalMs }
+}
+
 type Version = [number, number, number]
 
 export function parseVersion(text: string): Version | null {
