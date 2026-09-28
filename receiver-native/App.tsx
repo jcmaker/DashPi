@@ -9,6 +9,7 @@ import { WebView } from 'react-native-webview'
 import { bytesFromBarcode } from './src/barcode'
 import { cameraGate } from './src/camera-gate'
 import { unpackNativeContainer } from './src/native-container'
+import { verifiedHtmlWebViewProps } from './src/webview-policy'
 import type { OpticalFile } from './src/unpack'
 import { checkForUpdate } from './src/update-check'
 import { FrameCollector, messageForFrameError } from '../web/src/optical/collector.ts'
@@ -152,7 +153,7 @@ function Receiver() {
       ) : (
         <View style={styles.preview}>
           {screen.html ? (
-            <WebView originWhitelist={['*']} source={{ html: screen.html }} style={styles.web} />
+            <WebView {...verifiedHtmlWebViewProps(screen.html)} style={styles.web} />
           ) : (
             <Text style={styles.bodyDark}>
               {screen.file?.name} 검증이 끝났습니다. 공유해서 여세요.
