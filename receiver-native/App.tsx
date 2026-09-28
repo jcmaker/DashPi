@@ -7,18 +7,16 @@ import * as Application from 'expo-application'
 import * as Sharing from 'expo-sharing'
 import { Alert, AppState, Linking, Pressable, StyleSheet, Text, View } from 'react-native'
 import { WebView } from 'react-native-webview'
-import { bytesFromBarcode } from './src/barcode'
+import { handleBarcodeScan, type BarcodeScan } from './src/barcode'
 import { cameraGate } from './src/camera-gate'
 import { unpackNativeContainer } from './src/native-container'
 import type { OpticalFile } from './src/unpack'
 import { checkForUpdate, updateCooldown } from './src/update-check'
 import { FrameCollector } from '../web/src/optical/collector.ts'
-import { parseFrame } from '../web/src/optical/protocol.ts'
 import {
   FRAME_STALL_MS,
   type FrameMark,
   isFreshFrame,
-  messageForFrameError,
   offerDiscard,
   screenShouldStayAwake,
   stallMessage,
@@ -124,47 +122,22 @@ function Receiver() {
 
   useEffect(() => () => clearStall(), [clearStall])
 
-  const noteFrameError = useCallback(
-    (problem: unknown) => {
-      const message = messageForFrameError(problem)
-      if (!message) return
+  const onBarcodeScanned = useCallback((scan: BarcodeScan) => {
+    if (busy.current || halted.current) return
+    const frames = collector.current
+    const outcome = handleBarcodeScan(frames, scan)
+    if (outcome.status === 'ignore' || outcome.status === 'drop') return
+    if (outcome.status === 'error') {
       clearStall()
       halted.current = true
-      setScreen((current) => ({ ...current, error: message }))
-    },
-    [clearStall],
-  )
-
-  const onBarcodeScanned = useCallback(({ data }: { data: string }) => {
-    if (busy.current || halted.current) return
-    let bytes: Uint8Array
-    try {
-      bytes = bytesFromBarcode(data)
-    } catch {
+      setScreen((current) => ({ ...current, error: outcome.message }))
       return
     }
 
-    const frames = collector.current
-    let parsed: ReturnType<typeof parseFrame>
-    try {
-      parsed = parseFrame(bytes)
-    } catch (problem) {
-      noteFrameError(problem)
-      return
-    }
-
-    const fresh = isFreshFrame(lastMark.current, parsed)
-    let packed: Uint8Array | undefined
-    try {
-      packed = frames.add(parsed)
-    } catch (problem) {
-      noteFrameError(problem)
-      return
-    }
-
-    if (fresh) lastMark.current = { sessionId: parsed.sessionId, sequence: parsed.sequence }
-    const { recovered, total } = frames.progress
-    if (!packed) {
+    const fresh = isFreshFrame(lastMark.current, outcome)
+    if (fresh) lastMark.current = { sessionId: outcome.sessionId, sequence: outcome.sequence }
+    const { recovered, total } = outcome
+    if (outcome.status === 'progress') {
       if (fresh) armStall(Date.now())
       setScreen((current) => {
         if (!fresh && current.error) return current
@@ -178,7 +151,7 @@ function Receiver() {
     const ticket = generation.current
     const identity = frames.identity
     setScreen({ phase: 'verifying', recovered, total })
-    void unpackNativeContainer(packed)
+    void unpackNativeContainer(outcome.packed)
       .then((file) => {
         if (ticket !== generation.current || frames.identity !== identity) return
         const html = file.mediaType === 'text/html' ? new TextDecoder().decode(file.payload) : undefined
@@ -195,7 +168,7 @@ function Receiver() {
           error: '받은 데이터를 열 수 없습니다. 화면을 다시 비추세요.',
         })
       })
-  }, [armStall, clearStall, forgetCollection, noteFrameError])
+  }, [armStall, clearStall, forgetCollection])
 
   const share = useCallback(() => {
     const file = screen.file
