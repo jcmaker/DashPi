@@ -9,6 +9,7 @@ import { WebView } from 'react-native-webview'
 import { bytesFromBarcode } from './src/barcode'
 import { cameraGate } from './src/camera-gate'
 import { unpackNativeContainer } from './src/native-container'
+import { applyShareOutcome, createShareAttempt } from './src/share-report'
 import type { OpticalFile } from './src/unpack'
 import { checkForUpdate } from './src/update-check'
 import { FrameCollector, messageForFrameError } from '../web/src/optical/collector.ts'
@@ -62,6 +63,12 @@ function Receiver() {
   const collector = useRef(new FrameCollector())
   const busy = useRef(false)
   const generation = useRef(0)
+  const shareReport = useRef(
+    createShareAttempt({
+      open: (name) => new File(Paths.cache, name),
+      shareAsync: (uri, options) => Sharing.shareAsync(uri, options),
+    }),
+  ).current
   const [screen, setScreen] = useState<Screen>(initialScreen)
 
   const reset = useCallback(() => {
@@ -122,16 +129,13 @@ function Receiver() {
   const share = useCallback(() => {
     const file = screen.file
     if (!file) return
-    const stored = new File(Paths.cache, file.name)
-    if (stored.exists) stored.delete()
-    stored.create()
-    stored.write(file.payload)
-    void Sharing.shareAsync(stored.uri, {
-      mimeType: file.mediaType,
-      dialogTitle: '리포트 저장',
-      UTI: file.mediaType === 'text/html' ? 'public.html' : 'public.data',
+    void shareReport(file).then((outcome) => {
+      setScreen((current) => {
+        if (current.phase !== 'verified' || current.file !== file) return current
+        return applyShareOutcome(current, outcome)
+      })
     })
-  }, [screen.file])
+  }, [screen.file, shareReport])
 
   const percent = screen.total > 0 ? Math.round((screen.recovered / screen.total) * 100) : 0
   const scanning = screen.phase !== 'verified'
