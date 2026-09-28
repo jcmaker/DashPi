@@ -1,0 +1,20 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.dashpishare'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.dashpishare"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+    consumerProguardFiles 'proguard-rules.pro'
+  }
+}
+
+dependencies {
+  implementation 'com.facebook.react:react-android'
+}

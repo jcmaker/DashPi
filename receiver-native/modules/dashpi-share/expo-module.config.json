@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["DashpiShareModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.dashpishare.DashpiShareModule"]
+  }
+}

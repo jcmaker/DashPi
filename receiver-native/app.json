@@ -25,7 +25,7 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-sharing",
+      "./modules/dashpi-share/app.plugin.js",
       [
         "expo-camera",
         {

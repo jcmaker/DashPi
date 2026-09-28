@@ -4,7 +4,6 @@ import { CameraView, useCameraPermissions } from 'expo-camera'
 import { useKeepAwake } from 'expo-keep-awake'
 import { StatusBar } from 'expo-status-bar'
 import * as Application from 'expo-application'
-import * as Sharing from 'expo-sharing'
 import { useVideoPlayer, VideoView } from 'expo-video'
 import { Alert, AppState, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { WebView } from 'react-native-webview'
@@ -15,7 +14,6 @@ import { documentReportStore } from './src/document-reports'
 import {
   ReportSaveError,
   saveVerifiedReport,
-  shareSavedReport,
   type ReportStore,
   type SavedReport,
 } from './src/saved-reports'
@@ -38,6 +36,7 @@ import {
   screenShouldStayAwake,
   stallMessage,
 } from './src/scan-session'
+import { applyShareOutcome, shareReport } from './src/share-sheet'
 
 type Phase = 'scanning' | 'receiving' | 'verifying' | 'verified'
 
@@ -298,23 +297,13 @@ function Receiver({
   const share = useCallback(() => {
     const file = screen.file
     if (!file) return
-    setScreen((current) => ({ ...current, error: undefined }))
-    void shareSavedReport(file.name, store, (uri, mediaType) =>
-      Sharing.shareAsync(uri, {
-        mimeType: mediaType,
-        dialogTitle: '리포트 저장',
-        UTI: mediaType === 'text/html' ? 'public.html' : 'public.data',
-      }),
-    ).catch(() => {
-      const kept = store.get(file.name)
-      setScreen((current) => ({
-        ...current,
-        error: kept
-          ? '공유에 실패했습니다. 앱에 저장된 리포트는 그대로 있습니다.'
-          : '공유에 실패했습니다.',
-      }))
+    void shareReport(file).then((outcome) => {
+      setScreen((current) => {
+        if (current.phase !== 'verified') return current
+        return applyShareOutcome(current, outcome)
+      })
     })
-  }, [screen.file, store])
+  }, [screen.file])
 
   const percent = screen.total > 0 ? Math.round((screen.recovered / screen.total) * 100) : 0
   const scanning = screen.phase !== 'verified'
