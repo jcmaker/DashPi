@@ -58,19 +58,21 @@ function frameBytes(blockCount: number, blockSize: number, totalLength: number):
   return bytes;
 }
 
-test('rejects a frame whose total length exceeds 16MiB', () => {
-  assert.throws(
-    () => parseFrame(frameBytes(16385, 1024, 16 * 1024 * 1024 + 1)),
-    /malformed frame/,
-  );
+const maxPackedContainer = 16 * 1024 * 1024 + 49 + 255 + 255;
+
+test('accepts a frame for the largest packed 16MiB container', () => {
+  const frame = parseFrame(frameBytes(16385, 1024, maxPackedContainer));
+
+  assert.equal(frame.totalLength, maxPackedContainer);
+  assert.equal(frame.blockCount, 16385);
+  assert.equal(frame.symbol.length, 1024);
 });
 
-test('accepts a frame whose total length is exactly 16MiB', () => {
-  const frame = parseFrame(frameBytes(16384, 1024, 16 * 1024 * 1024));
-
-  assert.equal(frame.totalLength, 16 * 1024 * 1024);
-  assert.equal(frame.blockCount, 16384);
-  assert.equal(frame.symbol.length, 1024);
+test('rejects a frame longer than the largest packed 16MiB container', () => {
+  assert.throws(
+    () => parseFrame(frameBytes(16385, 1024, maxPackedContainer + 1)),
+    /malformed frame/,
+  );
 });
 
 test('rejects a checksummed frame whose total length exceeds its geometry', () => {

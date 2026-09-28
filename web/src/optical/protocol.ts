@@ -8,7 +8,8 @@ export type OpticalFrame = {
   symbol: Uint8Array;
 };
 
-const MAX_PAYLOAD = 16 * 1024 * 1024;
+// totalLength is the packed container: a 16MiB file plus a 49-byte header and two 255-byte fields.
+export const MAX_FRAME_LENGTH = 16 * 1024 * 1024 + 49 + 255 + 255;
 
 function crc32(bytes: Uint8Array): number {
   let crc = 0xffffffff;
@@ -45,7 +46,7 @@ export function parseFrame(bytes: Uint8Array): OpticalFrame {
     degree === 0 ||
     blockCount === 0 ||
     blockSize === 0 ||
-    totalLength > MAX_PAYLOAD ||
+    totalLength > MAX_FRAME_LENGTH ||
     totalLength <= (blockCount - 1) * blockSize ||
     totalLength > blockCount * blockSize ||
     expectedLength !== bytes.length

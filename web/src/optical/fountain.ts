@@ -1,6 +1,4 @@
-import type { OpticalFrame } from './protocol.ts';
-
-const MAX_PAYLOAD = 16 * 1024 * 1024;
+import { MAX_FRAME_LENGTH, type OpticalFrame } from './protocol.ts';
 
 type Equation = { indices: Set<number>; value: Uint8Array };
 
@@ -17,7 +15,7 @@ function isGeometry(blockCount: unknown, blockSize: unknown, totalLength: unknow
     (blockCount as number) <= 0xffff &&
     (blockSize as number) > 0 &&
     (blockSize as number) <= 0xffff &&
-    (totalLength as number) <= MAX_PAYLOAD &&
+    (totalLength as number) <= MAX_FRAME_LENGTH &&
     (totalLength as number) > ((blockCount as number) - 1) * (blockSize as number) &&
     (totalLength as number) <= (blockCount as number) * (blockSize as number)
   );

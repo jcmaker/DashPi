@@ -20,7 +20,7 @@ test('drops an over-limit frame before it can store blocks', () => {
     sequence: 0,
     blockCount: 16385,
     blockSize: 1024,
-    totalLength: 16 * 1024 * 1024 + 1,
+    totalLength: 16 * 1024 * 1024 + 49 + 255 + 255 + 1,
     indices: [0],
     symbol: new Uint8Array(1024),
   };
