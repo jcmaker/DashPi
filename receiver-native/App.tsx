@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { CameraView, useCameraPermissions } from 'expo-camera'
+import { useKeepAwake } from 'expo-keep-awake'
 import { StatusBar } from 'expo-status-bar'
 import { File, Paths } from 'expo-file-system'
 import * as Application from 'expo-application'
@@ -11,8 +12,17 @@ import { cameraGate } from './src/camera-gate'
 import { unpackNativeContainer } from './src/native-container'
 import type { OpticalFile } from './src/unpack'
 import { checkForUpdate } from './src/update-check'
-import { FrameCollector, messageForFrameError } from '../web/src/optical/collector.ts'
+import { FrameCollector } from '../web/src/optical/collector.ts'
 import { parseFrame } from '../web/src/optical/protocol.ts'
+import {
+  FRAME_STALL_MS,
+  type FrameMark,
+  isFreshFrame,
+  messageForFrameError,
+  offerDiscard,
+  screenShouldStayAwake,
+  stallMessage,
+} from './src/scan-session'
 
 type Phase = 'scanning' | 'receiving' | 'verifying' | 'verified'
 
@@ -58,21 +68,75 @@ function PermissionScreen({
   )
 }
 
+const KEEP_AWAKE_TAG = 'dashpi-optical-receive'
+
+function ScanKeepAwake() {
+  useKeepAwake(KEEP_AWAKE_TAG, { suppressDeactivateWarnings: true })
+  return null
+}
+
 function Receiver() {
   const collector = useRef(new FrameCollector())
   const busy = useRef(false)
   const generation = useRef(0)
+  const lastMark = useRef<FrameMark | null>(null)
+  const lastFreshAt = useRef<number | null>(null)
+  const stallTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const halted = useRef(false)
   const [screen, setScreen] = useState<Screen>(initialScreen)
+
+  const clearStall = useCallback(() => {
+    if (stallTimer.current != null) {
+      clearTimeout(stallTimer.current)
+      stallTimer.current = null
+    }
+  }, [])
+
+  const armStall = useCallback(
+    (at: number) => {
+      clearStall()
+      lastFreshAt.current = at
+      stallTimer.current = setTimeout(() => {
+        setScreen((current) => {
+          const message = stallMessage(current.phase, lastFreshAt.current, Date.now())
+          if (!message || current.error) return current
+          return { ...current, error: message }
+        })
+      }, FRAME_STALL_MS)
+    },
+    [clearStall],
+  )
+
+  const forgetCollection = useCallback(() => {
+    collector.current = new FrameCollector()
+    lastMark.current = null
+    lastFreshAt.current = null
+    halted.current = false
+    clearStall()
+  }, [clearStall])
 
   const reset = useCallback(() => {
     generation.current += 1
     busy.current = false
-    collector.current = new FrameCollector()
+    forgetCollection()
     setScreen(initialScreen)
-  }, [])
+  }, [forgetCollection])
+
+  useEffect(() => () => clearStall(), [clearStall])
+
+  const noteFrameError = useCallback(
+    (problem: unknown) => {
+      const message = messageForFrameError(problem)
+      if (!message) return
+      clearStall()
+      halted.current = true
+      setScreen((current) => ({ ...current, error: message }))
+    },
+    [clearStall],
+  )
 
   const onBarcodeScanned = useCallback(({ data }: { data: string }) => {
-    if (busy.current) return
+    if (busy.current || halted.current) return
     let bytes: Uint8Array
     try {
       bytes = bytesFromBarcode(data)
@@ -81,21 +145,35 @@ function Receiver() {
     }
 
     const frames = collector.current
+    let parsed: ReturnType<typeof parseFrame>
+    try {
+      parsed = parseFrame(bytes)
+    } catch (problem) {
+      noteFrameError(problem)
+      return
+    }
+
+    const fresh = isFreshFrame(lastMark.current, parsed)
     let packed: Uint8Array | undefined
     try {
-      packed = frames.add(parseFrame(bytes))
+      packed = frames.add(parsed)
     } catch (problem) {
-      const message = messageForFrameError(problem)
-      if (message) setScreen((current) => ({ ...current, error: message }))
+      noteFrameError(problem)
       return
     }
 
+    if (fresh) lastMark.current = { sessionId: parsed.sessionId, sequence: parsed.sequence }
     const { recovered, total } = frames.progress
     if (!packed) {
-      setScreen({ phase: 'receiving', recovered, total })
+      if (fresh) armStall(Date.now())
+      setScreen((current) => {
+        if (!fresh && current.error) return current
+        return { phase: 'receiving', recovered, total }
+      })
       return
     }
 
+    clearStall()
     busy.current = true
     const ticket = generation.current
     const identity = frames.identity
@@ -109,7 +187,7 @@ function Receiver() {
       .catch(() => {
         if (ticket !== generation.current) return
         busy.current = false
-        collector.current = new FrameCollector()
+        forgetCollection()
         setScreen({
           phase: 'scanning',
           recovered: 0,
@@ -117,7 +195,7 @@ function Receiver() {
           error: '받은 데이터를 열 수 없습니다. 화면을 다시 비추세요.',
         })
       })
-  }, [])
+  }, [armStall, clearStall, forgetCollection, noteFrameError])
 
   const share = useCallback(() => {
     const file = screen.file
@@ -135,9 +213,11 @@ function Receiver() {
 
   const percent = screen.total > 0 ? Math.round((screen.recovered / screen.total) * 100) : 0
   const scanning = screen.phase !== 'verified'
+  const discard = offerDiscard(screen.phase, screen.error)
 
   return (
     <View style={styles.screen}>
+      {screenShouldStayAwake(screen.phase) ? <ScanKeepAwake /> : null}
       <Text style={styles.kickerLight}>DashPi</Text>
       <Text style={styles.titleLight}>사고 리포트 받기</Text>
       {scanning ? (
@@ -173,6 +253,13 @@ function Receiver() {
         </View>
       )}
       {screen.error && <Text style={styles.error}>{screen.error}</Text>}
+      {discard && (
+        <View style={styles.actions}>
+          <Pressable style={styles.secondary} onPress={reset}>
+            <Text style={styles.secondaryLabel}>새로 받기</Text>
+          </Pressable>
+        </View>
+      )}
       {screen.phase === 'verified' && (
         <View style={styles.actions}>
           <Pressable style={styles.primary} onPress={share}>
