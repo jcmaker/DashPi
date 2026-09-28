@@ -299,7 +299,7 @@ function Receiver({
     if (!file) return
     void shareReport(file).then((outcome) => {
       setScreen((current) => {
-        if (current.phase !== 'verified') return current
+        if (current.phase !== 'verified' || current.file !== file) return current
         return applyShareOutcome(current, outcome)
       })
     })

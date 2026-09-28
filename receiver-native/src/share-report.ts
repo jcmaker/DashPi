@@ -33,8 +33,10 @@ export function shareCacheName(reportName: string, randomId: string): string {
   return name
 }
 
-export function randomShareId(fill: (bytes: Uint8Array) => void = (bytes) => crypto.getRandomValues(bytes)): string {
-  const bytes = new Uint8Array(16)
+export function randomShareId(
+  fill: (bytes: Uint8Array<ArrayBuffer>) => void = (bytes) => crypto.getRandomValues(bytes),
+): string {
+  const bytes = new Uint8Array(new ArrayBuffer(16))
   fill(bytes)
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
