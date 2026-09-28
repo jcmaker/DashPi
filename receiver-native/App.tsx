@@ -1,13 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { StatusBar } from 'expo-status-bar'
-import { File, Paths } from 'expo-file-system'
 import * as Application from 'expo-application'
 import * as Sharing from 'expo-sharing'
-import { Alert, AppState, Linking, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Alert, AppState, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { WebView } from 'react-native-webview'
 import { bytesFromBarcode } from './src/barcode'
 import { cameraGate } from './src/camera-gate'
+import { documentReportStore } from './src/document-reports'
+import {
+  ReportSaveError,
+  saveVerifiedReport,
+  shareSavedReport,
+  type ReportStore,
+  type SavedReport,
+} from './src/saved-reports'
 import { unpackNativeContainer } from './src/native-container'
 import type { OpticalFile } from './src/unpack'
 import { checkForUpdate } from './src/update-check'
@@ -58,7 +65,15 @@ function PermissionScreen({
   )
 }
 
-function Receiver() {
+function Receiver({
+  store,
+  saved,
+  reloadSaved,
+}: {
+  store: ReportStore
+  saved: SavedReport[]
+  reloadSaved: () => void
+}) {
   const collector = useRef(new FrameCollector())
   const busy = useRef(false)
   const generation = useRef(0)
@@ -100,13 +115,14 @@ function Receiver() {
     const ticket = generation.current
     const identity = frames.identity
     setScreen({ phase: 'verifying', recovered, total })
-    void unpackNativeContainer(packed)
+    void saveVerifiedReport(packed, unpackNativeContainer, store)
       .then((file) => {
         if (ticket !== generation.current || frames.identity !== identity) return
+        reloadSaved()
         const html = file.mediaType === 'text/html' ? new TextDecoder().decode(file.payload) : undefined
         setScreen({ phase: 'verified', recovered, total, file, html })
       })
-      .catch(() => {
+      .catch((problem: unknown) => {
         if (ticket !== generation.current) return
         busy.current = false
         collector.current = new FrameCollector()
@@ -114,24 +130,64 @@ function Receiver() {
           phase: 'scanning',
           recovered: 0,
           total: 0,
-          error: '받은 데이터를 열 수 없습니다. 화면을 다시 비추세요.',
+          error:
+            problem instanceof ReportSaveError
+              ? '리포트를 앱에 저장하지 못했습니다. 화면을 다시 비추세요.'
+              : '받은 데이터를 열 수 없습니다. 화면을 다시 비추세요.',
         })
       })
-  }, [])
+  }, [reloadSaved, store])
+
+  const openSaved = useCallback(
+    (name: string) => {
+      const stored = store.get(name)
+      if (!stored) {
+        reloadSaved()
+        return
+      }
+      generation.current += 1
+      busy.current = false
+      const html = stored.mediaType === 'text/html' ? new TextDecoder().decode(stored.payload) : undefined
+      setScreen({ phase: 'verified', recovered: 0, total: 0, file: stored, html })
+    },
+    [reloadSaved, store],
+  )
+
+  const deleteSaved = useCallback(
+    (name: string) => {
+      store.remove(name)
+      reloadSaved()
+      setScreen((current) => {
+        if (current.file?.name !== name) return current
+        generation.current += 1
+        busy.current = false
+        collector.current = new FrameCollector()
+        return initialScreen
+      })
+    },
+    [reloadSaved, store],
+  )
 
   const share = useCallback(() => {
     const file = screen.file
     if (!file) return
-    const stored = new File(Paths.cache, file.name)
-    if (stored.exists) stored.delete()
-    stored.create()
-    stored.write(file.payload)
-    void Sharing.shareAsync(stored.uri, {
-      mimeType: file.mediaType,
-      dialogTitle: '리포트 저장',
-      UTI: file.mediaType === 'text/html' ? 'public.html' : 'public.data',
+    setScreen((current) => ({ ...current, error: undefined }))
+    void shareSavedReport(file.name, store, (uri, mediaType) =>
+      Sharing.shareAsync(uri, {
+        mimeType: mediaType,
+        dialogTitle: '리포트 저장',
+        UTI: mediaType === 'text/html' ? 'public.html' : 'public.data',
+      }),
+    ).catch(() => {
+      const kept = store.get(file.name)
+      setScreen((current) => ({
+        ...current,
+        error: kept
+          ? '공유에 실패했습니다. 앱에 저장된 리포트는 그대로 있습니다.'
+          : '공유에 실패했습니다.',
+      }))
     })
-  }, [screen.file])
+  }, [screen.file, store])
 
   const percent = screen.total > 0 ? Math.round((screen.recovered / screen.total) * 100) : 0
   const scanning = screen.phase !== 'verified'
@@ -154,9 +210,7 @@ function Receiver() {
           {screen.html ? (
             <WebView originWhitelist={['*']} source={{ html: screen.html }} style={styles.web} />
           ) : (
-            <Text style={styles.bodyDark}>
-              {screen.file?.name} 검증이 끝났습니다. 공유해서 여세요.
-            </Text>
+            <Text style={styles.bodyDark}>{screen.file?.name} 검증이 끝났고 앱에 저장했습니다.</Text>
           )}
         </View>
       )}
@@ -165,7 +219,7 @@ function Receiver() {
         {screen.phase === 'receiving' && `수신 중 ${screen.recovered}/${screen.total} · ${percent}%`}
         {screen.phase === 'verifying' && 'SHA-256 무결성을 검증하고 있습니다.'}
         {screen.phase === 'verified' &&
-          `${screen.file?.name ?? '리포트'} · ${formatBytes(screen.file?.payload.length ?? 0)} 검증 완료`}
+          `${screen.file?.name ?? '리포트'} · ${formatBytes(screen.file?.payload.length ?? 0)} 검증 완료 · 앱에 저장됨`}
       </Text>
       {screen.phase === 'receiving' && (
         <View style={styles.track}>
@@ -173,10 +227,33 @@ function Receiver() {
         </View>
       )}
       {screen.error && <Text style={styles.error}>{screen.error}</Text>}
+      {screen.phase === 'scanning' && saved.length > 0 && (
+        <View style={styles.saved}>
+          <Text style={styles.savedTitle}>저장된 리포트</Text>
+          <ScrollView style={styles.savedList} nestedScrollEnabled>
+            {saved.map((item) => (
+              <View key={item.name} style={styles.savedRow}>
+                <Text style={styles.savedName} numberOfLines={1}>
+                  {item.name}
+                </Text>
+                <Pressable style={styles.savedOpen} onPress={() => openSaved(item.name)}>
+                  <Text style={styles.savedOpenLabel}>열기</Text>
+                </Pressable>
+                <Pressable style={styles.savedDelete} onPress={() => deleteSaved(item.name)}>
+                  <Text style={styles.savedDeleteLabel}>삭제</Text>
+                </Pressable>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      )}
       {screen.phase === 'verified' && (
         <View style={styles.actions}>
           <Pressable style={styles.primary} onPress={share}>
             <Text style={styles.primaryLabel}>공유 또는 파일에 저장</Text>
+          </Pressable>
+          <Pressable style={styles.secondary} onPress={() => screen.file && deleteSaved(screen.file.name)}>
+            <Text style={styles.secondaryLabel}>저장본 삭제</Text>
           </Pressable>
           <Pressable style={styles.secondary} onPress={reset}>
             <Text style={styles.secondaryLabel}>새로 받기</Text>
@@ -211,6 +288,19 @@ function useUpdatePrompt() {
 export default function App() {
   const [permission, requestPermission, getPermission] = useCameraPermissions()
   const checkUpdate = useUpdatePrompt()
+  const store = useRef(documentReportStore())
+  const [saved, setSaved] = useState<SavedReport[]>([])
+  const reloadSaved = useCallback(() => {
+    try {
+      setSaved(store.current.list())
+    } catch {
+      setSaved([])
+    }
+  }, [])
+
+  useEffect(() => {
+    reloadSaved()
+  }, [reloadSaved])
 
   useEffect(() => {
     void checkUpdate()
@@ -232,7 +322,7 @@ export default function App() {
           <Text style={styles.body}>카메라 권한을 확인하고 있습니다.</Text>
         </View>
       )}
-      {gate === 'scan' && <Receiver />}
+      {gate === 'scan' && <Receiver store={store.current} saved={saved} reloadSaved={reloadSaved} />}
       {(gate === 'request' || gate === 'settings') && (
         <PermissionScreen
           canAskAgain={gate === 'request'}
@@ -287,4 +377,27 @@ const styles = StyleSheet.create({
   fill: { height: 8, backgroundColor: '#38bdf8' },
   error: { color: '#fecaca', fontSize: 14, marginTop: 12 },
   actions: { gap: 10, marginTop: 16 },
+  saved: { marginTop: 12 },
+  savedTitle: { color: '#94a3b8', fontSize: 13, marginBottom: 8 },
+  savedList: { maxHeight: 160 },
+  savedRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  savedName: { color: '#f8fafc', flex: 1, fontSize: 15 },
+  savedOpen: {
+    borderColor: '#38bdf8',
+    borderRadius: 8,
+    borderWidth: 1,
+    minHeight: 36,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  savedOpenLabel: { color: '#e0f2fe', fontSize: 14, fontWeight: '600' },
+  savedDelete: {
+    borderColor: '#fecaca',
+    borderRadius: 8,
+    borderWidth: 1,
+    minHeight: 36,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  savedDeleteLabel: { color: '#fecaca', fontSize: 14, fontWeight: '600' },
 })
