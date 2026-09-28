@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { checkForUpdate, isNewer, parseVersion, pickUpdate, type Release } from '../src/update-check.ts'
+import {
+  UPDATE_CHECK_INTERVAL_MS,
+  checkForUpdate,
+  isNewer,
+  parseVersion,
+  pickUpdate,
+  updateCooldown,
+  type Release,
+} from '../src/update-check.ts'
 
 const apk = (tag: string) => ({
   name: 'DashPi.apk',
@@ -47,6 +55,21 @@ test('stays quiet when offline, rate-limited, or the version is unknown', async 
   assert.equal(await checkForUpdate('1.0.0', limited), null)
   const never = async () => { throw new Error('must not fetch') }
   assert.equal(await checkForUpdate(null, never), null)
+})
+
+test('a failed check does not block an immediate retry', () => {
+  const now = 1_700_000_000_000
+  // Failure and "no newer release" both leave the dialog unshown.
+  const missed = updateCooldown(0, now, false)
+  assert.equal(missed.shownAt, 0)
+  assert.equal(missed.due, true)
+  assert.equal(updateCooldown(missed.shownAt, now + 1, false).due, true)
+
+  const shown = updateCooldown(0, now, true)
+  assert.equal(shown.shownAt, now)
+  assert.equal(shown.due, false)
+  assert.equal(updateCooldown(shown.shownAt, now + UPDATE_CHECK_INTERVAL_MS - 1, false).due, false)
+  assert.equal(updateCooldown(shown.shownAt, now + UPDATE_CHECK_INTERVAL_MS, false).due, true)
 })
 
 test('asks GitHub for releases and returns a newer one', async () => {

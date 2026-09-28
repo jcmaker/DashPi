@@ -1,0 +1,84 @@
+diff -ruN a/android/src/main/java/expo/modules/camera/ExpoCameraView.kt b/android/src/main/java/expo/modules/camera/ExpoCameraView.kt
+--- a/android/src/main/java/expo/modules/camera/ExpoCameraView.kt	1985-10-26 17:15:00
++++ b/android/src/main/java/expo/modules/camera/ExpoCameraView.kt	2026-09-29 01:09:47
+@@ -235,7 +235,10 @@
+      * that would get coalesced (because both of them would have the same coalescing key).
+      * So let's differentiate them with a hash of the contents (mod short's max value).
+      */
+-    coalescingKey = { event -> (event.data.hashCode() % Short.MAX_VALUE).toShort() }
++    coalescingKey = { event ->
++      val identity = event.rawBytesBase64 ?: event.data
++      (identity.hashCode() % Short.MAX_VALUE).toShort()
++    }
+   )
+ 
+   private val onPictureSaved by EventDispatcher<PictureSavedEvent>(
+@@ -813,7 +816,8 @@
+           type = BarcodeType.mapFormatToString(barcode.type),
+           cornerPoints = cornerPoints,
+           bounds = boundingBox,
+-          extra = barcode.extra
++          extra = barcode.extra,
++          rawBytesBase64 = barcode.rawBytes?.let { android.util.Base64.encodeToString(it, android.util.Base64.NO_WRAP) }
+         )
+       )
+     }
+diff -ruN a/android/src/main/java/expo/modules/camera/analyzers/BarcodeAnalyzer.kt b/android/src/main/java/expo/modules/camera/analyzers/BarcodeAnalyzer.kt
+--- a/android/src/main/java/expo/modules/camera/analyzers/BarcodeAnalyzer.kt	1985-10-26 17:15:00
++++ b/android/src/main/java/expo/modules/camera/analyzers/BarcodeAnalyzer.kt	2026-09-29 01:09:47
+@@ -66,7 +66,8 @@
+               extra,
+               cornerPoints,
+               effectiveHeight,
+-              effectiveWidth
++              effectiveWidth,
++              barcode.rawBytes?.copyOf()
+             )
+           )
+         }
+diff -ruN a/android/src/main/java/expo/modules/camera/analyzers/BarcodeScannerResultSerializer.kt b/android/src/main/java/expo/modules/camera/analyzers/BarcodeScannerResultSerializer.kt
+--- a/android/src/main/java/expo/modules/camera/analyzers/BarcodeScannerResultSerializer.kt	1985-10-26 17:15:00
++++ b/android/src/main/java/expo/modules/camera/analyzers/BarcodeScannerResultSerializer.kt	2026-09-29 01:09:47
+@@ -11,6 +11,7 @@
+     Bundle().apply {
+       putString("data", result.value)
+       putString("raw", result.raw)
++      result.rawBytes?.let { putString("rawBytesBase64", android.util.Base64.encodeToString(it, android.util.Base64.NO_WRAP)) }
+       putInt("type", result.type)
+       putBundle("extra", result.extra)
+       val cornerPointsAndBoundingBox = getCornerPointsAndBoundingBox(result.cornerPoints, result.boundingBox, density)
+@@ -33,7 +34,7 @@
+     }
+ 
+     val extra = parseExtraDate(barcode)
+-    return BarCodeScannerResult(barcode.format, value, raw, extra, cornerPoints, inputImage?.height ?: 0, inputImage?.width ?: 0)
++    return BarCodeScannerResult(barcode.format, value, raw, extra, cornerPoints, inputImage?.height ?: 0, inputImage?.width ?: 0, barcode.rawBytes?.copyOf())
+   }
+ 
+   private fun getCornerPointsAndBoundingBox(
+diff -ruN a/android/src/main/java/expo/modules/camera/common/CommonEvents.kt b/android/src/main/java/expo/modules/camera/common/CommonEvents.kt
+--- a/android/src/main/java/expo/modules/camera/common/CommonEvents.kt	1985-10-26 17:15:00
++++ b/android/src/main/java/expo/modules/camera/common/CommonEvents.kt	2026-09-29 01:09:47
+@@ -13,7 +13,8 @@
+   @Field val type: String,
+   @Field val cornerPoints: ArrayList<Bundle>,
+   @Field val bounds: Bundle,
+-  @Field val extra: Bundle?
++  @Field val extra: Bundle?,
++  @Field val rawBytesBase64: String?
+ ) : Record
+ 
+ @OptimizedRecord
+diff -ruN a/android/src/main/java/expo/modules/camera/utils/BarCodeScannerResult.kt b/android/src/main/java/expo/modules/camera/utils/BarCodeScannerResult.kt
+--- a/android/src/main/java/expo/modules/camera/utils/BarCodeScannerResult.kt	1985-10-26 17:15:00
++++ b/android/src/main/java/expo/modules/camera/utils/BarCodeScannerResult.kt	2026-09-29 01:09:47
+@@ -9,7 +9,8 @@
+   val extra: Bundle,
+   var cornerPoints: MutableList<Int>,
+   var height: Int,
+-  var width: Int
++  var width: Int,
++  val rawBytes: ByteArray? = null
+ ) {
+   data class BoundingBox(val x: Int, val y: Int, val width: Int, val height: Int)
+ 

@@ -25,7 +25,7 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-sharing",
+      "./modules/dashpi-share/app.plugin.js",
       [
         "expo-camera",
         {
@@ -34,7 +34,8 @@
           "recordAudioAndroid": false
         }
       ],
-      "./plugins/with-release-signing"
+      "./plugins/with-release-signing",
+      "expo-video"
     ]
   }
 }

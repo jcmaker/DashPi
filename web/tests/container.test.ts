@@ -36,6 +36,55 @@ test('rejects a DPC1 file whose payload does not match its SHA-256', async () =>
   await assert.rejects(unpackContainer(packed), /sha256 mismatch/);
 });
 
+test('stops inflation when the declared length is only just above the compressed body', async () => {
+  const huge = Buffer.alloc(8 * 1024 * 1024, 0x61);
+  const body = deflateSync(huge);
+  const declared = body.length + 1;
+  const name = Buffer.from('report.html');
+  const media = Buffer.from('text/html');
+  const header = Buffer.alloc(49);
+  header.write('DPC1');
+  header.writeUInt8(1, 4);
+  header.writeUInt16LE(name.length, 5);
+  header.writeUInt16LE(media.length, 7);
+  header.writeUInt32LE(declared, 9);
+  header.writeUInt32LE(body.length, 13);
+  const packed = Uint8Array.from(Buffer.concat([header, name, media, body]));
+
+  const NativeStream = globalThis.DecompressionStream;
+  let produced = 0;
+  globalThis.DecompressionStream = class extends NativeStream {
+    constructor(format: CompressionFormat) {
+      super(format);
+      const inner = this.readable.getReader();
+      const outer = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          const next = await inner.read();
+          if (next.done) {
+            controller.close();
+            return;
+          }
+          produced += next.value.byteLength;
+          controller.enqueue(next.value);
+        },
+        cancel(reason) {
+          return inner.cancel(reason);
+        },
+      });
+      Object.defineProperty(this, 'readable', { configurable: true, value: outer });
+    }
+  };
+
+  try {
+    await assert.rejects(unpackContainer(packed), /invalid container length/);
+  } finally {
+    globalThis.DecompressionStream = NativeStream;
+  }
+
+  assert.ok(produced > 0);
+  assert.ok(produced < huge.length / 8, `inflated ${produced} bytes`);
+});
+
 test('rejects container metadata that is unsafe as a download name', async () => {
   const packed = container(Uint8Array.from(Buffer.from('report '.repeat(32))), '../report.html');
 
