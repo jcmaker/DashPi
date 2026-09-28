@@ -43,13 +43,17 @@ export function shareFileStillNeeded(name: string): boolean {
   return inFlight.has(name)
 }
 
+export type SharePresentation =
+  | { outcome: 'dismissed' }
+  | { outcome: 'sent'; finished: Promise<void> }
+
 export async function shareReportFile(input: {
   reportName: string
   mediaType: string
   payload: Uint8Array
   randomId: string
   openCacheFile: (name: string) => CacheFile
-  present: (file: CacheFile, mediaType: string) => Promise<void>
+  present: (file: CacheFile, mediaType: string) => Promise<SharePresentation>
   stillNeeded?: (file: CacheFile) => boolean
 }): Promise<void> {
   const cacheName = shareCacheName(input.reportName, input.randomId)
@@ -60,7 +64,8 @@ export async function shareReportFile(input: {
     file = input.openCacheFile(cacheName)
     if (file.name !== cacheName) throw new Error('share cache file name was rewritten')
     file.write(Uint8Array.from(input.payload))
-    await input.present(file, input.mediaType)
+    const presentation = await input.present(file, input.mediaType)
+    if (presentation.outcome === 'sent') await presentation.finished
   } finally {
     inFlight.delete(cacheName)
     if (file && !shareFileStillNeeded(file.name) && !input.stillNeeded?.(file) && file.exists) {

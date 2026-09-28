@@ -1,6 +1,13 @@
 import { Directory, File, Paths } from 'expo-file-system'
 import { presentShareSheet } from 'dashpi-share'
-import { isShareCacheName, randomShareId, SHARE_CACHE_DIRECTORY, shareReportFile, type CacheFile } from './share-report'
+import {
+  isShareCacheName,
+  randomShareId,
+  SHARE_CACHE_DIRECTORY,
+  shareReportFile,
+  type CacheFile,
+  type SharePresentation,
+} from './share-report'
 
 function openDashpiShareFile(name: string): CacheFile {
   if (!isShareCacheName(name)) throw new Error('refusing to open a predictable share cache name')
@@ -40,6 +47,13 @@ export function shareReceivedReport(report: {
     payload: report.payload,
     randomId: randomShareId(),
     openCacheFile: openDashpiShareFile,
-    present: (file, mediaType) => presentShareSheet(file.uri, mediaType),
+    present: (file, mediaType) => presentUntilCleanup(file.uri, mediaType),
   })
+}
+
+async function presentUntilCleanup(uri: string, mediaType: string): Promise<SharePresentation> {
+  // shareAsync stays pending while the chosen activity is open. It resolves when that
+  // activity finishes, or immediately if the sheet is dismissed with no target.
+  await presentShareSheet(uri, mediaType)
+  return { outcome: 'dismissed' }
 }

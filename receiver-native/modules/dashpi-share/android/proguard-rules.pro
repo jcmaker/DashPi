@@ -1,1 +1,2 @@
 -keep class expo.modules.dashpishare.DashpiShareFileProvider { *; }
+-keep class expo.modules.dashpishare.DashpiShareChooserActivity { *; }

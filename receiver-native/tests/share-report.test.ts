@@ -11,6 +11,7 @@ import {
   shareFileStillNeeded,
   shareReportFile,
   type CacheFile,
+  type SharePresentation,
 } from '../src/share-report.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -69,11 +70,35 @@ test('random ids are 128-bit hex and do not depend on the report name', () => {
   assert.equal(shareCacheName('report.html', live).includes('report'), false)
 })
 
-test('the picked share receives the same bytes and media type, then the cache file is removed', async () => {
+const dismissed = async (): Promise<SharePresentation> => ({ outcome: 'dismissed' })
+
+test('a dismissed sheet deletes the cache file without waiting for a target', async () => {
   const cache = memoryCache()
-  const payload = Uint8Array.from([1, 2, 3, 4])
-  let seen: { name: string; mediaType: string; bytes: Uint8Array } | undefined
+  const name = shareCacheName('report.html', htmlId)
   await shareReportFile({
+    reportName: 'report.html',
+    mediaType: 'text/html',
+    payload: Uint8Array.from([1, 2, 3, 4]),
+    randomId: htmlId,
+    openCacheFile: cache.open,
+    present: async (file, mediaType) => {
+      assert.equal(mediaType, 'text/html')
+      assert.deepEqual(file.bytes(), Uint8Array.from([1, 2, 3, 4]))
+      assert.equal(file.exists, true)
+      return { outcome: 'dismissed' }
+    },
+  })
+  assert.equal(cache.open(name).exists, false)
+  assert.equal(shareFileStillNeeded(name), false)
+})
+
+test('the chosen activity keeps the same bytes until it finishes', async () => {
+  const cache = memoryCache()
+  const name = shareCacheName('report.html', htmlId)
+  const payload = Uint8Array.from([1, 2, 3, 4])
+  let finishTarget: () => void = () => {}
+  let seen: { mediaType: string; bytes: Uint8Array } | undefined
+  const pending = shareReportFile({
     reportName: 'report.html',
     mediaType: 'text/html',
     payload,
@@ -81,16 +106,24 @@ test('the picked share receives the same bytes and media type, then the cache fi
     openCacheFile: cache.open,
     present: async (file, mediaType) => {
       payload[0] = 9
-      seen = { name: file.name, mediaType, bytes: file.bytes() }
-      assert.equal(file.exists, true)
-      assert.equal(shareFileStillNeeded(file.name), true)
+      seen = { mediaType, bytes: file.bytes() }
+      return {
+        outcome: 'sent',
+        finished: new Promise<void>((resolve) => {
+          finishTarget = resolve
+        }),
+      }
     },
   })
-  assert.equal(seen?.name, `${htmlId}.html`)
+  await new Promise((resolve) => setImmediate(resolve))
   assert.equal(seen?.mediaType, 'text/html')
   assert.deepEqual(seen?.bytes, Uint8Array.from([1, 2, 3, 4]))
-  assert.equal(cache.open(seen!.name).exists, false)
-  assert.equal(shareFileStillNeeded(seen!.name), false)
+  assert.equal(cache.open(name).exists, true)
+  assert.equal(shareFileStillNeeded(name), true)
+  finishTarget()
+  await pending
+  assert.equal(cache.open(name).exists, false)
+  assert.equal(shareFileStillNeeded(name), false)
 })
 
 test('a rejected share still removes only that cache file', async () => {
@@ -117,18 +150,21 @@ test('a rejected share still removes only that cache file', async () => {
 test('does not delete a share file that is still needed', async () => {
   const cache = memoryCache()
   const keptName = shareCacheName('report.html', htmlId)
-  let release: () => void = () => {}
+  let finishTarget: () => void = () => {}
   const first = shareReportFile({
     reportName: 'report.html',
     mediaType: 'text/html',
     payload: Uint8Array.from([1, 2]),
     randomId: htmlId,
     openCacheFile: cache.open,
-    present: () =>
-      new Promise<void>((resolve) => {
-        release = resolve
+    present: async () => ({
+      outcome: 'sent',
+      finished: new Promise<void>((resolve) => {
+        finishTarget = resolve
       }),
+    }),
   })
+  await new Promise((resolve) => setImmediate(resolve))
   assert.equal(cache.open(keptName).exists, true)
   assert.equal(shareFileStillNeeded(keptName), true)
   await assert.rejects(
@@ -140,7 +176,7 @@ test('does not delete a share file that is still needed', async () => {
       openCacheFile: () => {
         throw new Error('opened the in-flight cache file')
       },
-      present: async () => {},
+      present: dismissed,
     }),
     (error: unknown) => error instanceof Error && error.message === 'share file is still needed',
   )
@@ -173,13 +209,14 @@ test('does not delete a share file that is still needed', async () => {
     present: async (file, mediaType) => {
       assert.equal(mediaType, 'image/png')
       assert.equal(file.name, heldName)
+      return { outcome: 'dismissed' }
     },
     stillNeeded: () => held,
   })
   assert.equal(cache.open(heldName).exists, true)
   assert.equal(cache.open(keptName).exists, true)
 
-  release()
+  finishTarget()
   await first
   assert.equal(cache.open(keptName).exists, false)
   assert.equal(cache.open(heldName).exists, true)
@@ -187,24 +224,33 @@ test('does not delete a share file that is still needed', async () => {
   assert.equal(shareFileStillNeeded(heldName), false)
 })
 
-test('android share path grants read on the chooser and revokes it when the sheet finishes', () => {
+test('android revokes the report only after the chosen activity finishes', () => {
   const kotlin = readFileSync(
     join(root, 'modules/dashpi-share/android/src/main/java/expo/modules/dashpishare/DashpiShareModule.kt'),
+    'utf8',
+  )
+  const chooser = readFileSync(
+    join(root, 'modules/dashpi-share/android/src/main/java/expo/modules/dashpishare/DashpiShareChooserActivity.kt'),
     'utf8',
   )
   const paths = readFileSync(join(root, 'modules/dashpi-share/android/src/main/res/xml/dashpi_share_paths.xml'), 'utf8')
   const plugin = readFileSync(join(root, 'modules/dashpi-share/app.plugin.js'), 'utf8')
   assert.equal(kotlin.includes('grantUriPermission('), false)
+  assert.equal(chooser.includes('grantUriPermission('), false)
+  assert.equal(kotlin.includes('Intent.createChooser'), false)
   assert.equal(kotlin.includes('queryIntentActivities'), false)
-  assert.equal(kotlin.match(/addFlags\(Intent\.FLAG_GRANT_READ_URI_PERMISSION\)/g)?.length, 2)
-  assert.match(kotlin, /Intent\.createChooser/)
-  assert.match(kotlin, /clipData/)
+  assert.match(chooser, /queryIntentActivities/)
+  assert.match(kotlin, /clipData = ClipData\.newRawUri/)
+  assert.match(kotlin, /addFlags\(Intent\.FLAG_GRANT_READ_URI_PERMISSION\)/)
+  assert.match(kotlin, /startActivityForResult\(target, TARGET_REQUEST\)/)
+  assert.match(kotlin, /if \(!targetSelected/)
+  assert.match(kotlin, /chosenActivityOpen = true/)
+  assert.match(kotlin, /if \(!chosenActivityOpen\) finishShare\(\)/)
+  assert.match(kotlin, /TARGET_REQUEST -> onChosenActivityResult\(\)/)
   assert.match(kotlin, /revokeUriPermission/)
   assert.match(kotlin, /file\.delete\(\)/)
-  assert.match(kotlin, /SHARE_CACHE_DIRECTORY = "dashpi-share"/)
   assert.equal(paths.includes('path="."'), false)
   assert.match(paths, /path="dashpi-share\/"/)
   assert.match(plugin, /android:exported': 'false'/)
   assert.match(plugin, /android:grantUriPermissions': 'true'/)
-  assert.equal(plugin.includes('queryIntentActivities'), false)
 })
