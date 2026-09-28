@@ -85,6 +85,14 @@ test('rejects contradictory unresolved equations after peeling', () => {
   assert.throws(() => decoder.add(frame([2], 3)), /conflicting equation/);
 });
 
+test('accepts a packed 16MiB container and rejects anything longer before storing blocks', () => {
+  const maxPackedContainer = 16 * 1024 * 1024 + 49 + 255 + 255;
+  const decoder = new FountainDecoder(16385, 1024, maxPackedContainer);
+  assert.equal(decoder.recoveredBlocks, 0);
+
+  assert.throws(() => new FountainDecoder(16385, 1024, maxPackedContainer + 1), /malformed stream/);
+});
+
 test('rejects malformed symbols before changing decoder state', () => {
   const decoder = new FountainDecoder(2, 1, 2);
   const frame = {
