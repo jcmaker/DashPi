@@ -38,6 +38,9 @@ export function verifiedHtmlWebViewProps(html: string) {
     javaScriptEnabled: false as const,
     setSupportMultipleWindows: false as const,
     mediaCapturePermissionGrantType: 'deny' as const,
+    // Android: setBlockNetworkLoads plus shouldInterceptRequest, and no file chooser.
+    // The CSP meta below is display-only and is not this boundary.
+    blockNonDocumentLoads: true as const,
     source: { html: sandboxVerifiedHtml(html) },
     onShouldStartLoadWithRequest: (request: { url: string }) => allowVerifiedHtmlLoad(request.url),
   }

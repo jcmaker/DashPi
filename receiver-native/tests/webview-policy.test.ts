@@ -1,5 +1,16 @@
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import { fileURLToPath } from 'node:url'
+
+const packageRoot = fileURLToPath(new URL('..', import.meta.url))
+execFileSync(process.execPath, ['scripts/patch-webview-sandbox.mjs'], { cwd: packageRoot })
+execFileSync(process.execPath, ['scripts/patch-webview-sandbox.mjs'], { cwd: packageRoot })
+
+function source(relativePath: string): string {
+  return readFileSync(new URL(relativePath, import.meta.url), 'utf8')
+}
 import {
   allowVerifiedHtmlLoad,
   sandboxVerifiedHtml,
@@ -78,4 +89,46 @@ test('inserts the content security policy when the report has no head', () => {
   const displayed = sandboxVerifiedHtml('<img src="data:image/jpeg;base64,QQ">')
   assert.match(displayed, /^<head><meta http-equiv="Content-Security-Policy"/)
   assert.match(displayed, /src="data:image\/jpeg;base64,QQ"/)
+})
+
+test('the report WebView turns on the native load block, which is not the CSP', () => {
+  const props = verifiedHtmlWebViewProps('<p>report</p>')
+  assert.equal(props.blockNonDocumentLoads, true)
+  assert.match(source('../App.tsx'), /<WebView \{\.\.\.verifiedHtmlWebViewProps\(screen\.html\)\}/)
+  assert.match(source('../package.json'), /patch-webview-sandbox\.mjs/)
+
+  const client = source(
+    '../node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebViewClient.java',
+  )
+  const view = source(
+    '../node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebView.java',
+  )
+  const chrome = source(
+    '../node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebChromeClient.java',
+  )
+  const manager = source(
+    '../node_modules/react-native-webview/android/src/newarch/com/reactnativecommunity/webview/RNCWebViewManager.java',
+  )
+  const spec = source('../node_modules/react-native-webview/src/RNCWebViewNativeComponent.ts')
+
+  assert.match(spec, /blockNonDocumentLoads\?: WithDefault<boolean, false>/)
+  assert.match(manager, /@ReactProp\(name = "blockNonDocumentLoads"\)/)
+  assert.match(view, /getSettings\(\)\.setBlockNetworkLoads\(true\)/)
+  assert.match(view, /setSuppressFileChooser\(enabled\)/)
+  assert.match(client, /SHOULD_OVERRIDE_URL_LOADING_TIMEOUT = 250/)
+  assert.match(client, /shouldInterceptRequest\(WebView view, WebResourceRequest request\)/)
+  assert.match(client, /shouldInterceptRequest\(WebView view, String url\)/)
+  assert.match(client, /"data"\.equalsIgnoreCase\(scheme\)/)
+  assert.match(client, /"blank"\.equals\(rest\)/)
+  assert.match(client, /new WebResourceResponse\(/)
+  const intercept = client.slice(client.indexOf('shouldInterceptRequest(WebView view, WebResourceRequest request)'))
+  assert.match(intercept, /if \(!mBlockNonDocumentLoads \|\| allowsVerifiedDocumentResource/)
+  assert.doesNotMatch(intercept.slice(0, 500), /SHOULD_OVERRIDE_URL_LOADING_TIMEOUT/)
+
+  const show = chrome.slice(chrome.indexOf('boolean onShowFileChooser'))
+  const cancel = show.indexOf('filePathCallback.onReceiveValue(null)')
+  const picker = show.indexOf('startPhotoPickerIntent')
+  assert.ok(cancel > 0 && picker > cancel)
+  assert.match(show, /return true;/)
+  assert.match(chrome, /ACTION_IMAGE_CAPTURE|startPhotoPickerIntent/)
 })
