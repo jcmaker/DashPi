@@ -11,7 +11,10 @@ const MARKER = 'DASHPI_REPORT_SANDBOX'
 function patch(relativePath, edit) {
   const path = join(pkg, relativePath)
   const original = readFileSync(path, 'utf8')
-  if (original.includes(MARKER) && edit.skipIfMarked !== false && original.includes(edit.done)) {
+  const already = Boolean(edit.done) && original.includes(edit.done)
+  // Manager and WebViewTypes edits do not write DASHPI_REPORT_SANDBOX, and their
+  // anchors stay in the file. Skip those when the setter or property is already there.
+  if (already && (edit.skipIfPresent || (original.includes(MARKER) && edit.skipIfMarked !== false))) {
     return
   }
   if (!original.includes(edit.anchor)) {
@@ -212,7 +215,8 @@ const managerAnchor = `    @ReactProp(name = "javaScriptEnabled")
 `
 
 patch('android/src/newarch/com/reactnativecommunity/webview/RNCWebViewManager.java', {
-  done: 'name = "blockNonDocumentLoads"',
+  done: 'public void setBlockNonDocumentLoads',
+  skipIfPresent: true,
   anchor: managerAnchor,
   replacement: `    @Override
     @ReactProp(name = "blockNonDocumentLoads")
@@ -224,7 +228,8 @@ ${managerAnchor}`,
 })
 
 patch('android/src/oldarch/com/reactnativecommunity/webview/RNCWebViewManager.java', {
-  done: 'name = "blockNonDocumentLoads"',
+  done: 'public void setBlockNonDocumentLoads',
+  skipIfPresent: true,
   anchor: managerAnchor,
   replacement: `    @ReactProp(name = "blockNonDocumentLoads")
     public void setBlockNonDocumentLoads(RNCWebViewWrapper view, boolean value) {
@@ -263,7 +268,8 @@ patch('src/RNCWebViewNativeComponent.ts', {
 })
 
 patch('src/WebViewTypes.ts', {
-  done: 'blockNonDocumentLoads?',
+  done: 'blockNonDocumentLoads?: boolean',
+  skipIfPresent: true,
   anchor: '  setSupportMultipleWindows?: boolean;\n',
   replacement: `  setSupportMultipleWindows?: boolean;
 

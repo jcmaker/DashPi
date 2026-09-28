@@ -5,8 +5,12 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 const packageRoot = fileURLToPath(new URL('..', import.meta.url))
-execFileSync(process.execPath, ['scripts/patch-webview-sandbox.mjs'], { cwd: packageRoot })
-execFileSync(process.execPath, ['scripts/patch-webview-sandbox.mjs'], { cwd: packageRoot })
+
+function runPatchScript() {
+  execFileSync(process.execPath, ['scripts/patch-webview-sandbox.mjs'], { cwd: packageRoot })
+}
+
+runPatchScript()
 
 function source(relativePath: string): string {
   return readFileSync(new URL(relativePath, import.meta.url), 'utf8')
@@ -131,4 +135,19 @@ test('the report WebView turns on the native load block, which is not the CSP', 
   assert.ok(cancel > 0 && picker > cancel)
   assert.match(show, /return true;/)
   assert.match(chrome, /ACTION_IMAGE_CAPTURE|startPhotoPickerIntent/)
+})
+
+test('a second patch run leaves one setter and one property', () => {
+  runPatchScript()
+  const times = (text: string, needle: string) => text.split(needle).length - 1
+  const newarch = source(
+    '../node_modules/react-native-webview/android/src/newarch/com/reactnativecommunity/webview/RNCWebViewManager.java',
+  )
+  const oldarch = source(
+    '../node_modules/react-native-webview/android/src/oldarch/com/reactnativecommunity/webview/RNCWebViewManager.java',
+  )
+  const types = source('../node_modules/react-native-webview/src/WebViewTypes.ts')
+  assert.equal(times(newarch, 'public void setBlockNonDocumentLoads'), 1)
+  assert.equal(times(oldarch, 'public void setBlockNonDocumentLoads'), 1)
+  assert.equal(times(types, 'blockNonDocumentLoads'), 1)
 })
