@@ -2,13 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { StatusBar } from 'expo-status-bar'
 import { File, Paths } from 'expo-file-system'
+import * as Application from 'expo-application'
 import * as Sharing from 'expo-sharing'
-import { AppState, Linking, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Alert, AppState, Linking, Pressable, StyleSheet, Text, View } from 'react-native'
 import { WebView } from 'react-native-webview'
 import { bytesFromBarcode } from './src/barcode'
 import { cameraGate } from './src/camera-gate'
 import { unpackNativeContainer } from './src/native-container'
 import type { OpticalFile } from './src/unpack'
+import { checkForUpdate } from './src/update-check'
 import { FrameCollector, messageForFrameError } from '../web/src/optical/collector.ts'
 import { parseFrame } from '../web/src/optical/protocol.ts'
 
@@ -185,15 +187,40 @@ function Receiver() {
   )
 }
 
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
+
+function useUpdatePrompt() {
+  const lastCheck = useRef(0)
+  const check = useCallback(async () => {
+    if (Date.now() - lastCheck.current < UPDATE_CHECK_INTERVAL_MS) return
+    lastCheck.current = Date.now()
+    const update = await checkForUpdate(Application.nativeApplicationVersion)
+    if (!update) return
+    Alert.alert(
+      '새 버전이 있어요',
+      `DashPi ${update.version}이 나왔어요. 지금 받아서 설치할까요?`,
+      [
+        { text: '나중에', style: 'cancel' },
+        { text: '업데이트', onPress: () => void Linking.openURL(update.url) },
+      ],
+    )
+  }, [])
+  return check
+}
+
 export default function App() {
   const [permission, requestPermission, getPermission] = useCameraPermissions()
+  const checkUpdate = useUpdatePrompt()
 
   useEffect(() => {
+    void checkUpdate()
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void getPermission()
+      if (state !== 'active') return
+      void getPermission()
+      void checkUpdate()
     })
     return () => subscription.remove()
-  }, [getPermission])
+  }, [getPermission, checkUpdate])
 
   const gate = cameraGate(permission)
 

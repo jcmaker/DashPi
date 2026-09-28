@@ -43,26 +43,18 @@ jobs:
           npm ci
           npm test
           npm run build
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-      - uses: android-actions/setup-android@v3
-        with:
-          packages: platform-tools
-      - name: Build Android test APK
-        working-directory: receiver-native
-        run: |
-          npm ci
-          npx expo prebuild --platform android --no-install
-          cd android
-          ./gradlew assembleDebug --no-daemon
       - name: Assemble site
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           mkdir _site
           cp -R landing/. _site/
           cp -R receiver-app/dist _site/receiver
-          cp receiver-native/android/app/build/outputs/apk/debug/app-debug.apk _site/receiver/DashPi.apk
+          # Serve the newest signed app release (built by android-release.yml) at /receiver/DashPi.apk.
+          tag=$(gh release list --limit 30 --json tagName,isDraft,isPrerelease \
+            --jq '[.[] | select(.tagName | startswith("app-v")) | select((.isDraft or .isPrerelease) | not)][0].tagName // empty')
+          test -n "$tag" || { echo "::error::no app-v* release to serve; push an app-v tag first"; exit 1; }
+          gh release download "$tag" --pattern DashPi.apk --dir _site/receiver
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
