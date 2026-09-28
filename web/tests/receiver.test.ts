@@ -16,12 +16,17 @@ test('receiver keeps camera start and verified save explicit', async () => {
   assert.equal(html.includes('allow-same-origin'), false);
 });
 
-test('keeps foreign QR errors silent and explains unsupported DashPi versions', () => {
+test('keeps foreign QR errors silent and explains failures the receiver cannot recover', () => {
   assert.equal(messageForFrameError(new Error('foreign frame')), undefined);
   assert.equal(messageForFrameError(new Error('crc mismatch')), undefined);
+  assert.equal(messageForFrameError(new Error('malformed frame')), undefined);
   assert.equal(
     messageForFrameError(new Error('unsupported protocol')),
     '이 송신 형식을 읽으려면 수신기를 업데이트하세요.',
+  );
+  assert.equal(
+    messageForFrameError(new Error('conflicting equation')),
+    '수신한 QR이 서로 맞지 않습니다. 새로 받으세요.',
   );
 });
 

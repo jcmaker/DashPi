@@ -1,11 +1,7 @@
 import { FountainDecoder } from './fountain.ts';
 import type { OpticalFrame } from './protocol.ts';
 
-export function messageForFrameError(problem: unknown): string | undefined {
-  return String(problem).includes('unsupported protocol')
-    ? '이 송신 형식을 읽으려면 수신기를 업데이트하세요.'
-    : undefined;
-}
+export { messageForFrameError } from './frame-error.ts';
 
 // ZXing's getRawBytes() returns QR codewords with mode and length headers;
 // the scanned bytes live in the BYTE_SEGMENTS result metadata.
