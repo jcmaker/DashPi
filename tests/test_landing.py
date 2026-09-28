@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from html.parser import HTMLParser
 from pathlib import Path
+import importlib.util
 import json
 import re
 import struct
 import subprocess
+import sys
 import unittest
 
 
@@ -335,10 +337,116 @@ process.stdout.write(JSON.stringify(context.result));
         self.assertIn("actions/deploy-pages@v4", workflow)
         self.assertIn("cp -R landing/. _site/", workflow)
         self.assertIn("cp -R receiver-app/dist _site/receiver", workflow)
-        # The APK served at /receiver/DashPi.apk is the newest signed app release, never a debug build.
-        self.assertIn('gh release download "$tag" --pattern DashPi.apk --dir _site/receiver', workflow)
-        self.assertIn('startswith("app-v")', workflow)
+        cert = "a2580d9c7a94d086113cb23a1abe5e665e39b64d9cca6a5b50eb105eb1e35d77"
+        self.assertIn(
+            'gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases?per_page=100" '
+            "| python scripts/select_landing_apk.py",
+            workflow,
+        )
+        self.assertIn('gh release download "$tag" --pattern DashPi.apk --dir "$apk_dir"', workflow)
+        self.assertIn("build-tools;35.0.0", workflow)
+        self.assertIn('apksigner="$ANDROID_HOME/build-tools/35.0.0/apksigner"', workflow)
+        self.assertIn('"$apksigner" verify --print-certs "$apk_dir/DashPi.apk"', workflow)
+        self.assertIn(f"EXPECTED_CERT_SHA256: {cert}", workflow)
+        self.assertIn('test "$actual" = "$EXPECTED_CERT_SHA256"', workflow)
+        download_at = workflow.index('gh release download "$tag" --pattern DashPi.apk')
+        verify_at = workflow.index('"$apksigner" verify --print-certs')
+        copy_at = workflow.index('cp "$apk_dir/DashPi.apk" _site/receiver/DashPi.apk')
+        self.assertLess(download_at, verify_at)
+        self.assertLess(verify_at, copy_at)
+        self.assertNotIn("--dir _site/receiver", workflow)
         self.assertNotIn("assembleDebug", workflow)
+        android = (ROOT / ".github" / "workflows" / "android-release.yml").read_text(encoding="utf-8")
+        self.assertIn(f"EXPECTED_CERT_SHA256: {cert}", android)
+        self.assertIn('"$apksigner" verify --print-certs "$RUNNER_TEMP/DashPi.apk"', android)
         self.assertIn("path: _site", workflow)
         self.assertIn("pages: write", workflow)
         self.assertIn("id-token: write", workflow)
+
+
+def _landing_apk_selector():
+    path = ROOT / "scripts" / "select_landing_apk.py"
+    spec = importlib.util.spec_from_file_location("select_landing_apk", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _release(
+    tag: str,
+    *,
+    created_at: str,
+    draft: bool = False,
+    prerelease: bool = False,
+    assets: list[dict[str, str]] | None = None,
+) -> dict:
+    if assets is None:
+        assets = [{"name": "DashPi.apk"}]
+    return {
+        "tag_name": tag,
+        "draft": draft,
+        "prerelease": prerelease,
+        "created_at": created_at,
+        "assets": assets,
+    }
+
+
+class LandingApkSelectionTests(unittest.TestCase):
+    def releases(self) -> list[dict]:
+        # GitHub lists newest-created first. A later lower tag must not win.
+        return [
+            _release("app-v1.2.0", created_at="2026-09-28T00:00:00Z"),
+            _release("app-v1.9.0", created_at="2026-06-01T00:00:00Z"),
+            _release("app-v1.10.0", created_at="2026-05-01T00:00:00Z"),
+            _release("app-v3.0.0", created_at="2026-09-29T00:00:00Z", draft=True),
+            _release("app-v2.0.0", created_at="2026-09-27T00:00:00Z", prerelease=True),
+            _release(
+                "app-v1.11.0",
+                created_at="2026-09-26T00:00:00Z",
+                assets=[{"name": "notes.txt"}],
+            ),
+            _release("app-v1.11", created_at="2026-09-25T00:00:00Z"),
+            _release("v9.9.9", created_at="2026-09-24T00:00:00Z"),
+        ]
+
+    def test_highest_stable_apk_wins_over_a_newer_lower_tag(self) -> None:
+        selected = _landing_apk_selector().select_landing_apk(self.releases())
+        self.assertEqual(selected, "app-v1.10.0")
+
+    def test_selector_script_prints_the_highest_tag(self) -> None:
+        completed = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "select_landing_apk.py")],
+            input=json.dumps(self.releases()),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stdout, "app-v1.10.0\n")
+
+    def test_selector_script_reads_slurped_pages(self) -> None:
+        newer_lower = _release("app-v1.2.0", created_at="2026-09-28T00:00:00Z")
+        older_higher = _release("app-v1.10.0", created_at="2026-05-01T00:00:00Z")
+        completed = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "select_landing_apk.py")],
+            input=json.dumps([[newer_lower], [older_higher]]),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stdout, "app-v1.10.0\n")
+
+    def test_selector_script_fails_when_nothing_qualifies(self) -> None:
+        completed = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "select_landing_apk.py")],
+            input="[]",
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 1)
+        self.assertEqual(completed.stdout, "")
+        self.assertIn("no stable app-v* release", completed.stderr)

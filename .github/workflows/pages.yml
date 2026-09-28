@@ -6,6 +6,7 @@ on:
     paths:
       - landing/**
       - tests/test_landing.py
+      - scripts/select_landing_apk.py
       - receiver-app/**
       - receiver-native/**
       - web/src/optical/**
@@ -43,18 +44,32 @@ jobs:
           npm ci
           npm test
           npm run build
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools build-tools;35.0.0
       - name: Assemble site
         env:
           GH_TOKEN: ${{ github.token }}
+          # Same upload certificate android-release.yml pins. Any other signer fails this job.
+          EXPECTED_CERT_SHA256: a2580d9c7a94d086113cb23a1abe5e665e39b64d9cca6a5b50eb105eb1e35d77
         run: |
           mkdir _site
           cp -R landing/. _site/
           cp -R receiver-app/dist _site/receiver
-          # Serve the newest signed app release (built by android-release.yml) at /receiver/DashPi.apk.
-          tag=$(gh release list --limit 30 --json tagName,isDraft,isPrerelease \
-            --jq '[.[] | select(.tagName | startswith("app-v")) | select((.isDraft or .isPrerelease) | not)][0].tagName // empty')
-          test -n "$tag" || { echo "::error::no app-v* release to serve; push an app-v tag first"; exit 1; }
-          gh release download "$tag" --pattern DashPi.apk --dir _site/receiver
+          # Highest stable app-v* that has DashPi.apk, not the newest-created tag.
+          tag=$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases?per_page=100" | python scripts/select_landing_apk.py)
+          apk_dir="${RUNNER_TEMP}/landing-apk"
+          mkdir -p "$apk_dir"
+          gh release download "$tag" --pattern DashPi.apk --dir "$apk_dir"
+          apksigner="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          "$apksigner" verify --print-certs "$apk_dir/DashPi.apk" | tee "$RUNNER_TEMP/certs.txt"
+          actual=$(grep -m1 'SHA-256 digest' "$RUNNER_TEMP/certs.txt" | awk '{print $NF}')
+          test "$actual" = "$EXPECTED_CERT_SHA256" || { echo "::error::APK signed with $actual, expected $EXPECTED_CERT_SHA256"; exit 1; }
+          cp "$apk_dir/DashPi.apk" _site/receiver/DashPi.apk
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
