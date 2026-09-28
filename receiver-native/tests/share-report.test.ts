@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import test from 'node:test'
+import { fileURLToPath } from 'node:url'
 import { applyShareOutcome, createShareAttempt, type CacheFile, type ShareDialogOptions } from '../src/share-report.ts'
 
 const htmlReport = {
@@ -210,4 +213,44 @@ test('a failed attempt can be retried', async () => {
     reason: 'ENOSPC: no space left on device',
   })
   assert.deepEqual(await attempt(htmlReport), { status: 'shared' })
+})
+
+function blockAfter(source: string, marker: string): string {
+  const at = source.indexOf(marker)
+  assert.notEqual(at, -1, `missing ${marker}`)
+  const open = source.indexOf('{', at)
+  assert.notEqual(open, -1, `missing body for ${marker}`)
+  let depth = 0
+  for (let index = open; index < source.length; index += 1) {
+    const char = source[index]
+    if (char === '{') depth += 1
+    else if (char === '}') {
+      depth -= 1
+      if (depth === 0) return source.slice(at, index + 1)
+    }
+  }
+  assert.fail(`unclosed ${marker}`)
+}
+
+test('the verified screen applies the settled share outcome and does not write the cache file', () => {
+  const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../App.tsx'), 'utf8')
+  assert.equal(source.includes('.delete('), false)
+  assert.equal(source.includes('.write('), false)
+  assert.match(source, /\{screen\.error && <Text style=\{styles\.error\}>\{screen\.error\}<\/Text>\}/)
+  assert.match(source, /onPress=\{share\}[\s\S]*?공유 또는 파일에 저장/)
+
+  const share = blockAfter(source, 'const share = useCallback(')
+  assert.match(share, /const file = screen\.file/)
+  assert.match(share, /shareReport\(\s*file\s*\)/)
+  assert.doesNotMatch(share, /Sharing\.shareAsync/)
+
+  const settled = blockAfter(share, '.then(')
+  assert.match(settled, /\.then\(\s*\(\s*outcome\s*\)/)
+  const updater = blockAfter(settled, 'setScreen(')
+  const guardAt = updater.search(/current\.phase !== 'verified'/)
+  const applyAt = updater.search(/return applyShareOutcome\(\s*current\s*,\s*outcome\s*\)/)
+  assert.notEqual(guardAt, -1)
+  assert.notEqual(applyAt, -1)
+  assert.ok(guardAt < applyAt)
+  assert.match(updater.slice(guardAt, applyAt), /return current/)
 })
