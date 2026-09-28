@@ -335,10 +335,10 @@ process.stdout.write(JSON.stringify(context.result));
         self.assertIn("actions/deploy-pages@v4", workflow)
         self.assertIn("cp -R landing/. _site/", workflow)
         self.assertIn("cp -R receiver-app/dist _site/receiver", workflow)
-        self.assertIn(
-            "cp receiver-native/android/app/build/outputs/apk/debug/app-debug.apk _site/receiver/DashPi.apk",
-            workflow,
-        )
+        # The APK served at /receiver/DashPi.apk is the newest signed app release, never a debug build.
+        self.assertIn('gh release download "$tag" --pattern DashPi.apk --dir _site/receiver', workflow)
+        self.assertIn('startswith("app-v")', workflow)
+        self.assertNotIn("assembleDebug", workflow)
         self.assertIn("path: _site", workflow)
         self.assertIn("pages: write", workflow)
         self.assertIn("id-token: write", workflow)
