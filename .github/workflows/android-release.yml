@@ -1,0 +1,92 @@
+name: Release Android app
+
+# Push a tag like `app-v1.0.1` to publish a signed DashPi.apk as a GitHub Release.
+# Installed apps find it through the Releases API and offer the update.
+on:
+  push:
+    tags: ['app-v*']
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: android-release
+  cancel-in-progress: false
+
+env:
+  # SHA-256 of the DashPi upload certificate; a release signed with anything else is refused.
+  EXPECTED_CERT_SHA256: a2580d9c7a94d086113cb23a1abe5e665e39b64d9cca6a5b50eb105eb1e35d77
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: receiver-native
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: receiver-native/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools build-tools;35.0.0
+
+      - name: Read version from tag
+        id: version
+        run: |
+          version="${GITHUB_REF_NAME#app-v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          node scripts/set-app-version.mjs "$version"
+
+      - name: Test
+        run: |
+          npm ci
+          npm test
+
+      - name: Restore upload key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.DASHPI_UPLOAD_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.DASHPI_UPLOAD_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.DASHPI_UPLOAD_KEY_ALIAS }}
+        run: |
+          test -n "$KEYSTORE_BASE64" || { echo "::error::DASHPI_UPLOAD_KEYSTORE_BASE64 secret is missing"; exit 1; }
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/dashpi-upload.p12"
+          keytool -list -keystore "$RUNNER_TEMP/dashpi-upload.p12" -storetype PKCS12 \
+            -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" > /dev/null
+
+      - name: Build signed release APK
+        env:
+          DASHPI_UPLOAD_STORE_FILE: ${{ runner.temp }}/dashpi-upload.p12
+          DASHPI_UPLOAD_STORE_PASSWORD: ${{ secrets.DASHPI_UPLOAD_STORE_PASSWORD }}
+          DASHPI_UPLOAD_KEY_ALIAS: ${{ secrets.DASHPI_UPLOAD_KEY_ALIAS }}
+          DASHPI_UPLOAD_KEY_PASSWORD: ${{ secrets.DASHPI_UPLOAD_KEY_PASSWORD }}
+        run: |
+          npx expo prebuild --platform android --no-install
+          cd android
+          ./gradlew assembleRelease --no-daemon
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/DashPi.apk"
+
+      - name: Verify signature
+        run: |
+          apksigner="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          "$apksigner" verify --print-certs "$RUNNER_TEMP/DashPi.apk" | tee "$RUNNER_TEMP/certs.txt"
+          actual=$(grep -m1 'SHA-256 digest' "$RUNNER_TEMP/certs.txt" | awk '{print $NF}')
+          test "$actual" = "$EXPECTED_CERT_SHA256" || { echo "::error::APK signed with $actual, expected $EXPECTED_CERT_SHA256"; exit 1; }
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP/DashPi.apk" \
+            --title "DashPi 앱 ${{ steps.version.outputs.version }}" \
+            --notes "Android 앱 ${{ steps.version.outputs.version }}. 설치된 앱은 다음 실행 때 업데이트를 안내합니다. 처음 설치하거나 이전 테스트 빌드(서명이 다름)를 쓰고 있었다면, 기존 앱을 지운 뒤 설치하세요."
+          # Refresh the landing's /receiver/DashPi.apk with this release.
+          gh workflow run pages.yml --ref main
