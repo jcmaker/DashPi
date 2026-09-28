@@ -45,6 +45,34 @@ test('rejects a golden frame with a corrupted CRC', () => {
   assert.throws(() => parseFrame(bytes), /crc mismatch/);
 });
 
+function frameBytes(blockCount: number, blockSize: number, totalLength: number): Uint8Array {
+  const bytes = new Uint8Array(23 + 2 + blockSize + 4);
+  bytes.set([68, 80, 81, 49, 1, 0]);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(6, 1, true);
+  view.setUint16(14, blockCount, true);
+  view.setUint16(16, blockSize, true);
+  view.setUint32(18, totalLength, true);
+  view.setUint8(22, 1);
+  updateCrc(bytes);
+  return bytes;
+}
+
+test('rejects a frame whose total length exceeds 16MiB', () => {
+  assert.throws(
+    () => parseFrame(frameBytes(16385, 1024, 16 * 1024 * 1024 + 1)),
+    /malformed frame/,
+  );
+});
+
+test('accepts a frame whose total length is exactly 16MiB', () => {
+  const frame = parseFrame(frameBytes(16384, 1024, 16 * 1024 * 1024));
+
+  assert.equal(frame.totalLength, 16 * 1024 * 1024);
+  assert.equal(frame.blockCount, 16384);
+  assert.equal(frame.symbol.length, 1024);
+});
+
 test('rejects a checksummed frame whose total length exceeds its geometry', () => {
   const bytes = wireBytes();
   new DataView(bytes.buffer).setUint32(18, 13, true);

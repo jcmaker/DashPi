@@ -36,9 +36,10 @@ export class FrameCollector {
   add(frame: OpticalFrame): Uint8Array | undefined {
     const identity = `${frame.sessionId}:${frame.blockCount}:${frame.blockSize}:${frame.totalLength}`;
     if (identity !== this.currentIdentity) {
+      const decoder = new FountainDecoder(frame.blockCount, frame.blockSize, frame.totalLength);
       this.currentIdentity = identity;
       this.blockCount = frame.blockCount;
-      this.decoder = new FountainDecoder(frame.blockCount, frame.blockSize, frame.totalLength);
+      this.decoder = decoder;
     }
     this.decoder!.add(frame);
     return this.decoder!.result();
