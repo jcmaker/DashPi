@@ -27,7 +27,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "test": "node --experimental-transform-types --test tests/*.test.ts",
-    "postinstall": "node scripts/patch-expo-camera-raw-bytes.mjs"
+    "postinstall": "node scripts/patch-expo-camera-raw-bytes.mjs && node scripts/patch-webview-sandbox.mjs"
   },
   "private": true
 }

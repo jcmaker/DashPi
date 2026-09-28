@@ -6,6 +6,7 @@ import * as Application from 'expo-application'
 import * as Sharing from 'expo-sharing'
 import { Alert, AppState, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { WebView } from 'react-native-webview'
+import { verifiedHtmlWebViewProps } from './src/webview-policy'
 import { handleBarcodeScan, type BarcodeScan } from './src/barcode'
 import { cameraGate } from './src/camera-gate'
 import { documentReportStore } from './src/document-reports'
@@ -198,10 +199,11 @@ function Receiver({
       }
       generation.current += 1
       busy.current = false
+      forgetCollection()
       const html = stored.mediaType === 'text/html' ? new TextDecoder().decode(stored.payload) : undefined
       setScreen({ phase: 'verified', recovered: 0, total: 0, file: stored, html })
     },
-    [reloadSaved, store],
+    [forgetCollection, reloadSaved, store],
   )
 
   const deleteSaved = useCallback(
@@ -261,7 +263,7 @@ function Receiver({
       ) : (
         <View style={styles.preview}>
           {screen.html ? (
-            <WebView originWhitelist={['*']} source={{ html: screen.html }} style={styles.web} />
+            <WebView {...verifiedHtmlWebViewProps(screen.html)} style={styles.web} />
           ) : (
             <Text style={styles.bodyDark}>{screen.file?.name} 검증이 끝났고 앱에 저장했습니다.</Text>
           )}
