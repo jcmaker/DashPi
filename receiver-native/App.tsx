@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { StatusBar } from 'expo-status-bar'
-import { File, Paths } from 'expo-file-system'
 import * as Application from 'expo-application'
-import * as Sharing from 'expo-sharing'
 import { Alert, AppState, Linking, Pressable, StyleSheet, Text, View } from 'react-native'
 import { WebView } from 'react-native-webview'
 import { bytesFromBarcode } from './src/barcode'
 import { cameraGate } from './src/camera-gate'
 import { unpackNativeContainer } from './src/native-container'
 import type { OpticalFile } from './src/unpack'
+import { shareReceivedReport } from './src/share-sheet'
 import { checkForUpdate } from './src/update-check'
 import { FrameCollector, messageForFrameError } from '../web/src/optical/collector.ts'
 import { parseFrame } from '../web/src/optical/protocol.ts'
@@ -122,15 +121,7 @@ function Receiver() {
   const share = useCallback(() => {
     const file = screen.file
     if (!file) return
-    const stored = new File(Paths.cache, file.name)
-    if (stored.exists) stored.delete()
-    stored.create()
-    stored.write(file.payload)
-    void Sharing.shareAsync(stored.uri, {
-      mimeType: file.mediaType,
-      dialogTitle: '리포트 저장',
-      UTI: file.mediaType === 'text/html' ? 'public.html' : 'public.data',
-    })
+    void shareReceivedReport(file).catch(() => undefined)
   }, [screen.file])
 
   const percent = screen.total > 0 ? Math.round((screen.recovered / screen.total) * 100) : 0
