@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEvent } from 'expo'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { useKeepAwake } from 'expo-keep-awake'
 import { StatusBar } from 'expo-status-bar'
 import * as Application from 'expo-application'
 import * as Sharing from 'expo-sharing'
+import { useVideoPlayer, VideoView } from 'expo-video'
 import { Alert, AppState, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { WebView } from 'react-native-webview'
 import { verifiedHtmlWebViewProps } from './src/webview-policy'
@@ -20,6 +22,13 @@ import {
 import { unpackNativeContainer } from './src/native-container'
 import type { OpticalFile } from './src/unpack'
 import { checkForUpdate, updateCooldown } from './src/update-check'
+import {
+  PLAYBACK_UNAVAILABLE,
+  PREVIEW_OPEN_FAILED,
+  PREVIEW_PREPARING,
+  previewForFile,
+} from './src/preview-model'
+import { writePreview, type WrittenPreview } from './src/preview-storage'
 import { FrameCollector } from '../web/src/optical/collector.ts'
 import {
   FRAME_STALL_MS,
@@ -38,7 +47,6 @@ type Screen = {
   total: number
   error?: string
   file?: OpticalFile
-  html?: string
 }
 
 const initialScreen: Screen = { phase: 'scanning', recovered: 0, total: 0 }
@@ -79,6 +87,74 @@ const KEEP_AWAKE_TAG = 'dashpi-optical-receive'
 function ScanKeepAwake() {
   useKeepAwake(KEEP_AWAKE_TAG, { suppressDeactivateWarnings: true })
   return null
+}
+
+function ClipPlayer({ uri, fill }: { uri: string; fill: boolean }) {
+  const player = useVideoPlayer(uri, (instance) => {
+    instance.loop = false
+  })
+  const { status } = useEvent(player, 'statusChange', { status: player.status })
+  if (status === 'error') return <Text style={styles.previewMessage}>{PLAYBACK_UNAVAILABLE}</Text>
+  return (
+    <View style={fill ? styles.clipFill : styles.clip}>
+      <VideoView style={styles.clipVideo} player={player} nativeControls contentFit="contain" />
+      <View style={styles.transport}>
+        <Pressable style={styles.transportButton} onPress={() => player.play()}>
+          <Text style={styles.transportLabel}>재생</Text>
+        </Pressable>
+        <Pressable style={styles.transportButton} onPress={() => player.pause()}>
+          <Text style={styles.transportLabel}>일시정지</Text>
+        </Pressable>
+      </View>
+    </View>
+  )
+}
+
+function VerifiedPreview({ file }: { file: OpticalFile }) {
+  const model = useMemo(() => previewForFile(file), [file])
+  const [stored, setStored] = useState<WrittenPreview | null>(null)
+  const [prepareError, setPrepareError] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    setStored(null)
+    setPrepareError(false)
+    try {
+      const written = writePreview(model, file.payload)
+      if (!cancelled) setStored(written)
+    } catch {
+      if (!cancelled) setPrepareError(true)
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [file, model])
+
+  if (model.kind === 'message') {
+    return (
+      <View style={styles.preview}>
+        <Text style={styles.previewMessage}>{model.message}</Text>
+      </View>
+    )
+  }
+
+  return (
+    <View style={styles.preview}>
+      {model.kind === 'html' && model.playbackNotice ? (
+        <Text style={styles.previewMessage}>{model.playbackNotice}</Text>
+      ) : null}
+      {prepareError ? <Text style={styles.previewMessage}>{PREVIEW_OPEN_FAILED}</Text> : null}
+      {!stored && !prepareError ? <Text style={styles.previewMessage}>{PREVIEW_PREPARING}</Text> : null}
+      {stored?.videoUris.map((uri) => (
+        <ClipPlayer key={uri} uri={uri} fill={model.kind === 'video'} />
+      ))}
+      {model.kind === 'html' ? (
+        <View style={styles.webSlot}>
+          <WebView {...verifiedHtmlWebViewProps(model.html)} style={styles.web} />
+        </View>
+      ) : null}
+    </View>
+  )
 }
 
 function Receiver({
@@ -171,8 +247,7 @@ function Receiver({
       .then((file) => {
         if (ticket !== generation.current || frames.identity !== identity) return
         reloadSaved()
-        const html = file.mediaType === 'text/html' ? new TextDecoder().decode(file.payload) : undefined
-        setScreen({ phase: 'verified', recovered, total, file, html })
+        setScreen({ phase: 'verified', recovered, total, file })
       })
       .catch((problem: unknown) => {
         if (ticket !== generation.current) return
@@ -200,8 +275,7 @@ function Receiver({
       generation.current += 1
       busy.current = false
       forgetCollection()
-      const html = stored.mediaType === 'text/html' ? new TextDecoder().decode(stored.payload) : undefined
-      setScreen({ phase: 'verified', recovered: 0, total: 0, file: stored, html })
+      setScreen({ phase: 'verified', recovered: 0, total: 0, file: stored })
     },
     [forgetCollection, reloadSaved, store],
   )
@@ -261,13 +335,7 @@ function Receiver({
           />
         </View>
       ) : (
-        <View style={styles.preview}>
-          {screen.html ? (
-            <WebView {...verifiedHtmlWebViewProps(screen.html)} style={styles.web} />
-          ) : (
-            <Text style={styles.bodyDark}>{screen.file?.name} 검증이 끝났고 앱에 저장했습니다.</Text>
-          )}
-        </View>
+        screen.file ? <VerifiedPreview file={screen.file} /> : null
       )}
       <Text style={styles.status}>
         {screen.phase === 'scanning' && 'DashPi QR 화면을 카메라 안에 맞추세요.'}
@@ -416,7 +484,7 @@ const styles = StyleSheet.create({
   title: { color: '#0f172a', fontSize: 28, fontWeight: '700', marginBottom: 12 },
   titleLight: { color: '#f8fafc', fontSize: 24, fontWeight: '700', marginBottom: 16 },
   body: { color: '#334155', fontSize: 16, lineHeight: 24, marginBottom: 24 },
-  bodyDark: { color: '#e2e8f0', fontSize: 16, lineHeight: 24 },
+  previewMessage: { color: '#0f172a', fontSize: 16, lineHeight: 24, padding: 16 },
   primary: {
     backgroundColor: '#2563eb',
     borderRadius: 12,
@@ -438,7 +506,22 @@ const styles = StyleSheet.create({
   cameraFrame: { flex: 1, borderRadius: 16, overflow: 'hidden', backgroundColor: '#020617' },
   camera: { flex: 1 },
   preview: { flex: 1, borderRadius: 16, overflow: 'hidden', backgroundColor: '#ffffff' },
+  webSlot: { flex: 1 },
   web: { flex: 1, backgroundColor: '#ffffff' },
+  clip: { height: 240, backgroundColor: '#020617' },
+  clipFill: { flex: 1, backgroundColor: '#020617' },
+  clipVideo: { flex: 1 },
+  transport: { flexDirection: 'row', gap: 8, padding: 8 },
+  transportButton: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  transportLabel: { color: '#f8fafc', fontSize: 16, fontWeight: '600' },
   status: { color: '#e2e8f0', fontSize: 15, marginTop: 16 },
   track: { height: 8, borderRadius: 4, backgroundColor: '#1e293b', marginTop: 12, overflow: 'hidden' },
   fill: { height: 8, backgroundColor: '#38bdf8' },

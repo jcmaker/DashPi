@@ -11,6 +11,7 @@
     "expo-keep-awake": "~57.0.2",
     "expo-sharing": "~57.0.22",
     "expo-status-bar": "~57.0.1",
+    "expo-video": "~57.0.5",
     "pako": "^3.0.2",
     "react": "19.2.3",
     "react-native": "0.86.3",

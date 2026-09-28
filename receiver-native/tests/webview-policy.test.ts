@@ -98,7 +98,7 @@ test('inserts the content security policy when the report has no head', () => {
 test('the report WebView turns on the native load block, which is not the CSP', () => {
   const props = verifiedHtmlWebViewProps('<p>report</p>')
   assert.equal(props.blockNonDocumentLoads, true)
-  assert.match(source('../App.tsx'), /<WebView \{\.\.\.verifiedHtmlWebViewProps\(screen\.html\)\}/)
+  assert.match(source('../App.tsx'), /<WebView \{\.\.\.verifiedHtmlWebViewProps\(/)
   assert.match(source('../package.json'), /patch-webview-sandbox\.mjs/)
 
   const client = source(

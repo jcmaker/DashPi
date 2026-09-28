@@ -34,7 +34,8 @@
           "recordAudioAndroid": false
         }
       ],
-      "./plugins/with-release-signing"
+      "./plugins/with-release-signing",
+      "expo-video"
     ]
   }
 }
