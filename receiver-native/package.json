@@ -25,7 +25,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "test": "node --experimental-strip-types --test tests/*.test.ts"
+    "test": "node --experimental-transform-types --test tests/*.test.ts",
+    "postinstall": "node scripts/patch-expo-camera-raw-bytes.mjs"
   },
   "private": true
 }

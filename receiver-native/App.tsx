@@ -6,13 +6,12 @@ import * as Application from 'expo-application'
 import * as Sharing from 'expo-sharing'
 import { Alert, AppState, Linking, Pressable, StyleSheet, Text, View } from 'react-native'
 import { WebView } from 'react-native-webview'
-import { bytesFromBarcode } from './src/barcode'
+import { handleBarcodeScan, type BarcodeScan } from './src/barcode'
 import { cameraGate } from './src/camera-gate'
 import { unpackNativeContainer } from './src/native-container'
 import type { OpticalFile } from './src/unpack'
 import { checkForUpdate } from './src/update-check'
-import { FrameCollector, messageForFrameError } from '../web/src/optical/collector.ts'
-import { parseFrame } from '../web/src/optical/protocol.ts'
+import { FrameCollector } from '../web/src/optical/collector.ts'
 
 type Phase = 'scanning' | 'receiving' | 'verifying' | 'verified'
 
@@ -71,27 +70,18 @@ function Receiver() {
     setScreen(initialScreen)
   }, [])
 
-  const onBarcodeScanned = useCallback(({ data }: { data: string }) => {
+  const onBarcodeScanned = useCallback((scan: BarcodeScan) => {
     if (busy.current) return
-    let bytes: Uint8Array
-    try {
-      bytes = bytesFromBarcode(data)
-    } catch {
-      return
-    }
-
     const frames = collector.current
-    let packed: Uint8Array | undefined
-    try {
-      packed = frames.add(parseFrame(bytes))
-    } catch (problem) {
-      const message = messageForFrameError(problem)
-      if (message) setScreen((current) => ({ ...current, error: message }))
+    const outcome = handleBarcodeScan(frames, scan)
+    if (outcome.status === 'ignore' || outcome.status === 'drop') return
+    if (outcome.status === 'error') {
+      setScreen((current) => ({ ...current, error: outcome.message }))
       return
     }
 
-    const { recovered, total } = frames.progress
-    if (!packed) {
+    const { recovered, total } = outcome
+    if (outcome.status === 'progress') {
       setScreen({ phase: 'receiving', recovered, total })
       return
     }
@@ -100,7 +90,7 @@ function Receiver() {
     const ticket = generation.current
     const identity = frames.identity
     setScreen({ phase: 'verifying', recovered, total })
-    void unpackNativeContainer(packed)
+    void unpackNativeContainer(outcome.packed)
       .then((file) => {
         if (ticket !== generation.current || frames.identity !== identity) return
         const html = file.mediaType === 'text/html' ? new TextDecoder().decode(file.payload) : undefined
