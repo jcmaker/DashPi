@@ -1,14 +1,6 @@
-// Finds a newer DashPi APK among this repo's GitHub releases (tags `app-vX.Y.Z`).
-export const RELEASES_URL = 'https://api.github.com/repos/jcmaker/DashPi/releases?per_page=30'
-const TAG_PREFIX = 'app-v'
-const APK_NAME = 'DashPi.apk'
-
-export type Release = {
-  tag_name: string
-  draft: boolean
-  prerelease: boolean
-  assets: { name: string; browser_download_url: string }[]
-}
+// Pages publishes this manifest together with the signed APK.
+const APK_BASE_URL = 'https://jcmaker.github.io/DashPi/receiver'
+export const VERSION_URL = `${APK_BASE_URL}/version.json`
 
 export type Update = { version: string; url: string }
 
@@ -45,18 +37,6 @@ export function isNewer(candidate: string, current: string): boolean {
   return false
 }
 
-export function pickUpdate(releases: Release[], current: string): Update | null {
-  let best: Update | null = null
-  for (const release of releases) {
-    if (release.draft || release.prerelease || !release.tag_name.startsWith(TAG_PREFIX)) continue
-    const version = release.tag_name.slice(TAG_PREFIX.length)
-    const apk = release.assets.find((asset) => asset.name === APK_NAME)
-    if (!apk || !parseVersion(version) || !isNewer(version, best?.version ?? current)) continue
-    best = { version, url: apk.browser_download_url }
-  }
-  return best
-}
-
 // Never throws: offline, rate limits, or odd replies simply mean "no update to offer".
 export async function checkForUpdate(
   current: string | null,
@@ -66,13 +46,13 @@ export async function checkForUpdate(
   const timeout = new AbortController()
   const timer = setTimeout(() => timeout.abort(), 8000)
   try {
-    const response = await fetcher(RELEASES_URL, {
-      headers: { Accept: 'application/vnd.github+json' },
-      signal: timeout.signal,
-    })
+    const response = await fetcher(VERSION_URL, { signal: timeout.signal })
     if (!response.ok) return null
-    const releases = await response.json()
-    return Array.isArray(releases) ? pickUpdate(releases, current) : null
+    const manifest = await response.json()
+    const version = manifest?.version
+    return typeof version === 'string' && isNewer(version, current)
+      ? { version, url: `${APK_BASE_URL}/DashPi.apk?v=${version}` }
+      : null
   } catch {
     return null
   } finally {

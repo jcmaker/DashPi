@@ -67,7 +67,7 @@ function PermissionScreen({
 }) {
   return (
     <View style={styles.gate}>
-      <Text style={styles.kicker}>DashPi</Text>
+      <Text style={styles.kicker}>DashPi · v{Application.nativeApplicationVersion ?? '개발'}</Text>
       <Text style={styles.title}>사고 리포트 받기</Text>
       <Text style={styles.body}>
         {canAskAgain
@@ -322,7 +322,7 @@ function Receiver({
   return (
     <View style={styles.screen}>
       {screenShouldStayAwake(screen.phase) ? <ScanKeepAwake /> : null}
-      <Text style={styles.kickerLight}>DashPi</Text>
+      <Text style={styles.kickerLight}>DashPi · v{Application.nativeApplicationVersion ?? '개발'}</Text>
       <Text style={styles.titleLight}>사고 리포트 받기</Text>
       {scanning ? (
         <View style={styles.cameraFrame}>

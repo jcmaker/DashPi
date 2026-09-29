@@ -5,18 +5,10 @@ import {
   checkForUpdate,
   isNewer,
   parseVersion,
-  pickUpdate,
   updateCooldown,
-  type Release,
 } from '../src/update-check.ts'
 
-const apk = (tag: string) => ({
-  name: 'DashPi.apk',
-  browser_download_url: `https://github.com/jcmaker/DashPi/releases/download/${tag}/DashPi.apk`,
-})
-const release = (tag: string, extra: Partial<Release> = {}): Release => ({
-  tag_name: tag, draft: false, prerelease: false, assets: [apk(tag)], ...extra,
-})
+const APK_URL = 'https://jcmaker.github.io/DashPi/receiver/DashPi.apk?v=2.0.0'
 
 test('parses plain and app-tagged semantic versions', () => {
   assert.deepEqual(parseVersion('1.2.3'), [1, 2, 3])
@@ -30,22 +22,6 @@ test('compares versions numerically, not as text', () => {
   assert.equal(isNewer('1.0.0', '1.0.0'), false)
   assert.equal(isNewer('0.9.0', '1.0.0'), false)
   assert.equal(isNewer('1.0.1', 'garbage'), false)
-})
-
-test('picks the highest published app release that ships an APK', () => {
-  const releases = [
-    release('app-v1.0.1'),
-    release('app-v1.2.0', { draft: true }),
-    release('app-v1.1.0', { prerelease: true }),
-    release('app-v1.0.3', { assets: [] }),
-    release('landing-v9.0.0'),
-    release('app-v1.0.2'),
-  ]
-  assert.deepEqual(pickUpdate(releases, '1.0.0'), {
-    version: '1.0.2',
-    url: apk('app-v1.0.2').browser_download_url,
-  })
-  assert.equal(pickUpdate(releases, '1.0.2'), null)
 })
 
 test('stays quiet when offline, rate-limited, or the version is unknown', async () => {
@@ -72,15 +48,18 @@ test('a failed check does not block an immediate retry', () => {
   assert.equal(updateCooldown(shown.shownAt, now + UPDATE_CHECK_INTERVAL_MS, false).due, true)
 })
 
-test('asks GitHub for releases and returns a newer one', async () => {
+test('offers the Pages APK only after Pages advertises a newer version', async () => {
   let asked = ''
   const fetcher = async (url: string) => {
     asked = url
-    return new Response(JSON.stringify([release('app-v2.0.0')]), { status: 200 })
+    return new Response(JSON.stringify({ version: '2.0.0' }), { status: 200 })
   }
   assert.deepEqual(await checkForUpdate('1.4.2', fetcher), {
     version: '2.0.0',
-    url: apk('app-v2.0.0').browser_download_url,
+    url: APK_URL,
   })
-  assert.equal(asked, 'https://api.github.com/repos/jcmaker/DashPi/releases?per_page=30')
+  assert.equal(asked, 'https://jcmaker.github.io/DashPi/receiver/version.json')
+  assert.equal(await checkForUpdate('2.0.0', fetcher), null)
+  const invalid = async () => new Response(JSON.stringify({ version: 'unknown' }), { status: 200 })
+  assert.equal(await checkForUpdate('1.4.2', invalid), null)
 })
