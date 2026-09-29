@@ -852,7 +852,7 @@ class DashPiWindow(QMainWindow):
         self._step_rows = {}
         for step, text in ANALYSIS_STEPS:
             row = QWidget()
-            row.setFixedHeight(34)
+            row.setFixedHeight(29)
             line = QHBoxLayout(row)
             line.setContentsMargins(0, 0, 0, 0)
             line.setSpacing(10)
