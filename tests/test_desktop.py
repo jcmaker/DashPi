@@ -1062,7 +1062,7 @@ def test_optical_qr_and_back_button_fit_on_small_lcd(qapp, tmp_path, size):
         label = window.qr_label
         pixmap = label.pixmap()
         assert pixmap.width() <= label.width() and pixmap.height() <= label.height()
-        back = [b for b in window.optical_page.findChildren(QPushButton) if b.text() == "뒤로"][0]
+        back = window.optical_page.findChild(QToolButton, "back")
         bottom = back.mapTo(window, back.rect().bottomRight())
         assert back.isVisible() and bottom.x() < size[0] and bottom.y() < size[1]
     finally:
@@ -1192,5 +1192,26 @@ def test_analysis_screen_pins_the_current_question_above_the_typed_observation(q
         window._tick_analysis()
         lines = window.analysis_stream.text().split("\n")
         assert lines[0] == f"→ {AI_ASKS['report']}" and len(lines) == 2
+    finally:
+        window.close()
+
+
+def test_detail_actions_stay_on_the_lcd_and_the_back_arrow_returns_to_records(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    window = DashPiWindow(FakeSession(), IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        window.showNormal()
+        window.setFixedSize(800, 480)
+        window.external_analyze_button.show()
+        window.optical_button.show()  # right after an imported video is analyzed: the most buttons at once
+        window.pages.setCurrentWidget(window.detail_page)
+        qapp.processEvents()
+        for action in (window.external_analyze_button, window.optical_button, window.delete_button):
+            right = action.mapTo(window, action.rect().bottomRight())
+            assert right.x() < 800 and right.y() < 480
+
+        window.detail_page.findChild(QToolButton, "back").click()
+        assert window.pages.currentWidget() is window.records_page
     finally:
         window.close()

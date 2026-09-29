@@ -67,6 +67,9 @@ QToolButton {{
   background: {card}; border-radius: {radius_card}; min-height: 140px; min-width: 120px;
   font-size: {subtitle}; font-weight: 600; padding: 22px 12px 16px 12px;
 }}
+QToolButton#back {{
+  background: transparent; border: none; border-radius: {radius}; padding: 0; min-height: 0; min-width: 0;
+}}
 
 QLineEdit:focus, QDoubleSpinBox:focus, QComboBox:focus {{ border-bottom: 2px solid {accent}; }}
 QComboBox::drop-down {{ border: none; width: 44px; }}
