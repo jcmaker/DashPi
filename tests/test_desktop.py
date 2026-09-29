@@ -1145,3 +1145,33 @@ def test_deleting_an_external_video_names_the_file(qapp, tmp_path, monkeypatch):
         assert not video.exists()
     finally:
         window.close()
+
+
+def test_analysis_screen_follows_real_steps_and_types_out_observations(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    window = DashPiWindow(FakeSession(), IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        window._start_analysis_view("source.mp4 · 멈춘 위치 12.2초")
+        rows = window._step_rows
+        window._analysis_events.extend([
+            ("clip", "start", "", None), ("clip", "done", "20.0초 · 지문 ab12cd34", None),
+            ("locate", "skip", "멈춘 위치 12.2초 사용", None), ("observe", "start", "vision-m", None),
+        ])
+        window._tick_analysis()
+        assert [rows[step]["icon"].state for step in ("clip", "locate", "observe", "report")] == \
+            ["done", "skip", "start", "pending"]
+        assert rows["observe"]["detail"].text() == "vision-m 호출 중"
+
+        window._analysis_events.append(
+            ("observe", "done", "관찰 1개", [{"timestamp": 11.9, "description": "검은색 SUV가 매우 가깝게 지나간다"}]))
+        window._analysis_events.append(("report", "start", "report-m", None))
+        for _ in range(80):
+            window._tick_analysis()
+        assert "11.9초 · 검은색 SUV가 매우 가깝게 지나간다" in window.analysis_stream.text()
+
+        window._stop_analysis_view(True, "분석 실패: 모델 오류. 원본 영상은 보존됩니다.")
+        assert rows["report"]["icon"].state == "fail"
+        assert "원본 영상은 보존됩니다" in window.analysis_stream.text()
+    finally:
+        window.close()

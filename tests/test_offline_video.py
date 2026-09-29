@@ -59,3 +59,21 @@ def test_marked_moment_is_saved_so_a_later_retry_can_reuse_it(tmp_path):
 
     assert result.state is IncidentState.AWAITING_ANALYSIS
     assert store.load(result.incident_id).manual_offset_seconds == 5.0
+
+
+def test_external_analysis_reports_each_pipeline_step(tmp_path):
+    from dashpi import progress
+    from dashpi.offline_video import analyze_external_video
+
+    source = make_video(tmp_path / "source.mp4", 12)
+    settings = Settings(tmp_path / "data", "test-model", frame_sample_count=3)
+    events = []
+    with progress.reporting(lambda *event: events.append(event)):
+        analyze_external_video(
+            source, 5.0, settings, IncidentStore(settings.data_root),
+            lambda *_: {"incident_timestamp": 5.0, "summary": "사고 장면", "observations": [], "limitations": []},
+        )
+
+    assert [(step, state) for step, state, *_ in events] == [
+        ("clip", "start"), ("clip", "done"), ("frames", "start"), ("frames", "done"), ("build", "start"), ("build", "done"),
+    ]

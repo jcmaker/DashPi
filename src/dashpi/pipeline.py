@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 from tempfile import TemporaryDirectory
 
+from dashpi import progress
 from dashpi.ai_client import RetryableAnalysisError, retry_delay
 from dashpi.config import OverlaySettings, Settings
 from dashpi.media import (
@@ -49,6 +50,7 @@ class IncidentPipeline:
         try:
             incident.transition(IncidentState.CLIPPING, datetime.now(UTC).isoformat())
             self.store.save(incident)
+            progress.emit("clip", "start")
             window_start = incident.trigger_mono - self.settings.pre_seconds
             clip = build_clip(
                 segments,
@@ -57,6 +59,7 @@ class IncidentPipeline:
                 incident.post_deadline_mono - window_start,
             )
             incident.clip = replace(clip, duration=probe_duration(clip.path))
+            progress.emit("clip", "done", f"{incident.clip.duration:.1f}초 · 지문 {clip.sha256[:8]}")
         except Exception as error:
             incident.transition(IncidentState.CLIP_FAILED, datetime.now(UTC).isoformat(), str(error))
             self.store.save(incident)
@@ -116,7 +119,9 @@ class IncidentPipeline:
             incident.transition(IncidentState.ANALYZING, datetime.now(UTC).isoformat())
             self.store.save(incident)
             self.wait_for_capacity()
+            progress.emit("frames", "start")
             frames = sample_frames(evidence_path, directory / "frames", self.settings.frame_sample_count)
+            progress.emit("frames", "done", f"{len(frames)}장")
             generated_at = datetime.now(UTC).isoformat()
             self.wait_for_capacity()
             raw = analyze(frames, evidence_path, directory, incident_offset_override)
@@ -132,6 +137,7 @@ class IncidentPipeline:
             if analysis is not None:
                 report["analysis"] = analysis
             incident_offset = report["incident_timestamp"]
+            progress.emit("build", "start")
             start, end = transfer_window(incident_offset, incident.clip.duration)
             active_overlays = overlays or self.settings.overlays
             keyframe_dir = directory / "keyframes"
@@ -227,6 +233,7 @@ class IncidentPipeline:
                 directory / "report.json", json.dumps(report, sort_keys=True).encode()
             )
             incident.report_html = atomic_write(directory / "report.html", report_html)
+            progress.emit("build", "done", f"{len(report_html) / 1_000_000:.1f} MB")
             if (
                 sha256_file(evidence_path) != clip_before
                 or clip_before != incident.clip.sha256

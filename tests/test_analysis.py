@@ -164,3 +164,18 @@ def test_reached_cap_waits_before_any_call(tmp_path):
     with pytest.raises(RetryableAnalysisError, match="한도"):
         analyzer(tmp_path, client)(frames_for(clip, tmp_path), clip, tmp_path / "w")
     assert client.calls == [] and usage_count(tmp_path) == 20
+
+
+def test_roles_report_live_progress_with_the_real_observations(tmp_path):
+    from dashpi import progress
+
+    clip = make_video(tmp_path / "clip.mp4", 8)
+    events = []
+    with progress.reporting(lambda *event: events.append(event)):
+        analyzer(tmp_path, ScriptedClient(ANSWERS))(frames_for(clip, tmp_path), clip, tmp_path / "work", 2.5)
+
+    assert [(step, state) for step, state, *_ in events] == [
+        ("locate", "skip"), ("observe", "start"), ("observe", "done"), ("report", "start"), ("report", "done"),
+    ]
+    assert events[1][2] == "vision-m" and events[3][2] == "report-m"
+    assert events[2][3] == ANSWERS["observe"]["observations"]
