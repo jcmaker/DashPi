@@ -2,6 +2,8 @@
 
 Android 앱은 태그를 푸시하면 GitHub Actions가 서명된 APK를 만들어 GitHub Release로 올립니다.
 
+Pi 없이 수신을 확인하려면 [테스트 QR](../docs/assets/optical-scan-check.png)을 다른 화면에 띄워 앱으로 비춥니다. 정상 수신 시 `scan-check.html` 검증 완료가 표시됩니다.
+
 ```bash
 git checkout main && git pull
 git tag app-v1.0.1        # MAJOR.MINOR.PATCH, minor/patch는 0-99
