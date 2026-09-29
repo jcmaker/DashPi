@@ -884,7 +884,7 @@ class DashPiWindow(QMainWindow):
         layout.addLayout(bottom)
         self._analysis_events: deque = deque()
         self._analysis_started = time.monotonic()
-        self._stream_done, self._stream_queue, self._stream_typing = [], [], None
+        self._stream_done, self._stream_queue, self._stream_typing, self._stream_ask = [], [], None, None
         self.analysis_timer = QTimer(self)
         self.analysis_timer.timeout.connect(self._tick_analysis)
         self.pages.addWidget(self.analysis_page)
@@ -892,7 +892,7 @@ class DashPiWindow(QMainWindow):
     def _start_analysis_view(self, subtitle: str):
         self._analysis_events = deque()
         self._analysis_started = time.monotonic()
-        self._stream_done, self._stream_queue, self._stream_typing = [], [], None
+        self._stream_done, self._stream_queue, self._stream_typing, self._stream_ask = [], [], None, None
         for row in self._step_rows.values():
             row["icon"].state = "pending"
             row["icon"].update()
@@ -934,9 +934,10 @@ class DashPiWindow(QMainWindow):
         if state == "start":
             row["since"] = now
             row["detail"].setText(f"{detail} 호출 중" if detail else "진행 중")
-            if step in AI_ASKS:
-                self._stream_queue.append(f"→ {AI_ASKS[step]}")
+            self._stream_ask = AI_ASKS.get(step)
             return
+        if self._stream_ask == AI_ASKS.get(step):
+            self._stream_ask = None
         row["took"] = now - row["since"] if row["since"] is not None else 0.0
         row["clock"].setText(f"{row['took']:.1f}초" if state == "done" else "")
         row["detail"].setText(detail)
@@ -945,10 +946,14 @@ class DashPiWindow(QMainWindow):
                 self._stream_queue.append(f"{float(item['timestamp']):.1f}초 · {item['description']}")
 
     def _render_stream(self):
-        lines = self._stream_done[-2:]
+        # One pinned line for what the AI is being asked now, then the one observation being typed:
+        # a long observation wraps to two lines, and three lines is all the 480px LCD has room for.
+        lines = [f"→ {self._stream_ask}"] if self._stream_ask else []
         if self._stream_typing is not None:
             text, shown = self._stream_typing
-            lines = lines[-1:] + [text[:shown] + "▍"]
+            lines.append(text[:shown] + "▍")
+        else:
+            lines += self._stream_done[-1:]
         self.analysis_stream.setText("\n".join(lines))
 
     def _stop_analysis_view(self, failed: bool, message: str):
@@ -959,7 +964,7 @@ class DashPiWindow(QMainWindow):
                 row["icon"].state = "fail" if failed else "skip"
                 row["icon"].update()
                 row["clock"].setText("")
-        self._stream_done, self._stream_queue, self._stream_typing = [message], [], None
+        self._stream_done, self._stream_queue, self._stream_typing, self._stream_ask = [message], [], None, None
         self._render_stream()
         self.analysis_elapsed.setText("")
 

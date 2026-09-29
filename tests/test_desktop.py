@@ -1175,3 +1175,22 @@ def test_analysis_screen_follows_real_steps_and_types_out_observations(qapp, tmp
         assert "원본 영상은 보존됩니다" in window.analysis_stream.text()
     finally:
         window.close()
+
+
+def test_analysis_screen_pins_the_current_question_above_the_typed_observation(qapp, tmp_path):
+    from dashpi.desktop import AI_ASKS, DashPiWindow
+
+    window = DashPiWindow(FakeSession(), IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        window._start_analysis_view("source.mp4")
+        window._analysis_events.extend([
+            ("observe", "start", "vision-m", None),
+            ("observe", "done", "관찰 2개", [{"timestamp": 1.0, "description": "첫 관찰"},
+                                           {"timestamp": 2.0, "description": "둘째 관찰"}]),
+            ("report", "start", "report-m", None),
+        ])
+        window._tick_analysis()
+        lines = window.analysis_stream.text().split("\n")
+        assert lines[0] == f"→ {AI_ASKS['report']}" and len(lines) == 2
+    finally:
+        window.close()
