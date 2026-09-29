@@ -19,7 +19,7 @@ import time
 from collections import deque
 
 from PySide6.QtCore import Qt, QtMsgType, QLockFile, QPointF, QRect, QRectF, QTimer, QUrl, QSize, qInstallMessageHandler
-from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPen, QPixmap, QTransform
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -106,14 +106,36 @@ def button(text: str, callback, *, primary: bool = False) -> QPushButton:
     return result
 
 
-def page(title: str) -> tuple[QWidget, QVBoxLayout]:
+def back_button(callback) -> QToolButton:
+    """Top-left back arrow: a full-width 뒤로 row cost a whole button's height on the 480px LCD."""
+    result = QToolButton()
+    result.setObjectName("back")
+    result.setAccessibleName("뒤로")
+    left = theme.icon("chevron-down").pixmap(64, 64).transformed(QTransform().rotate(90))
+    result.setIcon(QIcon(left))
+    result.setIconSize(QSize(28, 28))
+    result.setFixedSize(48, 48)
+    result.clicked.connect(lambda: log.info("버튼: 뒤로"))
+    result.clicked.connect(callback)
+    return result
+
+
+def page(title: str, back=None) -> tuple[QWidget, QVBoxLayout]:
     widget = QWidget()
     layout = QVBoxLayout(widget)
     layout.setContentsMargins(24, 20, 24, 20)
     layout.setSpacing(14)
     heading = QLabel(title)
     heading.setObjectName("title")
-    layout.addWidget(heading)
+    if back is None:
+        layout.addWidget(heading)
+    else:
+        header = QHBoxLayout()
+        header.setSpacing(6)
+        header.addWidget(back_button(back), 0, Qt.AlignmentFlag.AlignLeft)  # stays left even when the title is hidden
+        header.addWidget(heading, 1)
+        layout.addLayout(header)
+    widget.heading = heading
     return widget, layout
 
 
@@ -233,7 +255,7 @@ class DashPiWindow(QMainWindow):
         self._detail_generation = 0
         self.pages = QStackedWidget()
         self.pages.currentChanged.connect(
-            lambda index: log.info("화면: %s", self.pages.widget(index).layout().itemAt(0).widget().text())
+            lambda index: log.info("화면: %s", self.pages.widget(index).heading.text())
         )
         self.setCentralWidget(self.pages)
 
@@ -278,19 +300,18 @@ class DashPiWindow(QMainWindow):
         self.pages.addWidget(self.home)
 
     def _build_confirmation(self):
-        self.confirmation, layout = page("녹화 시작")
+        self.confirmation, layout = page("녹화 시작", back=self.show_home)
         description = QLabel("카메라로 영상을 기록합니다. 주행 또는 수동 주차 녹화를 선택하세요.")
         description.setObjectName("caption")
         layout.addWidget(description)
         layout.addWidget(button("주행 녹화", lambda: self._begin("drive"), primary=True))
         layout.addWidget(button("주차 녹화", lambda: self._begin("parking")))
         layout.addStretch()
-        layout.addWidget(button("뒤로", self.show_home))
         self.pages.addWidget(self.confirmation)
 
     def _build_recording(self):
         self.recording_page, layout = page("DashPi")
-        self.record_heading = layout.itemAt(0).widget()
+        self.record_heading = self.recording_page.heading
         self.record_clock = QLabel(time.strftime("%H:%M", time.localtime()))
         self.record_clock.setObjectName("clock")
         layout.addWidget(self.record_clock)
@@ -316,7 +337,7 @@ class DashPiWindow(QMainWindow):
         return [self.analyze_button, self.stop_button]
 
     def _build_records(self):
-        self.records_page, layout = page("녹화기록")
+        self.records_page, layout = page("녹화기록", back=self.show_home)
         self.record_filter = QComboBox()
         self.record_filter.addItems(["전체", "주행", "사고", "주차"])
         self.record_filter.currentTextChanged.connect(self._refresh_records)
@@ -324,11 +345,10 @@ class DashPiWindow(QMainWindow):
         self.record_list = QListWidget()
         self.record_list.itemClicked.connect(self._open_record)
         layout.addWidget(self.record_list, 1)
-        layout.addWidget(button("뒤로", self.show_home))
         self.pages.addWidget(self.records_page)
 
     def _build_settings(self):
-        self.settings_page, layout = page("설정")
+        self.settings_page, layout = page("설정", back=self.show_home)
         current = load_settings(self.settings_path)
         self.resolution = QComboBox()
         self.resolution.addItems(["1080p", "720p"])
@@ -373,7 +393,6 @@ class DashPiWindow(QMainWindow):
         self.settings_status.setObjectName("caption")
         layout.addWidget(self.settings_status)
         actions = QHBoxLayout()
-        actions.addWidget(button("뒤로", self.show_home))
         self.exit_button = button("앱 종료", self._confirm_exit)
         self.exit_button.setObjectName("danger")
         actions.addWidget(self.exit_button)
@@ -385,7 +404,7 @@ class DashPiWindow(QMainWindow):
         self.pages.addWidget(self.settings_page)
 
     def _build_detail(self):
-        self.detail_page, layout = page("녹화 상세")
+        self.detail_page, layout = page("녹화 상세", back=self.show_records)
         self.detail_title = QLabel("")
         layout.addWidget(self.detail_title)
         self.player = QMediaPlayer(self)
@@ -406,7 +425,6 @@ class DashPiWindow(QMainWindow):
         # One row: stacked, these buttons made the page taller than the 480px LCD, and the window
         # grows to its tallest page, so every page (including the optical QR) spilled off-screen.
         actions = QHBoxLayout()
-        actions.addWidget(button("뒤로", self.show_records))
         actions.addWidget(button("재생 / 일시정지", self._toggle_playback))
         self.external_analyze_button = button("사고 분석", self._analyze_external, primary=True)
         self.external_analyze_button.hide()
@@ -424,8 +442,8 @@ class DashPiWindow(QMainWindow):
         self.pages.addWidget(self.detail_page)
 
     def _build_optical(self):
-        self.optical_page, layout = page("광학 리포트 전송")
-        layout.itemAt(0).widget().hide()  # the QR needs the height; the title stays for the screen log
+        self.optical_page, layout = page("광학 리포트 전송", back=self._leave_optical)
+        self.optical_page.heading.hide()  # the QR needs the height; the title stays for the screen log
         warning = QLabel("이 QR은 호환 수신기로 누구나 촬영할 수 있습니다. 휴대폰 DashPi 수신 PWA를 여세요.")
         warning.setObjectName("caption")
         warning.setWordWrap(True)
@@ -439,7 +457,6 @@ class DashPiWindow(QMainWindow):
         # label (and the page) larger than the LCD, cutting off the QR and pushing 뒤로 off-screen.
         self.qr_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         layout.addWidget(self.qr_label, 1)
-        layout.addWidget(button("뒤로", self._leave_optical))
         self.pages.addWidget(self.optical_page)
 
     def show_home(self):
@@ -844,7 +861,7 @@ class DashPiWindow(QMainWindow):
         self.pages.setCurrentWidget(self.detail_page)
 
     def _build_analysis(self):
-        self.analysis_page, layout = page("AI 사고 분석")
+        self.analysis_page, layout = page("AI 사고 분석", back=lambda: self.pages.setCurrentWidget(self.detail_page))
         layout.setSpacing(8)
         self.analysis_subtitle = QLabel("")
         self.analysis_subtitle.setObjectName("caption")
@@ -874,14 +891,9 @@ class DashPiWindow(QMainWindow):
         self.analysis_stream.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.analysis_stream.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         layout.addWidget(self.analysis_stream, 1)
-        bottom = QHBoxLayout()
         self.analysis_elapsed = QLabel("")
         self.analysis_elapsed.setObjectName("status")
-        bottom.addWidget(self.analysis_elapsed, 1)
-        back = button("뒤로", lambda: self.pages.setCurrentWidget(self.detail_page))
-        back.setMinimumWidth(200)
-        bottom.addWidget(back)
-        layout.addLayout(bottom)
+        layout.addWidget(self.analysis_elapsed)
         self._analysis_events: deque = deque()
         self._analysis_started = time.monotonic()
         self._stream_done, self._stream_queue, self._stream_typing, self._stream_ask = [], [], None, None
