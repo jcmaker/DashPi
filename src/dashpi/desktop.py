@@ -356,6 +356,9 @@ class DashPiWindow(QMainWindow):
         self.optical_button = button("리포트 QR 전송", self._open_selected_optical, primary=True)
         self.optical_button.hide()
         actions.addWidget(self.optical_button)
+        self.delete_button = button("삭제", self._confirm_delete)
+        self.delete_button.setObjectName("danger")
+        actions.addWidget(self.delete_button)
         layout.addLayout(actions)
         self.pages.addWidget(self.detail_page)
 
@@ -630,20 +633,50 @@ class DashPiWindow(QMainWindow):
             log.exception("설정 저장 실패")
             self.settings_status.setText(str(error))
 
-    def _confirm_exit(self):
+    def _confirm(self, title: str, text: str, action: str) -> bool:
         box = QMessageBox(
-            QMessageBox.Icon.Question, "DashPi 종료", "앱을 종료하시겠습니까?",
+            QMessageBox.Icon.Question, title, text,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, self,
         )
         confirm, cancel = box.button(QMessageBox.StandardButton.Yes), box.button(QMessageBox.StandardButton.No)
-        confirm.setText("종료")
+        confirm.setText(action)
         confirm.setObjectName("danger")
         confirm.style().polish(confirm)  # the dialog already styled its buttons before the rename
         cancel.setText("취소")
-        box.setDefaultButton(cancel)
+        box.setDefaultButton(cancel)  # Enter or a stray tap on the default must not destroy anything
         box.exec()
-        if box.clickedButton() is confirm:
+        return box.clickedButton() is confirm
+
+    def _confirm_exit(self):
+        if self._confirm("DashPi 종료", "앱을 종료하시겠습니까?", "종료"):
             self.close()
+
+    def _confirm_delete(self):
+        kind, value = self._selected_record
+        if kind == "incident":
+            what = "이 사고 기록(사고 영상과 분석 리포트)을"
+        elif kind == "recording":
+            what = f"이 녹화 영상(조각 {len(value.segments)}개)을"
+        else:
+            what = f"동영상 폴더의 원본 파일 {value.name}을(를)"
+        if not self._confirm("기록 삭제", f"{what} 삭제합니다.\n삭제하면 되돌릴 수 없습니다.", "삭제"):
+            return
+        self._detail_generation += 1
+        self.player.stop()
+        self.player.setSource(QUrl())  # release the file before it goes away
+        try:
+            if kind == "incident":
+                self.store.delete(value.incident_id)
+            elif kind == "recording":
+                self.session.delete_recording(value.segments[0].path.parent)
+            else:
+                value.unlink()
+        except Exception as error:
+            log.exception("기록 삭제 실패")
+            self.report_text.setText(f"삭제하지 못했습니다: {error}")
+            return
+        log.info("기록 삭제: %s", self.detail_title.text())
+        self.show_records()
 
     def _refresh_records(self):
         self.record_list.clear()
@@ -680,6 +713,8 @@ class DashPiWindow(QMainWindow):
         self.player.stop()
         self.player.setSource(QUrl())
         kind, value = item.data(Qt.ItemDataRole.UserRole)
+        self._selected_record = (kind, value)
+        self.delete_button.setEnabled(True)
         self._selected_incident = value if kind == "incident" else None
         self._selected_external = value if kind == "external" else None
         self.external_analyze_button.setVisible(kind == "external")
@@ -754,6 +789,7 @@ class DashPiWindow(QMainWindow):
         position = self.player.position() / 1000.0
         generation = self._detail_generation
         self.external_analyze_button.setEnabled(False)
+        self.delete_button.setEnabled(False)
         self.report_text.setText("사고 영상 분석 중...")
         try:
             current = load_settings(self.settings_path)
@@ -767,12 +803,14 @@ class DashPiWindow(QMainWindow):
         except Exception as error:
             log.exception("외부 영상 분석 시작 실패")
             self.external_analyze_button.setEnabled(True)
+            self.delete_button.setEnabled(True)
             self.report_text.setText(f"분석을 시작할 수 없습니다: {error}")
 
     def _external_analysis_done(self, future: Future, generation: int):
         if generation != self._detail_generation or self.pages.currentWidget() is not self.detail_page:
             return
         self.external_analyze_button.setEnabled(True)
+        self.delete_button.setEnabled(True)
         try:
             incident = future.result()
         except Exception as error:

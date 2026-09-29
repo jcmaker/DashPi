@@ -5,6 +5,7 @@ from contextlib import contextmanager
 import hashlib
 import json
 import os
+import shutil
 from pathlib import Path
 import stat
 from typing import BinaryIO
@@ -106,6 +107,12 @@ class IncidentStore:
             return IncidentMetadata(**raw)
         except (AttributeError, KeyError, TypeError, ValueError) as error:
             raise ValueError("invalid incident metadata") from error
+
+    def delete(self, incident_id: str) -> None:
+        item = self.load(incident_id)
+        if item.state not in SUMMARY_STATES:  # the pipeline is still writing into this directory
+            raise RuntimeError("처리 중인 사고 기록은 삭제할 수 없습니다.")
+        shutil.rmtree(self.directory(incident_id))
 
     def list(self, states: Collection[IncidentState] = SUMMARY_STATES) -> list[IncidentMetadata]:
         parent = self.root / "incidents"

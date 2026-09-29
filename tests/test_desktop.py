@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import json
 
 import pytest
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QToolButton
 from PySide6.QtMultimedia import QMediaPlayer
 
@@ -1085,5 +1085,63 @@ def test_detail_with_all_actions_still_fits_the_800x480_lcd(qapp, tmp_path):
         # The window can never be shorter than its tallest page, so one tall page pushes every
         # page (the optical QR's 뒤로 included) below the LCD.
         assert window.minimumSizeHint().height() <= 480
+    finally:
+        window.close()
+
+
+def _answer_delete(qapp, click, seen):
+    def answer():
+        dialog = QApplication.activeModalWidget()
+        seen.append((dialog.text(), sorted(button.text() for button in dialog.buttons())))
+        dialog.button(click).click()
+
+    QTimer.singleShot(0, answer)
+
+
+def test_deleting_an_incident_asks_first_and_cancel_keeps_it(qapp, tmp_path):
+    from PySide6.QtWidgets import QListWidgetItem
+    from dashpi.desktop import DashPiWindow
+
+    store = IncidentStore(tmp_path)
+    item = IncidentMetadata.new("incident-1", datetime.now(UTC).isoformat(), 100.0, 15.0)
+    item.transition(IncidentState.READY, datetime.now(UTC).isoformat())
+    store.save(item)
+    window = DashPiWindow(FakeSession(), store, tmp_path / "settings.json")
+    try:
+        record = QListWidgetItem("사고")
+        record.setData(Qt.ItemDataRole.UserRole, ("incident", item))
+        window._open_record(record)
+        seen = []
+        _answer_delete(qapp, QMessageBox.StandardButton.No, seen)
+        window.delete_button.click()
+        assert seen[0][1] == ["삭제", "취소"] and "되돌릴 수 없습니다" in seen[0][0]
+        assert store.directory("incident-1").exists()
+
+        _answer_delete(qapp, QMessageBox.StandardButton.Yes, seen)
+        window.delete_button.click()
+        assert not store.directory("incident-1").exists()
+        assert window.pages.currentWidget() is window.records_page
+    finally:
+        window.close()
+
+
+def test_deleting_an_external_video_names_the_file(qapp, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QListWidgetItem
+    from dashpi.desktop import DashPiWindow
+
+    video = tmp_path / "Videos" / "dashcam.mp4"
+    video.parent.mkdir()
+    video.write_bytes(b"video")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    window = DashPiWindow(FakeSession(), IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        record = QListWidgetItem("외부 영상")
+        record.setData(Qt.ItemDataRole.UserRole, ("external", video))
+        window._open_record(record)
+        seen = []
+        _answer_delete(qapp, QMessageBox.StandardButton.Yes, seen)
+        window.delete_button.click()
+        assert "dashcam.mp4" in seen[0][0]
+        assert not video.exists()
     finally:
         window.close()

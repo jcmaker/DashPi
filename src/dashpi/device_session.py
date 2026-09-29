@@ -146,6 +146,16 @@ class DeviceSession:
             self.recorder.segments = [segment for segment in self.recorder.segments if segment.path not in deleted]
         return freed >= needed
 
+    def delete_recording(self, directory: Path) -> None:
+        if directory.parent != self.settings.data_root / "raw":
+            raise ValueError("녹화 폴더가 아닙니다.")
+        if self.recorder.recording and getattr(self.recorder, "session_dir", None) == directory:
+            raise RuntimeError("녹화 중인 영상은 삭제할 수 없습니다.")
+        self._pending = [(job, paths) for job, paths in self._pending if not job.done()]
+        if any(path.parent == directory for _job, paths in self._pending for path in paths):
+            raise RuntimeError("사고 영상을 만드는 중이라 삭제할 수 없습니다.")
+        shutil.rmtree(directory)
+
     def _capture_failed(self, error: Exception) -> None:
         self.last_error = str(error)
         if self.coordinator.active:

@@ -225,3 +225,41 @@ def test_stop_at_post_deadline_tolerates_newly_opened_tail(tmp_path, monkeypatch
 
     assert session.stop(115.1) is True
     assert recorder.allowed_empty_tail
+
+
+def test_delete_recording_removes_a_finished_session_only(tmp_path, monkeypatch):
+    recorder = FakeRecorder(tmp_path)
+    session = make_session(tmp_path, recorder, monkeypatch, [])
+    old = tmp_path / "raw" / "old" / "000000.mp4"
+    old.parent.mkdir()
+    old.write_bytes(b"raw video")
+
+    session.start("drive")
+    with pytest.raises(RuntimeError):
+        session.delete_recording(recorder.session_dir)
+    with pytest.raises(ValueError):
+        session.delete_recording(tmp_path / "incidents")
+    session.delete_recording(old.parent)
+
+    assert not old.parent.exists()
+    assert recorder.session_dir.exists()
+
+
+def test_delete_recording_keeps_segments_an_incident_is_still_clipping(tmp_path, monkeypatch):
+    recorder = FakeRecorder(tmp_path)
+    session = make_session(tmp_path, recorder, monkeypatch, [])
+
+    class PendingWorker:
+        def submit(self, work):
+            return Future()
+
+    session.worker = PendingWorker()
+    session.start("drive")
+    session.trigger(100.0)
+    recorder.now = 115.1
+    session.tick(115.1)
+    session.recorder.stop()
+
+    with pytest.raises(RuntimeError):
+        session.delete_recording(recorder.session_dir)
+    assert recorder.session_dir.exists()
