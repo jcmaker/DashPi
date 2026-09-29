@@ -144,6 +144,7 @@ test('recovers a non-UTF-8 frame when display text is null or UTF-8-corrupted', 
   for (const display of ['null', 'utf8'] as const) {
     const scan = androidScan(frame, display)
     assert.notDeepEqual(legacyBytes(scan), frame)
+    assert.notEqual(handleBarcodeScan(new FrameCollector(), { data: scan.data, raw: scan.raw }).status, 'progress')
     assert.throws(() => bytesFromBarcode(scan.raw ?? ''), /not byte data/)
     const bytes = bytesFromBarcode(scan)
     assert.deepEqual(bytes, frame)
