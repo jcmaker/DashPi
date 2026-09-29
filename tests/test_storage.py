@@ -118,3 +118,23 @@ def test_cleanup_removes_only_unreferenced_partials(tmp_path: Path):
     active.write_bytes(b"a"); stale.write_bytes(b"s")
     assert store.cleanup_stale_partials({active}) == [stale]
     assert active.exists() and not stale.exists()
+
+
+def test_delete_removes_a_finished_incident_but_not_one_being_processed(tmp_path):
+    from datetime import UTC, datetime
+
+    store = IncidentStore(tmp_path)
+    now = datetime.now(UTC).isoformat()
+    done = IncidentMetadata.new("done", now, 100.0, 15.0)
+    done.transition(IncidentState.READY, now)
+    store.save(done)
+    busy = IncidentMetadata.new("busy", now, 100.0, 15.0)
+    busy.transition(IncidentState.ANALYZING, now)
+    store.save(busy)
+
+    store.delete("done")
+    with pytest.raises(RuntimeError):
+        store.delete("busy")
+
+    assert not store.directory("done").exists()
+    assert store.load("busy").state is IncidentState.ANALYZING
