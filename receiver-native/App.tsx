@@ -5,7 +5,7 @@ import { useKeepAwake } from 'expo-keep-awake'
 import { StatusBar } from 'expo-status-bar'
 import * as Application from 'expo-application'
 import { useVideoPlayer, VideoView } from 'expo-video'
-import { Alert, AppState, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { Alert, AppState, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { WebView } from 'react-native-webview'
 import { verifiedHtmlWebViewProps } from './src/webview-policy'
 import { handleBarcodeScan, type BarcodeScan } from './src/barcode'
@@ -173,6 +173,7 @@ function Receiver({
   const stallTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const halted = useRef(false)
   const [screen, setScreen] = useState<Screen>(initialScreen)
+  const [scanNotice, setScanNotice] = useState<string | null>(null)
 
   const clearStall = useCallback(() => {
     if (stallTimer.current != null) {
@@ -209,6 +210,7 @@ function Receiver({
     busy.current = false
     forgetCollection()
     setScreen(initialScreen)
+    setScanNotice(null)
   }, [forgetCollection])
 
   useEffect(() => () => clearStall(), [clearStall])
@@ -217,7 +219,15 @@ function Receiver({
     if (busy.current || halted.current) return
     const frames = collector.current
     const outcome = handleBarcodeScan(frames, scan)
-    if (outcome.status === 'ignore' || outcome.status === 'drop') return
+    if (outcome.status === 'ignore' || outcome.status === 'drop') {
+      setScanNotice(
+        Platform.OS === 'android' && !scan.rawBytesBase64
+          ? 'QR은 감지됐지만 원본 데이터를 받지 못했습니다.'
+          : 'QR은 감지됐지만 유효한 DashPi 프레임을 기다리고 있습니다.',
+      )
+      return
+    }
+    setScanNotice(null)
     if (outcome.status === 'error') {
       clearStall()
       halted.current = true
@@ -333,6 +343,7 @@ function Receiver({
         {screen.phase === 'verified' &&
           `${screen.file?.name ?? '리포트'} · ${formatBytes(screen.file?.payload.length ?? 0)} 검증 완료 · 앱에 저장됨`}
       </Text>
+      {screen.phase === 'scanning' && scanNotice && <Text style={styles.status}>{scanNotice}</Text>}
       {screen.phase === 'receiving' && (
         <View style={styles.track}>
           <View style={[styles.fill, { width: `${percent}%` }]} />

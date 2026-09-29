@@ -10,6 +10,7 @@ import math
 from pathlib import Path
 import time
 
+from dashpi import progress
 from dashpi.ai_budget import DailyBudget
 from dashpi.ai_client import (
     DEFAULT_CONFIG_PATH, AnalysisError, ChatClient, RetryableAnalysisError, load_ai_config,
@@ -131,18 +132,26 @@ class Analyzer:
         duration = probe_duration(clip_path)
         steps = []
         if incident_offset_override is None:
+            progress.emit("locate", "start", self.vision_model)
             located = locate(client, self.vision_model, frames)
             moment = located.output["incident_timestamp"]
             if isinstance(moment, bool) or not isinstance(moment, (int, float)) \
                     or not math.isfinite(moment) or not 0.0 <= moment <= duration:
                 raise AnalysisError("모델이 준 사고 시각이 클립 밖입니다")
             steps.append(("locate", located))
+            progress.emit("locate", "done", f"사고 순간 {moment:.1f}초")
         else:
             moment = incident_offset_override
+            progress.emit("locate", "skip", f"멈춘 위치 {moment:.1f}초 사용")
         start, end = observe_window(moment, duration)
         dense = sample_frames(clip_path, frame_dir / "observe", FRAME_COUNT, start, end)
+        progress.emit("observe", "start", self.vision_model)
         observed = observe(client, self.vision_model, dense)
-        reported = summarize(client, self.report_model, observed.output["observations"])
+        observations = observed.output["observations"]
+        progress.emit("observe", "done", f"관찰 {len(observations)}개", observations)
+        progress.emit("report", "start", self.report_model)
+        reported = summarize(client, self.report_model, observations)
+        progress.emit("report", "done", f"요약 {len(reported.output['summary'])}자")
         steps += [("observe", observed), ("report", reported)]
         for name, result in steps:  # never log the key or image content
             log.info("AI %s: %s %.1fs 토큰 %s/%s", name, result.model, result.seconds,

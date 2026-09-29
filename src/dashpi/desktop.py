@@ -16,9 +16,10 @@ import shutil
 import sys
 import threading
 import time
+from collections import deque
 
-from PySide6.QtCore import Qt, QtMsgType, QLockFile, QRect, QTimer, QUrl, QSize, qInstallMessageHandler
-from PySide6.QtGui import QIcon, QImage, QPixmap
+from PySide6.QtCore import Qt, QtMsgType, QLockFile, QPointF, QRect, QRectF, QTimer, QUrl, QSize, qInstallMessageHandler
+from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -35,6 +36,7 @@ from dashpi.config import Settings
 from dashpi.device import VideoSettings, load_settings, save_settings
 from dashpi.device_session import DeviceSession
 from dashpi.models import IncidentState
+from dashpi import progress
 from dashpi.offline_video import analyze_external_video
 from dashpi.optical.container import MAX_PAYLOAD
 from dashpi.optical.session import OpticalSession
@@ -137,6 +139,64 @@ class HomeTile(QToolButton):
                          Qt.AlignmentFlag.AlignCenter, self.text())
 
 
+ANALYSIS_STEPS = (
+    ("clip", "사고 구간 잘라 봉인"),
+    ("frames", "영상 지문 확인 · 사진 뽑기"),
+    ("locate", "AI · 사고 순간 찾기"),
+    ("observe", "AI · 사고 전후 자세히 보기"),
+    ("report", "AI · 요약 작성"),
+    ("build", "리포트 만들기"),
+)
+# What each model call is actually asked (see analysis.py), shown while the driver waits.
+AI_ASKS = {
+    "locate": "사진 12장에서 충돌·급정거·급회피가 일어난 순간을 찾고 있어요",
+    "observe": "사고 전후 3초의 차량·보행자·신호·차선을 보이는 그대로 적고 있어요",
+    "report": "관찰 기록만 근거로 운전자가 읽을 요약을 쓰고 있어요",
+}
+
+
+class StepIcon(QWidget):
+    """Ring, spinning arc, check, dash or cross for one analysis step."""
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedSize(24, 24)
+        self.state, self.angle = "pending", 0
+
+    def paintEvent(self, _event):
+        colors = theme.TOKENS
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        circle = QRectF(3, 3, 18, 18)
+
+        def pen(color, width=2.4):
+            result = QPen(QColor(color), width)
+            result.setCapStyle(Qt.PenCapStyle.RoundCap)
+            return result
+
+        if self.state == "start":
+            painter.setPen(pen(colors["stroke_top"]))
+            painter.drawEllipse(circle)
+            painter.setPen(pen(colors["accent"]))
+            painter.drawArc(circle, -self.angle * 16, 100 * 16)
+        elif self.state in ("done", "fail"):
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(colors["accent" if self.state == "done" else "critical"]))
+            painter.drawEllipse(circle)
+            painter.setPen(pen("#ffffff", 2.2))
+            if self.state == "done":
+                painter.drawPolyline([QPointF(7.5, 12.5), QPointF(10.5, 15.5), QPointF(16.5, 9)])
+            else:
+                painter.drawLine(QPointF(8.5, 8.5), QPointF(15.5, 15.5))
+                painter.drawLine(QPointF(15.5, 8.5), QPointF(8.5, 15.5))
+        elif self.state == "skip":
+            painter.setPen(pen(colors["text_disabled"]))
+            painter.drawLine(QPointF(7, 12), QPointF(17, 12))
+        else:
+            painter.setPen(pen(colors["stroke_top"]))
+            painter.drawEllipse(circle)
+
+
 def home_tile(text: str, icon: QIcon, callback, *, primary: bool = False) -> QToolButton:
     result = HomeTile()
     result.setText(text)
@@ -184,6 +244,7 @@ class DashPiWindow(QMainWindow):
         self._build_settings()
         self._build_detail()
         self._build_optical()
+        self._build_analysis()
         self.show_home()
 
         self.timer = QTimer(self)
@@ -782,6 +843,131 @@ class DashPiWindow(QMainWindow):
             self._play_segment(self.segment_list.item(0))
         self.pages.setCurrentWidget(self.detail_page)
 
+    def _build_analysis(self):
+        self.analysis_page, layout = page("AI 사고 분석")
+        layout.setSpacing(8)
+        self.analysis_subtitle = QLabel("")
+        self.analysis_subtitle.setObjectName("caption")
+        layout.addWidget(self.analysis_subtitle)
+        self._step_rows = {}
+        for step, text in ANALYSIS_STEPS:
+            row = QWidget()
+            row.setFixedHeight(29)
+            line = QHBoxLayout(row)
+            line.setContentsMargins(0, 0, 0, 0)
+            line.setSpacing(10)
+            icon, detail, clock = StepIcon(), QLabel(""), QLabel("")
+            detail.setObjectName("caption")
+            clock.setObjectName("caption")
+            clock.setFixedWidth(56)
+            clock.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            line.addWidget(icon)
+            line.addWidget(QLabel(text))
+            line.addStretch()
+            line.addWidget(detail)
+            line.addWidget(clock)
+            layout.addWidget(row)
+            self._step_rows[step] = {"icon": icon, "detail": detail, "clock": clock, "since": None, "took": None}
+        self.analysis_stream = QLabel("")
+        self.analysis_stream.setObjectName("caption")
+        self.analysis_stream.setWordWrap(True)
+        self.analysis_stream.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.analysis_stream.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        layout.addWidget(self.analysis_stream, 1)
+        bottom = QHBoxLayout()
+        self.analysis_elapsed = QLabel("")
+        self.analysis_elapsed.setObjectName("status")
+        bottom.addWidget(self.analysis_elapsed, 1)
+        back = button("뒤로", lambda: self.pages.setCurrentWidget(self.detail_page))
+        back.setMinimumWidth(200)
+        bottom.addWidget(back)
+        layout.addLayout(bottom)
+        self._analysis_events: deque = deque()
+        self._analysis_started = time.monotonic()
+        self._stream_done, self._stream_queue, self._stream_typing, self._stream_ask = [], [], None, None
+        self.analysis_timer = QTimer(self)
+        self.analysis_timer.timeout.connect(self._tick_analysis)
+        self.pages.addWidget(self.analysis_page)
+
+    def _start_analysis_view(self, subtitle: str):
+        self._analysis_events = deque()
+        self._analysis_started = time.monotonic()
+        self._stream_done, self._stream_queue, self._stream_typing, self._stream_ask = [], [], None, None
+        for row in self._step_rows.values():
+            row["icon"].state = "pending"
+            row["icon"].update()
+            row["detail"].setText("")
+            row["clock"].setText("")
+            row["since"] = row["took"] = None
+        self.analysis_subtitle.setText(subtitle)
+        self.analysis_elapsed.setText("")
+        self.analysis_stream.setText("")
+        self.pages.setCurrentWidget(self.analysis_page)
+        self.analysis_timer.start(80)
+
+    def _tick_analysis(self):
+        now = time.monotonic()
+        while self._analysis_events:
+            self._apply_step(now, *self._analysis_events.popleft())
+        for row in self._step_rows.values():
+            if row["since"] is not None and row["took"] is None:
+                row["clock"].setText(f"{now - row['since']:.0f}초")
+                row["icon"].angle = (row["icon"].angle + 24) % 360
+                row["icon"].update()
+        self.analysis_elapsed.setText(f"경과 {now - self._analysis_started:.0f}초")
+        # Type the model's real output out a few characters at a time instead of a static "분석 중".
+        if self._stream_typing is None and self._stream_queue:
+            self._stream_typing = [self._stream_queue.pop(0), 0]
+        if self._stream_typing is not None:
+            self._stream_typing[1] += 3
+            if self._stream_typing[1] >= len(self._stream_typing[0]):
+                self._stream_done.append(self._stream_typing[0])
+                self._stream_typing = None
+        self._render_stream()
+
+    def _apply_step(self, now: float, step: str, state: str, detail: str, payload) -> None:
+        row = self._step_rows.get(step)
+        if row is None:
+            return
+        row["icon"].state = state
+        row["icon"].update()
+        if state == "start":
+            row["since"] = now
+            row["detail"].setText(f"{detail} 호출 중" if detail else "진행 중")
+            self._stream_ask = AI_ASKS.get(step)
+            return
+        if self._stream_ask == AI_ASKS.get(step):
+            self._stream_ask = None
+        row["took"] = now - row["since"] if row["since"] is not None else 0.0
+        row["clock"].setText(f"{row['took']:.1f}초" if state == "done" else "")
+        row["detail"].setText(detail)
+        if step == "observe" and state == "done":
+            for item in payload or []:
+                self._stream_queue.append(f"{float(item['timestamp']):.1f}초 · {item['description']}")
+
+    def _render_stream(self):
+        # One pinned line for what the AI is being asked now, then the one observation being typed:
+        # a long observation wraps to two lines, and three lines is all the 480px LCD has room for.
+        lines = [f"→ {self._stream_ask}"] if self._stream_ask else []
+        if self._stream_typing is not None:
+            text, shown = self._stream_typing
+            lines.append(text[:shown] + "▍")
+        else:
+            lines += self._stream_done[-1:]
+        self.analysis_stream.setText("\n".join(lines))
+
+    def _stop_analysis_view(self, failed: bool, message: str):
+        self._tick_analysis()
+        self.analysis_timer.stop()
+        for row in self._step_rows.values():
+            if row["since"] is not None and row["took"] is None:
+                row["icon"].state = "fail" if failed else "skip"
+                row["icon"].update()
+                row["clock"].setText("")
+        self._stream_done, self._stream_queue, self._stream_typing, self._stream_ask = [message], [], None, None
+        self._render_stream()
+        self.analysis_elapsed.setText("")
+
     def _analyze_external(self):
         source = self._selected_external
         if source is None or not self.external_analyze_button.isEnabled():
@@ -791,23 +977,28 @@ class DashPiWindow(QMainWindow):
         self.external_analyze_button.setEnabled(False)
         self.delete_button.setEnabled(False)
         self.report_text.setText("사고 영상 분석 중...")
+        self._start_analysis_view(f"{source.name} · 멈춘 위치 {position:.1f}초")
+        events = self._analysis_events
         try:
             current = load_settings(self.settings_path)
             settings = replace(self.session.settings, ai_model=current.ai_model,
                                ai_report_model=current.ai_report_model)
             analyze = build_analyzer(settings.ai_model, settings.ai_report_model, self.settings_path.parent)
-            future = self.session.worker.submit(
-                lambda: analyze_external_video(source, position, settings, self.store, analyze)
-            )
+            def run():
+                with progress.reporting(lambda *event: events.append(event)):
+                    return analyze_external_video(source, position, settings, self.store, analyze)
+
+            future = self.session.worker.submit(run)
             self._jobs.append((future, lambda done: self._external_analysis_done(done, generation)))
         except Exception as error:
             log.exception("외부 영상 분석 시작 실패")
             self.external_analyze_button.setEnabled(True)
             self.delete_button.setEnabled(True)
             self.report_text.setText(f"분석을 시작할 수 없습니다: {error}")
+            self._stop_analysis_view(True, f"분석을 시작할 수 없습니다: {error}")
 
     def _external_analysis_done(self, future: Future, generation: int):
-        if generation != self._detail_generation or self.pages.currentWidget() is not self.detail_page:
+        if generation != self._detail_generation:
             return
         self.external_analyze_button.setEnabled(True)
         self.delete_button.setEnabled(True)
@@ -815,21 +1006,32 @@ class DashPiWindow(QMainWindow):
             incident = future.result()
         except Exception as error:
             log.error("외부 영상 분석 실패", exc_info=error)
-            self.report_text.setText(f"분석 실패: {error}. 원본 영상은 보존됩니다.")
+            message = f"분석 실패: {error}. 원본 영상은 보존됩니다."
+            self.report_text.setText(message)
+            self._stop_analysis_view(True, message)
             return
         if incident.state is IncidentState.AWAITING_ANALYSIS:
-            self.report_text.setText(f"분석 대기 · {incident.failure_reason} · 연결되면 자동으로 분석합니다.")
+            message = f"분석 대기 · {incident.failure_reason} · 연결되면 자동으로 분석합니다."
+            self.report_text.setText(message)
+            self._stop_analysis_view(False, message)
             return
         if incident.state is not IncidentState.READY:
             log.warning("외부 영상 분석 결과: %s (%s)", incident.state.value, incident.failure_reason)
-            self.report_text.setText(
-                f"분석 실패: {incident.failure_reason or incident.state.value}. 원본 영상은 보존됩니다."
-            )
+            message = f"분석 실패: {incident.failure_reason or incident.state.value}. 원본 영상은 보존됩니다."
+            self.report_text.setText(message)
+            self._stop_analysis_view(True, message)
             return
         self._selected_incident = incident
         self.report_text.setText("분석 완료. 광학 리포트를 표시합니다.")
         self.optical_button.show()
-        self.start_optical(incident)
+        self._stop_analysis_view(False, "분석 완료 · 잠시 후 QR 전송 화면으로 넘어갑니다.")
+        if self.pages.currentWidget() is self.analysis_page:
+            # Let the finished checklist register before the QR screen replaces it.
+            QTimer.singleShot(1500, lambda: self._open_finished_report(incident, generation))
+
+    def _open_finished_report(self, incident, generation: int):
+        if generation == self._detail_generation and self.pages.currentWidget() is self.analysis_page:
+            self.start_optical(incident)
 
     def _verified_clip_path(self, incident):
         with self.store.open_incident(incident.incident_id) as (_item, descriptor, directory):
