@@ -2,7 +2,7 @@ import pytest
 
 from dashpi.ai_client import AnalysisError, RetryableAnalysisError
 from dashpi.analysis import Analyzer, FakeAnalyzer, build_analyzer, observe_window
-from dashpi.reports import validate_report
+from dashpi.reports import NEGLIGENCE_ITEMS, validate_report
 from tests.media_factory import make_video
 
 
@@ -20,9 +20,19 @@ class ScriptedClient:
         return answer, {"prompt_tokens": 100, "completion_tokens": 10}
 
 
+def negligence_review(status="not_observed"):
+    return {
+        key: {"status": status, "evidence": "관련 장면 없음", "timestamp": None}
+        for key, _label in NEGLIGENCE_ITEMS
+    }
+
+
 ANSWERS = {
     "locate": {"incident_timestamp": 4.0, "confidence": 0.8, "reason": "앞차 급정거"},
-    "observe": {"observations": [{"timestamp": 3.5, "description": "앞차 브레이크등 점등"}]},
+    "observe": {
+        "observations": [{"timestamp": 3.5, "description": "앞차 브레이크등 점등"}],
+        "major_negligence_review": negligence_review(),
+    },
     "report": {"summary": "앞차가 급정거했다.", "limitations": ["야간 화질 저하"]},
 }
 
@@ -48,18 +58,26 @@ def test_roles_run_in_order_and_result_passes_report_validation(tmp_path):
     assert [name for name, *_ in client.calls] == ["locate", "observe", "report"]
     assert [model for _name, model, *_ in client.calls] == ["vision-m", "vision-m", "report-m"]
     assert result["analysis"]["locate"] == {"confidence": 0.8, "reason": "앞차 급정거"}
+    assert list(result["major_negligence_review"]) == [key for key, _ in NEGLIGENCE_ITEMS]
     raw = {key: result[key] for key in ("incident_timestamp", "summary", "observations", "limitations")}
     assert validate_report(raw, "0" * 64, "label", "now", 8.0)["incident_timestamp"] == 4.0
 
 
-def test_observe_frames_come_from_the_window_around_the_moment(tmp_path):
+def test_observe_uses_full_clip_context_and_dense_incident_frames(tmp_path):
     clip = make_video(tmp_path / "clip.mp4", 8)
     client = ScriptedClient(ANSWERS)
     analyzer(tmp_path, client)(frames_for(clip, tmp_path), clip, tmp_path / "work")
 
-    observe_text = " ".join(part["text"] for part in client.calls[1][2][1]["content"] if part["type"] == "text")
-    stamps = [float(token.removesuffix("초")) for token in observe_text.split() if token.endswith("초")]
-    assert len(stamps) == 12 and min(stamps) >= 1.0 and max(stamps) <= 7.0
+    content = client.calls[1][2][1]["content"]
+    stamps = [
+        float(part["text"].removesuffix("초"))
+        for part in content
+        if part["type"] == "text" and part["text"].endswith("초")
+    ]
+    assert min(stamps) < 1.0
+    assert max(stamps) > 7.0
+    assert any(1.0 < stamp < 7.0 for stamp in stamps)
+    assert len(stamps) > 12
 
 
 def test_role_timing_and_tokens_are_logged_without_the_key(tmp_path, caplog):
@@ -98,7 +116,7 @@ def test_locate_answer_outside_the_clip_fails(tmp_path):
 def test_role_answer_missing_required_field_fails(tmp_path):
     clip = make_video(tmp_path / "clip.mp4", 8)
     client = ScriptedClient({**ANSWERS, "observe": {}})
-    with pytest.raises(AnalysisError, match="observations 누락"):
+    with pytest.raises(AnalysisError, match="observations.*누락"):
         analyzer(tmp_path, client)(frames_for(clip, tmp_path), clip, tmp_path / "w")
 
 
