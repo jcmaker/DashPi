@@ -357,6 +357,8 @@ class DashPiWindow(QMainWindow):
         layout.addWidget(self.record_filter)
         self.record_list = QListWidget()
         self.record_list.itemClicked.connect(self._open_record)
+        # Long names are already elided; the unstyled horizontal bar drew as a stray white box.
+        self.record_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         layout.addWidget(self.record_list, 1)
         self.pages.addWidget(self.records_page)
 
@@ -422,19 +424,26 @@ class DashPiWindow(QMainWindow):
         layout.addWidget(self.detail_title)
         self.player = QMediaPlayer(self)
         self.player.mediaStatusChanged.connect(self._advance_on_end)
+        # Video beside the file list and report: stacked under them on the 480px LCD it got 0px.
+        body = QHBoxLayout()
         self.video = QVideoWidget()
         self.player.setVideoOutput(self.video)
-        layout.addWidget(self.video, 1)
+        body.addWidget(self.video, 3)
+        side = QVBoxLayout()
         self.segment_list = QListWidget()
         self.segment_list.itemClicked.connect(self._play_segment)
-        layout.addWidget(self.segment_list)
+        self.segment_list.setMaximumHeight(120)
+        # Long names are already elided; the unstyled horizontal bar drew as a stray white box.
+        self.segment_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        side.addWidget(self.segment_list)
         self.report_text = QLabel("")
         self.report_text.setWordWrap(True)
         report_scroll = QScrollArea()
         report_scroll.setWidgetResizable(True)
-        report_scroll.setMaximumHeight(160)
         report_scroll.setWidget(self.report_text)
-        layout.addWidget(report_scroll)
+        side.addWidget(report_scroll, 1)
+        body.addLayout(side, 2)
+        layout.addLayout(body, 1)
         # One row: stacked, these buttons made the page taller than the 480px LCD, and the window
         # grows to its tallest page, so every page (including the optical QR) spilled off-screen.
         actions = QHBoxLayout()
