@@ -240,6 +240,20 @@ dashpi simulate input.mp4 \
 
 Detector는 YOLOv8 COCO ONNX의 `[1,84,8400]` 또는 `[1,8400,84]` output 형식만 지원합니다.
 
+### 선택 실시간 ByteTrack 엔진
+
+로컬 개발 환경에서 실제 supervision ByteTrack 엔진을 설치합니다.
+
+```bash
+python -m pip install -e '.[tracking]'
+```
+
+`supervision==0.27.0`은 Python 3.11 / NumPy 2.4에서 로컬 검증했습니다. 기본 설치는 supervision을 요구하지 않으며 `LiveTracker` 생성 시에만 로드합니다. Pi의 apt Picamera2/OpenCV 환경에서는 이 명령이 가져오는 `opencv-python`과 NumPy wheel을 그대로 설치하지 말고, apt 패키지와 맞는 의존성을 먼저 확인하세요. Pi 설치·성능 검증과 카메라/Qt 연결은 후속 단계입니다.
+
+모델은 **YOLOv8n COCO ONNX**, 입력 **640×640**, 출력 `[1,84,8400]` 또는 `[1,8400,84]` 형식으로 미리 준비하고 `YoloDetector(Path('/absolute/path/yolov8n.onnx'), confidence=0.10)`처럼 경로를 명시합니다. 실행 중 다운로드하지 않습니다. live 입력 하한은 **0.10**, `LiveTracker(frame_rate=10, activation_threshold=0.45)`의 활성 임계값은 **0.45**입니다. supervision은 새 track 생성에 활성 임계값 + 0.10을 적용합니다. 기존 저장 영상 감지기의 기본 confidence **0.45**는 그대로 유지합니다. 10Hz는 목표이며 Pi 성능 보장이 아닙니다.
+
+person, bicycle, car, motorcycle, bus, truck에 클래스별 ByteTrack을 적용하고 세션 내 고유 ID와 결정적 RGB 색상을 제공합니다. `render_overlay(width, height, detections)`는 투명 uint8 RGBA를 반환하며 box는 해당 width/height 공간의 xyxy 픽셀 좌표입니다. 프레임과 overlay 크기가 다르면 호출자가 좌표를 변환해야 합니다. 이 엔진의 overlay는 프리뷰 전용이며 원본 MP4에 합성하지 않습니다. 새 녹화 세션에는 새 tracker를 생성합니다. ID는 영구 객체 식별자가 아닙니다.
+
 ## 사고 리포트와 전송
 
 `report.html`의 **Download HTML**은 재생 가능한 10초 annotated video를 포함한 오프라인 단일 파일을 저장합니다. **Save as PDF**는 브라우저의 인쇄 대화상자를 사용해 작성 분석과 핵심 장면 3장을 정적 PDF로 저장하므로, 재생 가능한 영상은 HTML에만 남습니다.
@@ -362,3 +376,15 @@ DashPi/
 ## 라이선스
 
 현재 저장소에는 라이선스가 지정되어 있지 않습니다. 별도 라이선스가 추가되기 전까지 소스 코드의 사용·수정·재배포 권한이 자동으로 부여되지는 않습니다.
+
+Pi 프리뷰 실시간 추적은 명시적으로 모델을 지정할 때만 켜집니다:
+
+```bash
+python -m dashpi.desktop --tracking-model /path/to/yolov8n.onnx \
+  --tracking-fps 10 --tracking-confidence 0.10 --tracking-activation 0.45
+```
+
+`dashpi[tracking]` 설치가 필요합니다. supervision 0.27의 SciPy 호환성을 위해
+`scipy>=1.10,<1.18`을 사용합니다. 640×360 lores 프레임을 단일 작업자가
+처리하며 FPS는 상한입니다. 박스·클래스·ID는 프리뷰에만 표시하고 원본 MP4는
+그대로 저장합니다. 1초 지난 결과는 지우며 모델/추론 실패는 추적만 중단합니다.
