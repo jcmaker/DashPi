@@ -357,6 +357,8 @@ class DashPiWindow(QMainWindow):
         layout.addWidget(self.record_filter)
         self.record_list = QListWidget()
         self.record_list.itemClicked.connect(self._open_record)
+        # Long names are already elided; the unstyled horizontal bar drew as a stray white box.
+        self.record_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         layout.addWidget(self.record_list, 1)
         self.pages.addWidget(self.records_page)
 
@@ -431,6 +433,8 @@ class DashPiWindow(QMainWindow):
         self.segment_list = QListWidget()
         self.segment_list.itemClicked.connect(self._play_segment)
         self.segment_list.setMaximumHeight(120)
+        # Long names are already elided; the unstyled horizontal bar drew as a stray white box.
+        self.segment_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         side.addWidget(self.segment_list)
         self.report_text = QLabel("")
         self.report_text.setWordWrap(True)
