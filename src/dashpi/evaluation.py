@@ -11,7 +11,15 @@ import urllib.error
 import urllib.request
 
 from dashpi.ai_client import AnalysisError, RetryableAnalysisError
-from dashpi.analysis import FRAME_COUNT, MAX_TOKENS, locate, observe, observe_window, summarize
+from dashpi.analysis import (
+    FRAME_COUNT,
+    MAX_TOKENS,
+    locate,
+    merge_observation_frames,
+    observe,
+    observe_window,
+    summarize,
+)
 from dashpi.media import probe_duration, sample_frames
 
 PRICES_URL = "https://openrouter.ai/api/v1/models"
@@ -60,11 +68,12 @@ def call_cost(usage: dict, price: tuple[float, float]) -> float:
 
 def max_cost(case_count: int, vision_models: list[str], report_models: list[str],
              prices: dict[str, tuple[float, float]]) -> float:
-    vision_input = FRAME_COUNT * IMAGE_TOKEN_CEILING + PROMPT_TOKEN_CEILING
+    locate_input = FRAME_COUNT * IMAGE_TOKEN_CEILING + PROMPT_TOKEN_CEILING
+    observe_input = FRAME_COUNT * 2 * IMAGE_TOKEN_CEILING + PROMPT_TOKEN_CEILING
     per_case = 0.0
     for model in vision_models:
-        per_case += call_cost({"prompt_tokens": vision_input, "completion_tokens": MAX_TOKENS["locate"]}, prices[model])
-        per_case += call_cost({"prompt_tokens": vision_input, "completion_tokens": MAX_TOKENS["observe"]}, prices[model])
+        per_case += call_cost({"prompt_tokens": locate_input, "completion_tokens": MAX_TOKENS["locate"]}, prices[model])
+        per_case += call_cost({"prompt_tokens": observe_input, "completion_tokens": MAX_TOKENS["observe"]}, prices[model])
         for report in report_models:
             per_case += call_cost({"prompt_tokens": 3 * PROMPT_TOKEN_CEILING,
                                    "completion_tokens": MAX_TOKENS["report"]}, prices[report])
@@ -107,7 +116,7 @@ def run(cases: list[Case], vision_models: list[str], report_models: list[str], c
                     start, end = observe_window(moment, duration)
                     dense = sample_frames(case.clip, work_root / case.case_id / f"observe-{start:.2f}",
                                           FRAME_COUNT, start, end)
-                    observed = observe(client, vision, dense)
+                    observed = observe(client, vision, merge_observation_frames(frames, dense))
                 except (AnalysisError, RetryableAnalysisError) as error:
                     emit(_error_row(case.case_id, vision, "-", error))
                     continue

@@ -15,7 +15,8 @@ function reportHtml(videoSource: string, image = Buffer.from('before').toString(
 @media print{body{background:white}.screen-only{display:none!important}}
 </style></head><body><main>
 <header><h1>사고 분석 리포트</h1></header>
-<section class="screen-only"><video controls preload="metadata" src="${videoSource}"></video></section>
+<section class="video screen-only" data-section="video"><video controls preload="metadata" src="${videoSource}"></video><div class="video-cue"><p>사고 순간 · 전송 영상 2.0초 지점</p><div class="incident-timeline"><i class="incident-marker" style="left:20.00%"></i></div></div></section>
+<section data-section="summary"><h2>AI 핵심 요약</h2><p>사고 요약</p></section>
 <section class="keyframes"><figure><img src="data:image/jpeg;base64,${image}" alt="사고 전"><figcaption>사고 전</figcaption></figure></section>
 <nav class="screen-only"><button type="button" onclick="downloadReport()">Download HTML</button><button type="button" onclick="window.print()">Save as PDF</button></nav>
 </main><script>
@@ -44,6 +45,10 @@ test('a report keeps its pictures, lifts out the data video, and drops dead save
   assert.match(model.html, /@media print/)
   assert.equal(model.html.includes('data:video/'), false)
   assert.equal(model.html.includes('<video'), false)
+  assert.match(model.html, /data-section="video"/)
+  assert.match(model.html, /incident-marker/)
+  assert.match(model.html, /사고 순간/)
+  assert.match(model.html, /data-section="summary"/)
   assert.equal(model.html.includes('<button'), false)
   assert.equal(model.html.includes('Download HTML'), false)
   assert.equal(model.html.includes('Save as PDF'), false)

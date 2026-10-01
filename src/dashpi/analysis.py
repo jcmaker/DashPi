@@ -16,6 +16,7 @@ from dashpi.ai_client import (
     DEFAULT_CONFIG_PATH, AnalysisError, ChatClient, RetryableAnalysisError, load_ai_config,
 )
 from dashpi.media import probe_duration, sample_frames
+from dashpi.reports import NEGLIGENCE_ITEMS
 
 log = logging.getLogger("dashpi")
 FAKE_MODEL = "fake"
@@ -38,10 +39,21 @@ LOCATE_SCHEMA = _object({
     "confidence": {"type": "number"},
     "reason": {"type": "string"},
 })
+REVIEW_ITEM_SCHEMA = _object({
+    "status": {
+        "type": "string",
+        "enum": ["observed", "not_observed", "not_determinable"],
+    },
+    "evidence": {"type": "string"},
+    "timestamp": {"type": ["number", "null"]},
+})
 OBSERVE_SCHEMA = _object({
     "observations": {"type": "array", "items": _object({
         "timestamp": {"type": "number"}, "description": {"type": "string"},
     })},
+    "major_negligence_review": _object({
+        key: REVIEW_ITEM_SCHEMA for key, _label in NEGLIGENCE_ITEMS
+    }),
 })
 REPORT_SCHEMA = _object({
     "summary": {"type": "string"},
@@ -85,8 +97,14 @@ def locate(client, model: str, frames: list[tuple[Path, float]]) -> RoleResult:
 
 
 def observe(client, model: str, frames: list[tuple[Path, float]]) -> RoleResult:
-    instruction = ("사고 순간 전후 프레임입니다. 차량·보행자·신호·차선·도로·날씨·움직임에 대해 보이는 사실을 "
-                   "시각(초, 클립 기준)과 함께 observations로 나열하세요. 판단이나 추측은 쓰지 마세요.")
+    labels = ", ".join(f"{key}={label}" for key, label in NEGLIGENCE_ITEMS)
+    instruction = (
+        "45초 전체 구간의 균등 표본과 사고 순간 주변의 고밀도 프레임입니다. "
+        "차량·보행자·신호·차선·도로·날씨·움직임에 대해 보이는 사실을 시각(초, 클립 기준)과 함께 "
+        "observations로 나열하세요. major_negligence_review는 법적 판정이 아니라 각 항목과 관련된 장면이 "
+        "영상에 보이는지만 observed, not_observed, not_determinable 중 하나로 기록하세요. 속도·면허·음주·약물은 "
+        "항상 not_determinable입니다. 판단이나 추측은 쓰지 마세요. 항목: " + labels
+    )
     return _run(client, model, "observe", OBSERVE_SCHEMA, _frame_content(instruction, frames))
 
 
@@ -101,6 +119,14 @@ def observe_window(moment: float, duration: float) -> tuple[float, float]:
     start = max(0.0, moment - OBSERVE_SECONDS)
     end = min(duration, moment + OBSERVE_SECONDS)
     return (0.0, duration) if end - start < 1.0 else (start, end)
+
+
+def merge_observation_frames(
+    full: list[tuple[Path, float]], dense: list[tuple[Path, float]]
+) -> list[tuple[Path, float]]:
+    by_time = {round(timestamp, 3): (path, timestamp) for path, timestamp in full}
+    by_time.update({round(timestamp, 3): (path, timestamp) for path, timestamp in dense})
+    return sorted(by_time.values(), key=lambda item: item[1])
 
 
 class Analyzer:
@@ -146,7 +172,7 @@ class Analyzer:
         start, end = observe_window(moment, duration)
         dense = sample_frames(clip_path, frame_dir / "observe", FRAME_COUNT, start, end)
         progress.emit("observe", "start", self.vision_model)
-        observed = observe(client, self.vision_model, dense)
+        observed = observe(client, self.vision_model, merge_observation_frames(frames, dense))
         observations = observed.output["observations"]
         progress.emit("observe", "done", f"관찰 {len(observations)}개", observations)
         progress.emit("report", "start", self.report_model)
@@ -168,6 +194,7 @@ class Analyzer:
             "summary": reported.output["summary"],
             "observations": observed.output["observations"],
             "limitations": reported.output["limitations"],
+            "major_negligence_review": observed.output["major_negligence_review"],
             "analysis": analysis,
         }
 
@@ -184,6 +211,14 @@ class FakeAnalyzer:
             "summary": "가짜 분석기 결과입니다. 실제 영상 내용이 아닙니다.",
             "observations": [{"timestamp": moment, "description": "가짜 관찰"}],
             "limitations": ["테스트용 가짜 분석 결과"],
+            "major_negligence_review": {
+                key: {
+                    "status": "not_determinable",
+                    "evidence": "테스트 분석에서는 확인하지 않습니다.",
+                    "timestamp": None,
+                }
+                for key, _label in NEGLIGENCE_ITEMS
+            },
             "analysis": {"models": {"all": FAKE_MODEL}},
         }
 

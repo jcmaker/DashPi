@@ -144,7 +144,10 @@ function prepareHtml(html: string): { html: string; videos: EmbeddedVideo[]; pla
       bytes: extracted.bytes,
     })
     return ''
-  })
+  }).replace(
+    /<section\b(?=[^>]*\bscreen-only\b)(?=[^>]*\bdata-section\s*=\s*["']video["'])[^>]*>\s*<\/section>/gi,
+    '',
+  )
   return { html: document, videos, playbackNotice }
 }
 
