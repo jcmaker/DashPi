@@ -135,6 +135,42 @@ def test_html_escapes_model_output():
     assert "&lt;script&gt;" in html
 
 
+def test_mobile_report_is_video_first_and_requires_no_download_before_preview():
+    report = complete_report_fixture()
+    report["major_negligence_review"] = negligence_review()
+    rendered = render_report_html(report, b"video", [b"before", b"moment", b"after"])
+
+    markers = [
+        'data-section="video"',
+        'data-section="keyframes"',
+        'data-section="summary"',
+        'data-section="timeline"',
+        'data-section="limitations"',
+        'data-section="major-negligence"',
+        'data-section="emergency"',
+        'data-section="evidence"',
+    ]
+    positions = [rendered.index(marker) for marker in markers]
+    assert positions == sorted(positions)
+    assert "119 · 구급/소방" in rendered
+    assert "112 · 경찰" in rendered
+    assert "tel:" not in rendered
+    assert "법적 판정이 아닌 영상 사실 정리입니다." in rendered
+
+
+def test_mobile_report_escapes_review_evidence():
+    report = complete_report_fixture()
+    report["major_negligence_review"] = negligence_review()
+    report["major_negligence_review"]["signal"] = {
+        "status": "observed",
+        "evidence": "<img src=x onerror=alert(1)>",
+        "timestamp": 22.5,
+    }
+    rendered = render_report_html(report, b"video", [b"before", b"moment", b"after"])
+    assert "<img src=x onerror=alert(1)>" not in rendered
+    assert "&lt;img src=x onerror=alert(1)&gt;" in rendered
+
+
 def test_html_identifies_report_provenance_and_escapes_hostile_lists():
     report = complete_report_fixture()
     report.update(
