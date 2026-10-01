@@ -1289,3 +1289,50 @@ def test_tracking_overlay_failure_disables_only_tracking_and_preserves_status(qa
     window._preview_widget = None
     session.recorder.recording = False
     window.close()
+
+
+def test_preview_is_dropped_once_the_camera_closes_under_it(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    session = FakeSession()
+    window = DashPiWindow(session, IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        window.show_recording()
+        assert window._preview_widget is not None
+        session.recorder.recording = False  # stop() clears this before the camera has finished closing
+        window._poll()
+        assert window._preview_widget is not None
+
+        session.recorder.picam2 = None  # capture failure closed the camera on the worker thread
+        window._poll()
+        assert window._preview_widget is None
+    finally:
+        window.close()
+
+
+def test_a_repeating_uncaught_error_is_logged_once_with_a_count(tmp_path, monkeypatch):
+    import sys
+    import threading
+    from PySide6.QtCore import qInstallMessageHandler
+    from dashpi import desktop
+
+    monkeypatch.setattr(sys, "excepthook", sys.excepthook)
+    monkeypatch.setattr(sys, "__excepthook__", lambda *_: None)
+    monkeypatch.setattr(threading, "excepthook", threading.excepthook)
+    directory = desktop.setup_logging(tmp_path)
+    try:
+        def fail(message):
+            try:
+                raise ValueError(message)
+            except ValueError:
+                sys.excepthook(*sys.exc_info())
+
+        for _ in range(1000):
+            fail("read of closed file")
+        fail("something else")
+        text = (directory / "dashpi.log").read_text(encoding="utf-8")
+        assert text.count("Traceback") == 2  # one full trace per distinct error
+        assert "같은 오류 1000번 반복" in text
+        assert "ValueError: something else" in text
+    finally:
+        qInstallMessageHandler(None)
