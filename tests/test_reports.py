@@ -1,6 +1,6 @@
 import pytest
 
-from dashpi.reports import render_report_html, validate_report
+from dashpi.reports import NEGLIGENCE_ITEMS, render_report_html, validate_report
 
 
 def complete_report_fixture():
@@ -33,6 +33,43 @@ def complete_report_fixture():
         "model": "test-model",
         "generated_at": "2026-09-06T00:01:00Z",
     }
+
+
+def negligence_review(status="not_observed"):
+    return {
+        key: {"status": status, "evidence": "관련 장면 없음", "timestamp": None}
+        for key, _label in NEGLIGENCE_ITEMS
+    }
+
+
+def test_report_keeps_exactly_twelve_video_review_items():
+    raw = {
+        "incident_timestamp": 2.5,
+        "summary": "차량이 정지했다.",
+        "observations": [],
+        "limitations": ["표본 프레임 분석"],
+        "major_negligence_review": negligence_review(),
+    }
+    report = validate_report(raw, "0" * 64, "model", "now", 5.0)
+    assert list(report["major_negligence_review"]) == [key for key, _ in NEGLIGENCE_ITEMS]
+    assert len(report["major_negligence_review"]) == 12
+
+
+def test_nonvisual_review_items_are_never_reported_as_observed():
+    raw = {
+        "incident_timestamp": 2.5,
+        "summary": "x",
+        "observations": [],
+        "limitations": [],
+        "major_negligence_review": negligence_review("observed"),
+    }
+    report = validate_report(raw, "0" * 64, "model", "now", 5.0)
+    for key in ("speeding", "unlicensed", "intoxication"):
+        assert report["major_negligence_review"][key] == {
+            "status": "not_determinable",
+            "evidence": "카메라 영상만으로 확인할 수 없습니다.",
+            "timestamp": None,
+        }
 
 
 def test_report_binds_model_and_source_digest():
@@ -198,4 +235,3 @@ def test_report_rejects_boolean_and_non_finite_timestamps(timestamp):
             "now",
             clip_duration=6.0,
         )
-

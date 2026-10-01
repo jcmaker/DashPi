@@ -4,6 +4,70 @@ import json
 import math
 
 
+NEGLIGENCE_ITEMS = (
+    ("signal", "신호 지시 관련 장면"),
+    ("center_line", "중앙선 관련 장면"),
+    ("speeding", "제한속도 초과 여부"),
+    ("overtaking", "앞지르기·끼어들기 관련 장면"),
+    ("railroad_crossing", "철길건널목 관련 장면"),
+    ("crosswalk", "횡단보도 보행자 관련 장면"),
+    ("unlicensed", "운전면허 상태"),
+    ("intoxication", "음주·약물 상태"),
+    ("sidewalk", "보도 침범 관련 장면"),
+    ("passenger_fall", "승객 추락 방지 관련 장면"),
+    ("school_zone", "어린이보호구역 관련 장면"),
+    ("cargo", "화물 고정 관련 장면"),
+)
+NEGLIGENCE_STATUSES = {"observed", "not_observed", "not_determinable"}
+NONVISUAL_REVIEW_KEYS = {"speeding", "unlicensed", "intoxication"}
+
+
+def _unavailable_review() -> dict:
+    return {
+        key: {
+            "status": "not_determinable",
+            "evidence": "카메라 영상만으로 확인할 수 없습니다.",
+            "timestamp": None,
+        }
+        for key, _label in NEGLIGENCE_ITEMS
+    }
+
+
+def _validate_review(raw: object, clip_duration: float) -> dict:
+    if raw is None:
+        return _unavailable_review()
+    keys = {key for key, _label in NEGLIGENCE_ITEMS}
+    if not isinstance(raw, dict) or set(raw) != keys:
+        raise ValueError("invalid major negligence review")
+    result = {}
+    for key, _label in NEGLIGENCE_ITEMS:
+        item = raw[key]
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"status", "evidence", "timestamp"}
+            or item["status"] not in NEGLIGENCE_STATUSES
+            or not isinstance(item["evidence"], str)
+        ):
+            raise ValueError("invalid major negligence review")
+        timestamp = item["timestamp"]
+        if timestamp is not None and (
+            isinstance(timestamp, bool)
+            or not isinstance(timestamp, (int, float))
+            or not math.isfinite(timestamp)
+            or not 0.0 <= timestamp <= clip_duration
+        ):
+            raise ValueError("invalid major negligence review")
+        result[key] = {
+            "status": item["status"],
+            "evidence": item["evidence"],
+            "timestamp": timestamp,
+        }
+    unavailable = _unavailable_review()
+    for key in NONVISUAL_REVIEW_KEYS:
+        result[key] = unavailable[key]
+    return result
+
+
 def validate_report(
     raw: object,
     clip_sha256: str,
@@ -15,7 +79,10 @@ def validate_report(
     if (
         not isinstance(raw, dict)
         or not {"summary", "observations", "limitations"} <= set(raw)
-        or not set(raw) <= {"incident_timestamp", "summary", "observations", "limitations"}
+        or not set(raw) <= {
+            "incident_timestamp", "summary", "observations", "limitations",
+            "major_negligence_review",
+        }
         or not isinstance(raw["summary"], str)
         or not isinstance(raw["observations"], list)
         or not isinstance(raw["limitations"], list)
@@ -53,6 +120,9 @@ def validate_report(
             for item in raw["observations"]
         ],
         "limitations": list(raw["limitations"]),
+        "major_negligence_review": _validate_review(
+            raw.get("major_negligence_review"), clip_duration
+        ),
         "source_clip_sha256": clip_sha256,
         "model": model,
         "generated_at": generated_at,
