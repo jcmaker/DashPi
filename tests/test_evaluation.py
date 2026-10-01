@@ -5,6 +5,7 @@ import pytest
 
 from dashpi.ai_client import AnalysisError, RetryableAnalysisError
 from dashpi.evaluation import Case, call_cost, fetch_prices, load_cases, max_cost, run, score, summary_table
+from dashpi.reports import NEGLIGENCE_ITEMS
 from tests.media_factory import make_video
 
 
@@ -81,7 +82,12 @@ def test_run_continues_after_a_failed_model_call(tmp_path):
                 return ({"incident_timestamp": 1.0, "confidence": 0.9, "reason": "r"},
                         {"prompt_tokens": 10, "completion_tokens": 5})
             if name == "observe":
-                return ({"observations": [{"timestamp": 1.0, "description": "d"}]},
+                review = {
+                    key: {"status": "not_determinable", "evidence": "없음", "timestamp": None}
+                    for key, _label in NEGLIGENCE_ITEMS
+                }
+                return ({"observations": [{"timestamp": 1.0, "description": "d"}],
+                         "major_negligence_review": review},
                         {"prompt_tokens": 20, "completion_tokens": 10})
             if name == "report":
                 if model == "bad-report":
