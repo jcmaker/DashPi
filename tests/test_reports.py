@@ -91,6 +91,75 @@ def test_report_rejects_non_string_review_status():
         )
 
 
+@pytest.mark.parametrize("timestamp", [-0.1, 5.1])
+def test_report_rejects_observations_outside_the_clip(timestamp):
+    with pytest.raises(ValueError, match="observation"):
+        validate_report(
+            {
+                "incident_timestamp": 2.5,
+                "summary": "x",
+                "observations": [{"timestamp": timestamp, "description": "차량이 보임"}],
+                "limitations": [],
+            },
+            "0" * 64,
+            "model",
+            "now",
+            5.0,
+        )
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("summary", "운전자 과실이다."),
+        ("observation", "신호 위반 차량이다."),
+        ("limitation", "속도는 80km/h로 보인다."),
+        ("review", "음주 운전으로 판단된다."),
+    ],
+)
+def test_report_rejects_ai_legal_and_unmeasured_claims(field, value):
+    raw = {
+        "incident_timestamp": 2.5,
+        "summary": "차량이 보인다.",
+        "observations": [{"timestamp": 2.0, "description": "차량이 정지한다."}],
+        "limitations": ["표본 프레임 분석"],
+        "major_negligence_review": negligence_review(),
+    }
+    if field == "summary":
+        raw["summary"] = value
+    elif field == "observation":
+        raw["observations"][0]["description"] = value
+    elif field == "limitation":
+        raw["limitations"][0] = value
+    else:
+        raw["major_negligence_review"]["signal"]["evidence"] = value
+    with pytest.raises(ValueError, match="forbidden model claim"):
+        validate_report(raw, "0" * 64, "model", "now", 5.0)
+
+
+def test_school_zone_review_requires_a_visible_sign_or_road_marking():
+    value = negligence_review()
+    value["school_zone"] = {
+        "status": "observed",
+        "evidence": "어린이가 보인다.",
+        "timestamp": 2.0,
+    }
+    report = validate_report(
+        {
+            "incident_timestamp": 2.5,
+            "summary": "x",
+            "observations": [],
+            "limitations": [],
+            "major_negligence_review": value,
+        },
+        "0" * 64,
+        "model",
+        "now",
+        5.0,
+    )
+    assert report["major_negligence_review"]["school_zone"]["status"] == "not_determinable"
+
+
 def test_report_binds_model_and_source_digest():
     report = validate_report(
         {
@@ -188,6 +257,24 @@ def test_mobile_report_escapes_review_evidence():
     rendered = render_report_html(report, b"video", [b"before", b"moment", b"after"])
     assert "<img src=x onerror=alert(1)>" not in rendered
     assert "&lt;img src=x onerror=alert(1)&gt;" in rendered
+
+
+def test_video_timeline_marks_shifted_incident_position():
+    report = complete_report_fixture()
+    report["incident_timestamp"] = 2.0
+    report["transfer_window"] = {"start": 0.0, "end": 10.0}
+    rendered = render_report_html(report, b"video", [b"before", b"moment", b"after"])
+    assert 'class="incident-marker" style="left:20.00%"' in rendered
+    assert "전송 영상 2.0초 지점" in rendered
+
+
+def test_mobile_and_print_css_reveal_required_content():
+    rendered = render_report_html(
+        complete_report_fixture(), b"video", [b"before", b"moment", b"after"]
+    )
+    assert "@media(max-width:700px)" in rendered
+    assert ".keyframes,.emergency-grid{grid-template-columns:1fr}" in rendered
+    assert "details:not([open])>:not(summary){display:block!important}" in rendered
 
 
 def test_html_identifies_report_provenance_and_escapes_hostile_lists():

@@ -2,6 +2,7 @@ import base64
 import html
 import json
 import math
+import re
 
 
 NEGLIGENCE_ITEMS = (
@@ -20,6 +21,17 @@ NEGLIGENCE_ITEMS = (
 )
 NEGLIGENCE_STATUSES = {"observed", "not_observed", "not_determinable"}
 NONVISUAL_REVIEW_KEYS = {"speeding", "unlicensed", "intoxication"}
+FORBIDDEN_MODEL_CLAIMS = re.compile(
+    r"(?:과실|법적\s*책임|가해자|피해자|신호\s*위반|중앙선\s*침범|무면허|"
+    r"음주\s*운전|혈중\s*알코올|GPS|충격량|델타\s*V|ΔV|"
+    r"\d+(?:\.\d+)?\s*(?:km/?h|kmh))",
+    re.IGNORECASE,
+)
+
+
+def _validate_model_text(value: str) -> None:
+    if FORBIDDEN_MODEL_CLAIMS.search(value):
+        raise ValueError("forbidden model claim")
 
 
 def _unavailable_review() -> dict:
@@ -58,6 +70,7 @@ def _validate_review(raw: object, clip_duration: float) -> dict:
             or not 0.0 <= timestamp <= clip_duration
         ):
             raise ValueError("invalid major negligence review")
+        _validate_model_text(item["evidence"])
         result[key] = {
             "status": item["status"],
             "evidence": item["evidence"],
@@ -66,6 +79,15 @@ def _validate_review(raw: object, clip_duration: float) -> dict:
     unavailable = _unavailable_review()
     for key in NONVISUAL_REVIEW_KEYS:
         result[key] = unavailable[key]
+    school = result["school_zone"]
+    if school["status"] == "observed" and not any(
+        marker in school["evidence"] for marker in ("표지", "노면", "도로 표시", "글자")
+    ):
+        result["school_zone"] = {
+            "status": "not_determinable",
+            "evidence": "어린이보호구역 표지·노면 표시를 영상에서 확인할 수 없습니다.",
+            "timestamp": None,
+        }
     return result
 
 
@@ -95,12 +117,19 @@ def validate_report(
         or isinstance(item["timestamp"], bool)
         or not isinstance(item["timestamp"], (int, float))
         or not math.isfinite(item["timestamp"])
+        or not 0.0 <= item["timestamp"] <= clip_duration
         or not isinstance(item["description"], str)
         for item in raw["observations"]
     ):
         raise ValueError("invalid observation")
     if any(not isinstance(item, str) for item in raw["limitations"]):
         raise ValueError("invalid limitation")
+    for value in [
+        raw["summary"],
+        *(item["description"] for item in raw["observations"]),
+        *raw["limitations"],
+    ]:
+        _validate_model_text(value)
     incident_timestamp = (
         raw.get("incident_timestamp")
         if incident_offset_override is None
@@ -134,6 +163,13 @@ def render_report_html(report: dict, video_bytes: bytes, keyframe_bytes: list[by
     if len(keyframe_bytes) != 3:
         raise ValueError("report requires three key frames")
     incident_time = float(report["incident_timestamp"])
+    transfer_start = float(report["transfer_window"]["start"])
+    transfer_end = float(report["transfer_window"]["end"])
+    incident_video_seconds = incident_time - transfer_start
+    incident_percent = min(
+        100.0,
+        max(0.0, incident_video_seconds / (transfer_end - transfer_start) * 100.0),
+    )
     tracks: dict[str, set[int]] = {}
     for item in report["object_observations"]:
         tracks.setdefault(str(item["label"]), set()).add(int(item["track_id"]))
@@ -201,15 +237,15 @@ def render_report_html(report: dict, video_bytes: bytes, keyframe_bytes: list[by
 <title>DashPi 사고 분석 리포트</title><style>
 :root{{color-scheme:light;--bg:#eef2f7;--panel:#fff;--line:#dce3ec;--text:#142033;--muted:#657187;--accent:#165dff;--soft:#edf3ff;--warn:#fff7df}}
 *{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--text);font:15px/1.6 system-ui,sans-serif}}main{{max-width:760px;margin:auto;padding:20px}}
-header{{padding:8px 4px 14px}}header p{{margin:0;color:var(--muted)}}h1{{margin:4px 0 2px;font-size:28px}}h2{{margin:0 0 10px;font-size:18px}}section,details{{margin:0 0 12px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px}}summary{{cursor:pointer;font-size:18px;font-weight:700}}img,video{{width:100%;border-radius:12px}}.keyframes{{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}}figure{{margin:0}}figcaption{{margin-top:5px;text-align:center;color:var(--muted);font-size:12px}}.summary{{border-left:4px solid var(--accent)}}.timeline{{list-style:none;margin:0;padding:0}}.timeline li{{display:grid;grid-template-columns:64px 1fr;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}}.timeline time{{color:var(--accent);font-weight:800}}.limitations{{background:var(--warn)}}.review{{list-style:none;margin:14px 0 0;padding:0}}.review li{{padding:10px 0;border-top:1px solid var(--line)}}.review li div{{display:flex;justify-content:space-between;gap:12px}}.review li p{{margin:4px 0 0;color:var(--muted)}}.review-status{{color:var(--accent);font-size:12px;font-weight:700;text-align:right}}.emergency-grid{{display:grid;grid-template-columns:1fr 1fr;gap:8px}}.emergency-grid p{{margin:0;padding:12px;border-radius:12px;background:var(--soft);text-align:center;font-size:17px;font-weight:800}}.object-chart{{display:grid;gap:8px;margin:12px 0}}.object-chart>div{{display:grid;grid-template-columns:100px 1fr 32px;align-items:center;gap:8px}}.object-chart>div i{{display:block;height:10px;background:var(--accent);border-radius:8px}}.incident-timeline{{height:4px;margin:10px 0;background:var(--accent);border-radius:4px}}table{{width:100%;border-collapse:collapse;font-size:13px}}th,td{{padding:7px;border-bottom:1px solid var(--line);text-align:left}}code{{overflow-wrap:anywhere}}nav{{display:flex;gap:8px}}button{{padding:10px 12px;border:0;border-radius:10px;background:var(--accent);color:#fff;font-weight:700}}
-@media(max-width:520px){{main{{padding:12px}}.keyframes{{gap:5px}}.timeline li{{grid-template-columns:58px 1fr}}.review li div{{display:block}}.review-status{{display:block;text-align:left}}}}
-@media print{{body{{background:white;color:black}}.screen-only{{display:none!important}}section,details{{border:1px solid #bbb;break-inside:avoid}}.keyframes{{grid-template-columns:repeat(3,1fr)}}details{{display:block}}}}
+header{{padding:8px 4px 14px}}header p{{margin:0;color:var(--muted)}}h1{{margin:4px 0 2px;font-size:28px}}h2{{margin:0 0 10px;font-size:18px}}section,details{{margin:0 0 12px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px}}summary{{cursor:pointer;font-size:18px;font-weight:700}}img,video{{width:100%;border-radius:12px}}.keyframes{{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}}figure{{margin:0}}figcaption{{margin-top:5px;text-align:center;color:var(--muted);font-size:12px}}.summary{{border-left:4px solid var(--accent)}}.timeline{{list-style:none;margin:0;padding:0}}.timeline li{{display:grid;grid-template-columns:64px 1fr;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}}.timeline time{{color:var(--accent);font-weight:800}}.limitations{{background:var(--warn)}}.review{{list-style:none;margin:14px 0 0;padding:0}}.review li{{padding:10px 0;border-top:1px solid var(--line)}}.review li div{{display:flex;justify-content:space-between;gap:12px}}.review li p{{margin:4px 0 0;color:var(--muted)}}.review-status{{color:var(--accent);font-size:12px;font-weight:700;text-align:right}}.emergency-grid{{display:grid;grid-template-columns:1fr 1fr;gap:8px}}.emergency-grid p{{margin:0;padding:12px;border-radius:12px;background:var(--soft);text-align:center;font-size:17px;font-weight:800}}.object-chart{{display:grid;gap:8px;margin:12px 0}}.object-chart>div{{display:grid;grid-template-columns:100px 1fr 32px;align-items:center;gap:8px}}.object-chart>div i{{display:block;height:10px;background:var(--accent);border-radius:8px}}.incident-timeline{{position:relative;height:8px;margin:10px 0;background:#d7e0ed;border-radius:8px}}.incident-marker{{position:absolute;top:-4px;width:3px;height:16px;background:var(--accent)}}.video-cue{{margin-top:10px}}.video-cue p{{margin:0;color:var(--muted);font-size:13px}}table{{width:100%;border-collapse:collapse;font-size:13px}}th,td{{padding:7px;border-bottom:1px solid var(--line);text-align:left}}code{{overflow-wrap:anywhere}}nav{{display:flex;gap:8px}}button{{padding:10px 12px;border:0;border-radius:10px;background:var(--accent);color:#fff;font-weight:700}}
+@media(max-width:700px){{main{{padding:12px}}.keyframes,.emergency-grid{{grid-template-columns:1fr}}.timeline li{{grid-template-columns:58px 1fr}}.review li div{{display:block}}.review-status{{display:block;text-align:left}}}}
+@media print{{body{{background:white;color:black}}.screen-only{{display:none!important}}section,details{{border:1px solid #bbb;break-inside:avoid}}.keyframes{{grid-template-columns:repeat(3,1fr)}}details{{display:block}}details:not([open])>:not(summary){{display:block!important}}}}
 </style></head><body><main>
 <header><p>DashPi · SHA-256 무결성 검증 완료</p><h1>사고 분석 리포트</h1><p>{html.escape(str(report["triggered_at"]))}</p></header>
-<section class="screen-only" data-section="video"><video controls preload="metadata" src="{video_source}"></video></section>
+<section class="screen-only" data-section="video"><video controls preload="metadata" src="{video_source}"></video><div class="video-cue"><p>사고 순간 · 전송 영상 {incident_video_seconds:.1f}초 지점</p><div class="incident-timeline"><i class="incident-marker" style="left:{incident_percent:.2f}%"></i></div></div></section>
 <section class="keyframes" data-section="keyframes">{keyframes}</section>
 <section class="summary" data-section="summary"><h2>AI 핵심 요약</h2><p>{html.escape(str(report["summary"]))}</p></section>
-<section data-section="timeline"><h2>사실 타임라인</h2><div class="incident-timeline"></div><ol class="timeline">{observation_markup}</ol></section>
+<section data-section="timeline"><h2>사실 타임라인</h2><ol class="timeline">{observation_markup}</ol></section>
 <section class="limitations" data-section="limitations"><h2>확인할 수 없는 내용</h2><p>45초 전체의 표본 프레임과 사고 주변 프레임을 분석했습니다. GPS, 실제 속도와 충격량은 측정되지 않았습니다.</p>{warning_markup}</section>
 <details data-section="major-negligence"><summary>12대 중과실 관련 확인 항목</summary><p>법적 판정이 아닌 영상 사실 정리입니다.</p><ul class="review">{review_markup}</ul></details>
 <section data-section="emergency"><h2>긴급 번호</h2><div class="emergency-grid"><p>119 · 구급/소방</p><p>112 · 경찰</p></div></section>

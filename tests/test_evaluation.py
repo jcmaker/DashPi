@@ -4,6 +4,7 @@ import urllib.error
 import pytest
 
 from dashpi.ai_client import AnalysisError, RetryableAnalysisError
+from dashpi.analysis import FRAME_COUNT
 from dashpi.evaluation import Case, call_cost, fetch_prices, load_cases, max_cost, run, score, summary_table
 from dashpi.reports import NEGLIGENCE_ITEMS
 from tests.media_factory import make_video
@@ -73,6 +74,7 @@ def test_eval_command_asks_before_spending(tmp_path, monkeypatch, capsys):
 def test_run_continues_after_a_failed_model_call(tmp_path):
     clip = make_video(tmp_path / "clip.mp4", 6)
     case = Case("a", clip, {"incident_timestamp": 1.0})
+    observed_image_counts = []
 
     class FakeClient:
         def complete(self, model, messages, name, schema, max_tokens):
@@ -82,6 +84,9 @@ def test_run_continues_after_a_failed_model_call(tmp_path):
                 return ({"incident_timestamp": 1.0, "confidence": 0.9, "reason": "r"},
                         {"prompt_tokens": 10, "completion_tokens": 5})
             if name == "observe":
+                observed_image_counts.append(sum(
+                    part["type"] == "image_url" for part in messages[1]["content"]
+                ))
                 review = {
                     key: {"status": "not_determinable", "evidence": "없음", "timestamp": None}
                     for key, _label in NEGLIGENCE_ITEMS
@@ -104,6 +109,7 @@ def test_run_continues_after_a_failed_model_call(tmp_path):
     errors = [row for row in rows if "error" in row]
     successes = [row for row in rows if "error" not in row]
     assert len(rows) == 3
+    assert observed_image_counts and observed_image_counts[0] > FRAME_COUNT
     assert len(errors) == 2 and len(successes) == 1
     assert successes[0]["vision_model"] == "good-vision" and successes[0]["report_model"] == "good-report"
     assert successes[0]["usage"] == {"locate": {"prompt_tokens": 10, "completion_tokens": 5},
