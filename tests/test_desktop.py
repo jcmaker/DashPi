@@ -528,12 +528,16 @@ def test_double_start_tap_does_not_prepare_camera_twice(qapp, tmp_path):
         window.close()
 
 
-def test_bad_settings_do_not_trap_window_in_starting_state(qapp, tmp_path):
-    from dashpi.desktop import DashPiWindow
+def test_a_failed_start_does_not_trap_window_in_starting_state(qapp, tmp_path, monkeypatch):
+    import dashpi.desktop as desktop
 
     path = tmp_path / "settings.json"
-    window = DashPiWindow(FakeSession(), IncidentStore(tmp_path), path)
-    path.write_text("not json")
+    window = desktop.DashPiWindow(FakeSession(), IncidentStore(tmp_path), path)
+
+    def unreadable(_path):
+        raise PermissionError("settings unreadable")
+
+    monkeypatch.setattr(desktop, "load_settings", unreadable)
     try:
         window._begin("drive")
         assert not window._starting

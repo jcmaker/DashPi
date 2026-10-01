@@ -138,3 +138,39 @@ def test_delete_removes_a_finished_incident_but_not_one_being_processed(tmp_path
 
     assert not store.directory("done").exists()
     assert store.load("busy").state is IncidentState.ANALYZING
+
+
+def test_atomic_write_also_syncs_the_directory_so_the_rename_survives_power_loss(tmp_path, monkeypatch):
+    import os
+    import stat as stat_module
+
+    synced = []
+    real_fsync = os.fsync
+    monkeypatch.setattr(os, "fsync", lambda fd: (synced.append(stat_module.S_ISDIR(os.fstat(fd).st_mode)), real_fsync(fd)))
+    atomic_write(tmp_path / "metadata.json", b"{}")
+    assert synced == [False, True]  # the file's bytes, then the directory entry that names it
+
+
+def test_capture_cut_short_by_a_restart_becomes_a_visible_clip_failure(tmp_path):
+    from datetime import UTC, datetime
+
+    store = IncidentStore(tmp_path)
+    now = datetime.now(UTC).isoformat()
+    for incident_id, state in [("collecting", IncidentState.COLLECTING_POST_TRIGGER),
+                               ("clipping", IncidentState.CLIPPING), ("done", IncidentState.READY),
+                               ("analyzing", IncidentState.ANALYZING)]:
+        item = IncidentMetadata.new(incident_id, now, 100.0, 15.0)
+        item.transition(state, now)
+        store.save(item)
+    leftover = tmp_path / "raw" / "session" / "segments.csv.partial"
+    leftover.parent.mkdir(parents=True)
+    leftover.write_text("cut off")
+
+    assert sorted(store.recover_interrupted_capture(now)) == ["clipping", "collecting"]
+
+    assert store.load("collecting").state is IncidentState.CLIP_FAILED
+    assert "앱이 종료" in store.load("clipping").failure_reason
+    assert store.load("done").state is IncidentState.READY
+    assert store.load("analyzing").state is IncidentState.ANALYZING  # the analysis retrier owns this one
+    assert {item.incident_id for item in store.list()} >= {"collecting", "clipping"}  # now listed and deletable
+    assert not leftover.exists()

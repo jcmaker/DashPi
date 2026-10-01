@@ -39,6 +39,12 @@ def atomic_write(path: Path, data: bytes) -> FileArtifact:
         os.fsync(output.fileno())
     digest, byte_length = sha256_file(partial), partial.stat().st_size
     partial.replace(path)
+    # Without syncing the directory the rename itself can be lost on power loss.
+    directory = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
     return FileArtifact(path, byte_length, digest)
 
 
@@ -139,6 +145,19 @@ class IncidentStore:
             key=lambda item: item.triggered_at,
             reverse=True,
         )
+
+    def recover_interrupted_capture(self, now: str) -> list[str]:
+        """Run once at startup, before anything records: nothing can still be writing."""
+        self.cleanup_stale_partials(set())
+        recovered = []
+        for item in self.list(states={IncidentState.COLLECTING_POST_TRIGGER, IncidentState.CLIPPING}):
+            # The post-trigger window lived only in the old process, so the clip cannot be finished;
+            # left as-is the incident was hidden from 녹화기록 and could never be deleted.
+            item.transition(IncidentState.CLIP_FAILED, now,
+                            "앱이 종료되어 사고 영상을 만들지 못했습니다. 원본 녹화는 녹화기록에 남아 있습니다.")
+            self.save(item)
+            recovered.append(item.incident_id)
+        return recovered
 
     def cleanup_stale_partials(self, active: set[Path]) -> list[Path]:
         removed = []
