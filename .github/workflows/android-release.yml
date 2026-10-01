@@ -1,7 +1,7 @@
 name: Release Android app
 
 # Push a tag like `app-v1.0.1` to publish a signed DashPi.apk as a GitHub Release.
-# Installed apps find it through the Releases API and offer the update.
+# Pages republishes it with a version manifest before installed apps offer the update.
 on:
   push:
     tags: ['app-v*']

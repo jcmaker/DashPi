@@ -70,6 +70,7 @@ jobs:
           actual=$(grep -m1 'SHA-256 digest' "$RUNNER_TEMP/certs.txt" | awk '{print $NF}')
           test "$actual" = "$EXPECTED_CERT_SHA256" || { echo "::error::APK signed with $actual, expected $EXPECTED_CERT_SHA256"; exit 1; }
           cp "$apk_dir/DashPi.apk" _site/receiver/DashPi.apk
+          printf '{"version":"%s"}\n' "${tag#app-v}" > _site/receiver/version.json
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
