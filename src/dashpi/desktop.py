@@ -16,6 +16,7 @@ import shutil
 import sys
 import threading
 import time
+import traceback
 from collections import deque
 
 from PySide6.QtCore import Qt, QtMsgType, QLockFile, QPointF, QRect, QRectF, QTimer, QUrl, QSize, qInstallMessageHandler
@@ -59,9 +60,21 @@ def setup_logging(root: Path) -> Path:
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(threadName)s: %(message)s"))
     logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
 
-    def uncaught(kind, value, traceback):
-        log.critical("처리되지 않은 오류", exc_info=(kind, value, traceback))
-        sys.__excepthook__(kind, value, traceback)
+    repeat = {"key": None, "count": 0}
+
+    def uncaught(kind, value, tb):
+        # A Qt slot failing on every event loop pass once wrote 380 MB of identical tracebacks in
+        # seven minutes; log the first in full and only a running count after that.
+        last = traceback.extract_tb(tb)[-1:] if tb else []
+        key = (kind, str(value), tuple((frame.filename, frame.lineno) for frame in last))
+        if key == repeat["key"]:
+            repeat["count"] += 1
+            if repeat["count"] in (10, 100) or repeat["count"] % 1000 == 0:
+                log.critical("같은 오류 %d번 반복: %s: %s", repeat["count"], kind.__name__, value)
+            return
+        repeat.update(key=key, count=1)
+        log.critical("처리되지 않은 오류", exc_info=(kind, value, tb))
+        sys.__excepthook__(kind, value, tb)
 
     sys.excepthook = uncaught
     threading.excepthook = lambda args: log.critical(
@@ -606,6 +619,11 @@ class DashPiWindow(QMainWindow):
 
     def _poll(self):
         recording = self.session.recorder.recording
+        if (self._preview_widget is not None and not recording and not self._starting
+                and getattr(self.session.recorder, "picam2", True) is None):
+            # The camera closed under the preview (a stop, or a capture failure on the worker thread).
+            # Left in place, the preview kept reading the closed camera's notifier in a tight loop.
+            self._release_camera()
         self.record_heading.setText("● REC" if recording else "DashPi")
         if self.record_heading.objectName() != ("rec" if recording else "title"):
             self.record_heading.setObjectName("rec" if recording else "title")
