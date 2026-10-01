@@ -1266,3 +1266,24 @@ def test_a_repeating_uncaught_error_is_logged_once_with_a_count(tmp_path, monkey
         assert "ValueError: something else" in text
     finally:
         qInstallMessageHandler(None)
+
+
+def test_detail_video_gets_real_room_on_the_800x480_lcd(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    window = DashPiWindow(FakeSession(), IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        window.showNormal()
+        window.setFixedSize(800, 480)
+        for name in ("annotated.mp4", "clip.mp4", "000001.mp4"):
+            window.segment_list.addItem(name)
+        window.report_text.setText("요약\n" * 12)
+        window.pages.setCurrentWidget(window.detail_page)
+        qapp.processEvents()
+        # Stacked under the list and report, the video got 0px and footage played invisibly.
+        assert window.video.height() >= 200 and window.video.width() >= 350
+        corner = window.video.mapTo(window, window.video.rect().bottomRight())
+        assert corner.x() < 800 and corner.y() < 480
+        assert window.minimumSizeHint().height() <= 480
+    finally:
+        window.close()
