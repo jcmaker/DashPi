@@ -45,6 +45,7 @@ def _validate_review(raw: object, clip_duration: float) -> dict:
         if (
             not isinstance(item, dict)
             or set(item) != {"status", "evidence", "timestamp"}
+            or not isinstance(item["status"], str)
             or item["status"] not in NEGLIGENCE_STATUSES
             or not isinstance(item["evidence"], str)
         ):

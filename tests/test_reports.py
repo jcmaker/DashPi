@@ -72,6 +72,25 @@ def test_nonvisual_review_items_are_never_reported_as_observed():
         }
 
 
+def test_report_rejects_non_string_review_status():
+    value = negligence_review()
+    value["signal"]["status"] = []
+    with pytest.raises(ValueError, match="major negligence review"):
+        validate_report(
+            {
+                "incident_timestamp": 2.5,
+                "summary": "x",
+                "observations": [],
+                "limitations": [],
+                "major_negligence_review": value,
+            },
+            "0" * 64,
+            "model",
+            "now",
+            5.0,
+        )
+
+
 def test_report_binds_model_and_source_digest():
     report = validate_report(
         {
