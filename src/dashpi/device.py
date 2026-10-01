@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from io import StringIO
 import json
+import logging
 import math
 from pathlib import Path
 import shutil
@@ -19,6 +20,8 @@ import uuid
 from dashpi.models import Segment
 from dashpi.media import probe_duration
 from dashpi.storage import atomic_write
+
+log = logging.getLogger("dashpi")
 
 
 @dataclass(frozen=True)
@@ -49,11 +52,17 @@ class VideoSettings:
 def load_settings(path: Path) -> VideoSettings:
     if not path.exists():
         return VideoSettings()
-    raw = json.loads(path.read_text())
-    if type(raw) is not dict:
-        raise ValueError("invalid device settings")
-    raw.pop("ollama_model", None)  # pre-OpenRouter settings: fall back to the new default models
-    return VideoSettings(**raw)
+    try:
+        raw = json.loads(path.read_text())
+        if type(raw) is not dict:
+            raise ValueError("invalid device settings")
+        raw.pop("ollama_model", None)  # pre-OpenRouter settings: fall back to the new default models
+        return VideoSettings(**raw)
+    except (OSError, ValueError, TypeError) as error:
+        # A power cut on the SD card can leave this file empty; a dashcam that refuses to start
+        # over it loses more than the settings, so record with defaults until the next save.
+        log.error("설정 파일을 읽을 수 없어 기본값으로 실행합니다: %s (%s)", path, error)
+        return VideoSettings()
 
 
 def save_settings(path: Path, settings: VideoSettings) -> None:

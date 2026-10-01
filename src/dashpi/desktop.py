@@ -1233,6 +1233,8 @@ def main():
         log.info("DashPi 이미 실행 중 — 새 실행을 건너뜀")
         return
     log.info("DashPi 시작 (data root: %s)", root)
+    for incident_id in IncidentStore(root).recover_interrupted_capture(datetime.now(UTC).isoformat()):
+        log.warning("중단된 사고 수집 정리: %s", incident_id)
     current = load_settings(root / "settings.json")
     app = QApplication([])
     worker = AnalysisWorker()

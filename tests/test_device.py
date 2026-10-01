@@ -107,3 +107,14 @@ def test_recording_time_starts_at_first_camera_segment(tmp_path):
     recorder.stop()
 
     assert recorder.start_mono >= before + 0.4
+
+
+@pytest.mark.parametrize("content", ["", "{not json", "[]", '{"width": 1280, "unknown_key": 1}'])
+def test_damaged_settings_fall_back_to_defaults_instead_of_stopping_the_app(tmp_path, content, caplog):
+    from dashpi.device import VideoSettings, load_settings
+
+    path = tmp_path / "settings.json"
+    path.write_text(content)  # e.g. emptied by a power cut on the SD card
+    assert load_settings(path) == VideoSettings()
+    assert "설정 파일을 읽을 수 없어 기본값" in caplog.text
+    assert path.read_text() == content  # left in place for inspection; the next save replaces it
