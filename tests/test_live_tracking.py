@@ -94,3 +94,43 @@ else:
     raise AssertionError('missing dependency was not reported')
 '''
     subprocess.run([sys.executable, '-c', f'import sys; sys.path = {sys.path!r}\n' + script], check=True)
+
+
+def test_worker_stop_discards_slow_inference_result():
+    import threading
+    import time
+    from dashpi.live_tracking import TrackingWorker
+    entered, finish = threading.Event(), threading.Event()
+    def detector(frame):
+        entered.set()
+        finish.wait(2)
+        return []
+    class Tracker:
+        def update(self, detections):
+            return detections
+    worker = TrackingWorker(lambda stop: np.zeros((360, 640, 3), dtype=np.uint8),
+                            detector, Tracker(), 10)
+    worker.start()
+    assert entered.wait(1)
+    stopping = threading.Thread(target=worker.stop)
+    stopping.start()
+    time.sleep(.02)
+    assert stopping.is_alive()
+    finish.set()
+    stopping.join(1)
+    assert not stopping.is_alive()
+    assert worker.snapshot() == (None, None)
+    assert not worker.thread.is_alive()
+
+
+def test_worker_inference_failure_is_reported_without_result():
+    from dashpi.live_tracking import TrackingWorker
+    def fail(frame):
+        raise ValueError('inference failed')
+    worker = TrackingWorker(lambda stop: np.zeros((1, 1, 3), dtype=np.uint8), fail,
+                            LiveTracker())
+    worker.start()
+    worker.thread.join(1)
+    assert not worker.thread.is_alive()
+    assert worker.snapshot() == (None, 'inference failed')
+    worker.stop()

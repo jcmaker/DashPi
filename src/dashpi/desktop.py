@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 import faulthandler
 import json
 import logging
+import math
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 import secrets
@@ -247,6 +248,8 @@ class DashPiWindow(QMainWindow):
         self._starting = False
         self._recording_mode = "drive"
         self._preview_widget = None
+        self._tracking_overlay_visible = False
+        self._tracking_error_reported = None
         self.optical_session: OpticalSession | None = None
         self._optical_sequence = 0
         self._optical_generation = 0
@@ -550,6 +553,7 @@ class DashPiWindow(QMainWindow):
             self._release_camera()
 
     def _release_camera(self):
+        self._clear_tracking_overlay()
         if self._preview_widget is not None:
             self.preview_layout.removeWidget(self._preview_widget)
             self._preview_widget.close()
@@ -579,6 +583,8 @@ class DashPiWindow(QMainWindow):
         self._submit(lambda: self.session.stop(pressed_at), self._stopped)
 
     def _stopped(self, future: Future):
+        if not self.session.recorder.recording:
+            self._clear_tracking_overlay()
         if not self._report_error(future):
             return
         if future.result():
@@ -634,6 +640,35 @@ class DashPiWindow(QMainWindow):
                     self.show_home()
         if self.session.recorder.recording and self._tick_future is None:
             self._tick_future = self._executor.submit(lambda: self.session.tick(time.monotonic()))
+        self._poll_tracking()
+
+    def _clear_tracking_overlay(self):
+        if self._tracking_overlay_visible and self._preview_widget is not None:
+            self._preview_widget.set_overlay(None)
+        self._tracking_overlay_visible = False
+
+    def _poll_tracking(self):
+        recorder = self.session.recorder
+        if not recorder.recording:
+            self._clear_tracking_overlay()
+            self._tracking_error_reported = None
+            return
+        worker = getattr(recorder, "tracking_worker", None)
+        result, error = worker.snapshot() if worker is not None else (None, None)
+        error = error or getattr(recorder, "tracking_error", None)
+        if error and error != self._tracking_error_reported:
+            self._tracking_error_reported = error
+            log.warning("추적 중단: %s", error)
+            self.record_status.setText(self.record_status.text() + f" · 추적 중단: {error}")
+        if result is None or time.monotonic() - result[0] > 1:
+            self._clear_tracking_overlay()
+            return
+        if self._preview_widget is not None:
+            from dashpi.live_tracking import render_overlay
+            _, (height, width), tracks = result
+            # Picamera2 scales its RGBA texture with the camera image, independent of widget size.
+            self._preview_widget.set_overlay(render_overlay(width, height, tracks))
+            self._tracking_overlay_visible = True
 
     def _report_error(self, future: Future) -> bool:
         try:
@@ -1205,7 +1240,16 @@ class DashPiWindow(QMainWindow):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-root", type=Path, default=Path.home() / ".local/share/dashpi")
+    parser.add_argument("--tracking-model", type=Path)
+    parser.add_argument("--tracking-fps", type=float, default=10)
+    parser.add_argument("--tracking-confidence", type=float, default=.10)
+    parser.add_argument("--tracking-activation", type=float, default=.45)
     args = parser.parse_args()
+    if (not all(math.isfinite(value) for value in
+                (args.tracking_fps, args.tracking_confidence, args.tracking_activation))
+            or args.tracking_fps <= 0 or not 0 <= args.tracking_confidence < 1
+            or not 0 < args.tracking_activation < 1):
+        parser.error("invalid tracking thresholds or FPS")
     root = args.data_root
     setup_logging(root)
     # 원격 접속처럼 느린 화면에서 아이콘을 여러 번 누르면 전체화면 창이 겹쳐 떠서
@@ -1218,7 +1262,10 @@ def main():
     current = load_settings(root / "settings.json")
     app = QApplication([])
     worker = AnalysisWorker()
-    recorder = PiCameraRecorder(root, current)
+    recorder = PiCameraRecorder(root, current, tracking_model=args.tracking_model,
+                                tracking_fps=args.tracking_fps,
+                                tracking_confidence=args.tracking_confidence,
+                                tracking_activation=args.tracking_activation)
     settings = Settings(root, current.ai_model, current.ai_report_model)
     session = DeviceSession(recorder, settings, IncidentStore(root), worker,
                             build_analyzer(settings.ai_model, settings.ai_report_model, root))

@@ -376,3 +376,15 @@ DashPi/
 ## 라이선스
 
 현재 저장소에는 라이선스가 지정되어 있지 않습니다. 별도 라이선스가 추가되기 전까지 소스 코드의 사용·수정·재배포 권한이 자동으로 부여되지는 않습니다.
+
+Pi 프리뷰 실시간 추적은 명시적으로 모델을 지정할 때만 켜집니다:
+
+```bash
+python -m dashpi.desktop --tracking-model /path/to/yolov8n.onnx \
+  --tracking-fps 10 --tracking-confidence 0.10 --tracking-activation 0.45
+```
+
+`dashpi[tracking]` 설치가 필요합니다. supervision 0.27의 SciPy 호환성을 위해
+`scipy>=1.10,<1.18`을 사용합니다. 640×360 lores 프레임을 단일 작업자가
+처리하며 FPS는 상한입니다. 박스·클래스·ID는 프리뷰에만 표시하고 원본 MP4는
+그대로 저장합니다. 1초 지난 결과는 지우며 모델/추론 실패는 추적만 중단합니다.

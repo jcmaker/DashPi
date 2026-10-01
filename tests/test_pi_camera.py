@@ -251,3 +251,101 @@ def test_split_times_out_instead_of_hanging_when_camera_frames_stop(fake_picamer
             recorder.split()
     finally:
         never.set()
+
+
+def test_tracking_failure_keeps_single_camera_recording(fake_picamera2, monkeypatch, tmp_path):
+    from dashpi.device import VideoSettings
+    from dashpi.pi_camera import PiCameraRecorder
+    state, _ = fake_picamera2
+    monkeypatch.setattr('dashpi.pi_camera.probe_duration', lambda path: 2.)
+    def fail(*args, **kwargs):
+        raise ValueError('bad model')
+    monkeypatch.setattr('dashpi.vision.YoloDetector', fail)
+    recorder = PiCameraRecorder(tmp_path, VideoSettings(), tracking_model=tmp_path / 'bad.onnx')
+    recorder.prepare()
+    assert recorder.picam2.configuration['lores'] == {'size': (640, 360), 'format': 'YUV420'}
+    recorder.create_preview()
+    recorder.start('drive')
+    assert recorder.recording and recorder.tracking_error == 'bad model'
+    assert len(recorder.split()) == 1
+    recorder.stop()
+    recorder.release()
+    assert state.created == state.started == state.closed == 1
+    assert recorder.tracking_worker is None
+
+
+def test_tracking_frame_is_copied_and_released_before_conversion(fake_picamera2, monkeypatch, tmp_path):
+    import numpy as np
+    import threading
+    from dashpi.device import VideoSettings
+    from dashpi.pi_camera import PiCameraRecorder
+    source = np.zeros((540, 640), dtype=np.uint8)
+    released = []
+    request = SimpleNamespace(make_array=lambda stream: source,
+                              release=lambda: released.append(True))
+    recorder = PiCameraRecorder(tmp_path, VideoSettings())
+    recorder.prepare()
+    def capture(**kwargs):
+        kwargs["signal_function"](SimpleNamespace(get_result=lambda: request))
+    recorder.picam2.capture_request = capture
+    def convert(data, code):
+        assert released == [True]
+        assert not np.shares_memory(source, data)
+        return np.zeros((360, 640, 3), dtype=np.uint8)
+    monkeypatch.setattr('cv2.cvtColor', convert)
+    assert recorder.read_tracking_frame(threading.Event()).shape == (360, 640, 3)
+    recorder.release()
+
+
+def test_stalled_capture_stop_cancels_job_before_close(fake_picamera2, tmp_path):
+    import threading
+    import time
+    from concurrent.futures import Future
+    from dashpi.device import VideoSettings
+    from dashpi.pi_camera import PiCameraRecorder
+    from dashpi.live_tracking import TrackingWorker
+    recorder = PiCameraRecorder(tmp_path, VideoSettings())
+    recorder.prepare()
+    pending = Future()
+    called = threading.Event()
+    def capture(**kwargs):
+        called.set()
+        return SimpleNamespace(get_result=pending.result)
+    recorder.picam2.capture_request = capture
+    cancelled = []
+    def cancel():
+        cancelled.append(True)
+        pending.set_exception(RuntimeError('cancelled'))
+    recorder.picam2.cancel_all_and_flush = cancel
+    recorder.tracking_worker = TrackingWorker(recorder.read_tracking_frame, lambda frame: [], None)
+    worker = recorder.tracking_worker
+    worker.start()
+    assert called.wait(1)
+    started = time.monotonic()
+    recorder.release()
+    assert time.monotonic() - started < .5
+    assert cancelled == [True]
+    assert not worker.thread.is_alive()
+
+
+def test_completed_capture_callback_releases_even_after_cancel_race(fake_picamera2, tmp_path):
+    import threading
+    from dashpi.device import VideoSettings
+    from dashpi.pi_camera import PiCameraRecorder
+    recorder = PiCameraRecorder(tmp_path, VideoSettings())
+    recorder.prepare()
+    signal = []
+    stop = threading.Event()
+    def capture(**kwargs):
+        signal.append(kwargs['signal_function'])
+        stop.set()
+    recorder.picam2.capture_request = capture
+    recorder.picam2.cancel_all_and_flush = lambda: None
+    assert recorder.read_tracking_frame(stop) is None
+    released = []
+    def forbidden(stream):
+        raise AssertionError('stopped capture must not copy/infer')
+    request = SimpleNamespace(make_array=forbidden, release=lambda: released.append(True))
+    signal[0](SimpleNamespace(get_result=lambda: request))
+    assert released == [True]
+    recorder.release()

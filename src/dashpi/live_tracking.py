@@ -76,3 +76,49 @@ def render_overlay(width: int, height: int, detections: list[dict]) -> np.ndarra
             .45, color, 1, cv2.LINE_AA,
         )
     return overlay
+
+
+class TrackingWorker:
+    """One capture/inference thread and a replaceable, timestamped result slot."""
+
+    def __init__(self, read_frame, detector, tracker, fps=10):
+        import threading
+        self.read_frame, self.detector, self.tracker = read_frame, detector, tracker
+        self.interval = 1 / fps
+        self.stop_event = threading.Event()
+        self.lock = threading.Lock()
+        self.result = self.error = None
+        self.thread = threading.Thread(target=self._run, name='dashpi-tracking', daemon=True)
+
+    def start(self):
+        self.thread.start()
+
+    def snapshot(self):
+        with self.lock:
+            return self.result, self.error
+
+    def stop(self):
+        self.stop_event.set()
+        self.thread.join()
+        with self.lock:
+            self.result = self.error = None
+
+    def _run(self):
+        import time
+        try:
+            while not self.stop_event.is_set():
+                started = time.monotonic()
+                frame = self.read_frame(self.stop_event)
+                if frame is None or self.stop_event.is_set():
+                    break
+                captured = time.monotonic()
+                tracks = self.tracker.update(self.detector(frame))
+                with self.lock:
+                    if not self.stop_event.is_set():
+                        self.result = (captured, frame.shape[:2], tracks)
+                self.stop_event.wait(max(0, self.interval - (time.monotonic() - started)))
+        except Exception as error:
+            with self.lock:
+                if not self.stop_event.is_set():
+                    self.error = str(error)
+                    self.result = None

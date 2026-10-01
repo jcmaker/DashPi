@@ -19,7 +19,10 @@ from dashpi.storage import atomic_write
 
 
 class PiCameraRecorder:
-    def __init__(self, root: Path, settings: VideoSettings, segment_seconds: float = 2.0):
+    def __init__(self, root: Path, settings: VideoSettings, segment_seconds: float = 2.0, *,
+                 tracking_model: Path | None = None,
+                 tracking_fps: float = 10, tracking_confidence: float = .10,
+                 tracking_activation: float = .45):
         self.root, self.settings, self.segment_seconds = root, settings, segment_seconds
         # A split waits for the next natural keyframe (one GOP = segment_seconds); longer means frames stopped.
         self.split_timeout = max(5.0, segment_seconds * 3)
@@ -38,6 +41,12 @@ class PiCameraRecorder:
         self.recording = False
         self.current_path: Path | None = None
         self._next_index = 0
+        self.tracking_model = tracking_model
+        self.tracking_fps = tracking_fps
+        self.tracking_confidence = tracking_confidence
+        self.tracking_activation = tracking_activation
+        self.tracking_worker = None
+        self.tracking_error = None
 
     def prepare(self) -> None:
         if self.picam2 is not None:
@@ -60,6 +69,8 @@ class PiCameraRecorder:
             configuration = camera.create_video_configuration(
                 main={"size": (self.settings.width, self.settings.height)},
                 controls={"FrameRate": self.settings.fps},
+                **({"lores": {"size": (640, 360), "format": "YUV420"}}
+                   if self.tracking_model is not None else {}),
             )
             camera.configure(configuration)
             camera.set_controls({"Brightness": self.settings.brightness})
@@ -75,6 +86,7 @@ class PiCameraRecorder:
         return self._preview
 
     def release(self) -> None:
+        self.stop_tracking()
         if self.recording:
             raise RuntimeError("cannot release a recording camera")
         if self.picam2 is not None:
@@ -129,6 +141,8 @@ class PiCameraRecorder:
             self.picam2 = None
             raise
 
+        self.start_tracking()
+
     def split(self) -> list[Segment]:
         if not self.recording:
             raise RuntimeError("recording is not active")
@@ -164,6 +178,7 @@ class PiCameraRecorder:
             raise errors[0]
 
     def stop(self, *, allow_empty_tail: bool = False) -> list[Segment]:
+        self.stop_tracking()
         if not self.recording:
             return list(self.segments)
         self.recording = False
@@ -184,6 +199,62 @@ class PiCameraRecorder:
             self._preview = None
             self.current_path = None
         return list(self.segments)
+
+    def start_tracking(self):
+        self.tracking_error = None
+        if self.tracking_model is None:
+            return
+        try:
+            from dashpi.live_tracking import LiveTracker, TrackingWorker
+            from dashpi.vision import YoloDetector
+            detector = YoloDetector(self.tracking_model, confidence=self.tracking_confidence)
+            tracker = LiveTracker(self.tracking_fps, self.tracking_activation)
+            worker = TrackingWorker(self.read_tracking_frame, detector, tracker, self.tracking_fps)
+            worker.start()
+            self.tracking_worker = worker
+        except Exception as error:
+            self.tracking_error = str(error)
+
+    def stop_tracking(self):
+        if self.tracking_worker is not None:
+            self.tracking_worker.stop()
+            self.tracking_worker = None
+
+    def read_tracking_frame(self, stop_event):
+        """Bounded capture wait; release the request before inference."""
+        import cv2
+        camera = self.picam2
+        done = threading.Event()
+        captured, errors = [], []
+
+        def completed(job):
+            try:
+                request = job.get_result()
+                try:
+                    if not stop_event.is_set():
+                        captured.append(request.make_array("lores").copy())
+                finally:
+                    request.release()
+            except Exception as error:
+                errors.append(error)
+            finally:
+                done.set()
+
+        camera.capture_request(wait=False, signal_function=completed)
+        deadline = time.monotonic() + 1
+        while not done.wait(.05):
+            if stop_event.is_set() or time.monotonic() >= deadline:
+                camera.cancel_all_and_flush()
+                # A completed job can be between dequeue and signal. Its callback
+                # still owns and releases the request after this waiter exits.
+                if stop_event.is_set():
+                    return None
+                raise TimeoutError("tracking camera frame timed out")
+        if errors:
+            raise errors[0]
+        if stop_event.is_set() or not captured:
+            return None
+        return cv2.cvtColor(captured[0], cv2.COLOR_YUV2BGR_I420)
 
     def list_recordings(self) -> list[Recording]:
         recordings = []

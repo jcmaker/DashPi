@@ -1215,3 +1215,31 @@ def test_detail_actions_stay_on_the_lcd_and_the_back_arrow_returns_to_records(qa
         assert window.pages.currentWidget() is window.records_page
     finally:
         window.close()
+
+
+def test_tracking_overlay_is_main_thread_and_cleared_on_stale_and_stop(qapp, tmp_path):
+    import threading
+    from dashpi.desktop import DashPiWindow
+    session = FakeSession()
+    window = DashPiWindow(session, IncidentStore(tmp_path), tmp_path / 'settings.json')
+    calls = []
+    class Preview:
+        def set_overlay(self, overlay):
+            assert threading.current_thread() is threading.main_thread()
+            calls.append(overlay)
+    window._preview_widget = Preview()
+    result = [time.monotonic(), (360, 640), []]
+    session.recorder.tracking_worker = SimpleNamespace(snapshot=lambda: (result, None))
+    session.recorder.recording = True
+    window._poll_tracking()
+    assert calls[-1].shape == (360, 640, 4)
+    result[0] -= 2
+    window._poll_tracking()
+    assert calls[-1] is None
+    result[0] = time.monotonic()
+    window._poll_tracking()
+    session.recorder.recording = False
+    window._poll_tracking()
+    assert calls[-1] is None
+    window._preview_widget = None
+    window.close()
