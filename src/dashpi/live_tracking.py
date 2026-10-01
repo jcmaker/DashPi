@@ -82,6 +82,8 @@ class TrackingWorker:
     """One capture/inference thread and a replaceable, timestamped result slot."""
 
     def __init__(self, read_frame, detector, tracker, fps=10):
+        if not math.isfinite(fps) or not 0 < fps <= 10:
+            raise ValueError("tracking FPS must be finite and between 0 and 10")
         import threading
         self.read_frame, self.detector, self.tracker = read_frame, detector, tracker
         self.interval = 1 / fps

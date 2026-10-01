@@ -285,9 +285,13 @@ def test_tracking_frame_is_copied_and_released_before_conversion(fake_picamera2,
                               release=lambda: released.append(True))
     recorder = PiCameraRecorder(tmp_path, VideoSettings())
     recorder.prepare()
-    def capture(**kwargs):
-        kwargs["signal_function"](SimpleNamespace(get_result=lambda: request))
-    recorder.picam2.capture_request = capture
+    def capture(name, **kwargs):
+        assert name == "lores" and kwargs == {"wait": False}
+        # Picamera2.capture_array performs these operations under its camera lock.
+        data = request.make_array(name).copy()
+        request.release()
+        return SimpleNamespace(get_result=lambda **kwargs: data)
+    recorder.picam2.capture_array = capture
     def convert(data, code):
         assert released == [True]
         assert not np.shares_memory(source, data)
@@ -308,10 +312,10 @@ def test_stalled_capture_stop_cancels_job_before_close(fake_picamera2, tmp_path)
     recorder.prepare()
     pending = Future()
     called = threading.Event()
-    def capture(**kwargs):
+    def capture(name, **kwargs):
         called.set()
         return SimpleNamespace(get_result=pending.result)
-    recorder.picam2.capture_request = capture
+    recorder.picam2.capture_array = capture
     cancelled = []
     def cancel():
         cancelled.append(True)
@@ -328,24 +332,38 @@ def test_stalled_capture_stop_cancels_job_before_close(fake_picamera2, tmp_path)
     assert not worker.thread.is_alive()
 
 
-def test_completed_capture_callback_releases_even_after_cancel_race(fake_picamera2, tmp_path):
+def test_capture_array_completion_race_has_no_request_after_release(fake_picamera2, tmp_path):
     import threading
+    import numpy as np
+    from concurrent.futures import Future
     from dashpi.device import VideoSettings
     from dashpi.pi_camera import PiCameraRecorder
     recorder = PiCameraRecorder(tmp_path, VideoSettings())
     recorder.prepare()
-    signal = []
     stop = threading.Event()
-    def capture(**kwargs):
-        signal.append(kwargs['signal_function'])
+    owned = np.zeros((540, 640), dtype=np.uint8)
+    pending = Future()
+    released = []
+    def capture(name, **kwargs):
+        # A dequeued array job has already copied and released its request.
+        released.append(True)
         stop.set()
-    recorder.picam2.capture_request = capture
+        return SimpleNamespace(get_result=pending.result)
+    recorder.picam2.capture_array = capture
     recorder.picam2.cancel_all_and_flush = lambda: None
     assert recorder.read_tracking_frame(stop) is None
-    released = []
-    def forbidden(stream):
-        raise AssertionError('stopped capture must not copy/infer')
-    request = SimpleNamespace(make_array=forbidden, release=lambda: released.append(True))
-    signal[0](SimpleNamespace(get_result=lambda: request))
-    assert released == [True]
     recorder.release()
+    assert released == [True]
+    pending.set_result(owned)  # Late signal owns only an array, no camera request.
+
+
+@pytest.mark.parametrize('options', [
+    {'tracking_fps': 11}, {'tracking_fps': 0}, {'tracking_fps': float('nan')},
+    {'tracking_confidence': -1}, {'tracking_confidence': float('inf')},
+    {'tracking_activation': 1}, {'tracking_activation': float('nan')},
+])
+def test_recorder_rejects_invalid_tracking_configuration(tmp_path, options):
+    from dashpi.device import VideoSettings
+    from dashpi.pi_camera import PiCameraRecorder
+    with pytest.raises(ValueError):
+        PiCameraRecorder(tmp_path, VideoSettings(), **options)

@@ -7,6 +7,7 @@ from contextlib import suppress
 from datetime import UTC, datetime
 from io import StringIO
 import json
+import math
 from pathlib import Path
 import threading
 import time
@@ -23,6 +24,12 @@ class PiCameraRecorder:
                  tracking_model: Path | None = None,
                  tracking_fps: float = 10, tracking_confidence: float = .10,
                  tracking_activation: float = .45):
+        if not math.isfinite(tracking_fps) or not 0 < tracking_fps <= 10:
+            raise ValueError("tracking FPS must be finite and between 0 and 10")
+        if not math.isfinite(tracking_confidence) or not 0 <= tracking_confidence < 1:
+            raise ValueError("tracking confidence must be finite and between 0 and 1")
+        if not math.isfinite(tracking_activation) or not 0 < tracking_activation < 1:
+            raise ValueError("tracking activation must be finite and between 0 and 1")
         self.root, self.settings, self.segment_seconds = root, settings, segment_seconds
         # A split waits for the next natural keyframe (one GOP = segment_seconds); longer means frames stopped.
         self.split_timeout = max(5.0, segment_seconds * 3)
@@ -224,37 +231,23 @@ class PiCameraRecorder:
         """Bounded capture wait; release the request before inference."""
         import cv2
         camera = self.picam2
-        done = threading.Event()
-        captured, errors = [], []
-
-        def completed(job):
-            try:
-                request = job.get_result()
-                try:
-                    if not stop_event.is_set():
-                        captured.append(request.make_array("lores").copy())
-                finally:
-                    request.release()
-            except Exception as error:
-                errors.append(error)
-            finally:
-                done.set()
-
-        camera.capture_request(wait=False, signal_function=completed)
+        # Picamera2 copies the array and releases the request under its camera lock,
+        # before dequeue/signalling. A late completion owns no camera resources.
+        job = camera.capture_array("lores", wait=False)
         deadline = time.monotonic() + 1
-        while not done.wait(.05):
-            if stop_event.is_set() or time.monotonic() >= deadline:
-                camera.cancel_all_and_flush()
-                # A completed job can be between dequeue and signal. Its callback
-                # still owns and releases the request after this waiter exits.
-                if stop_event.is_set():
-                    return None
-                raise TimeoutError("tracking camera frame timed out")
-        if errors:
-            raise errors[0]
-        if stop_event.is_set() or not captured:
+        while True:
+            try:
+                data = job.get_result(timeout=.05)
+                break
+            except TimeoutError:
+                if stop_event.is_set() or time.monotonic() >= deadline:
+                    camera.cancel_all_and_flush()
+                    if stop_event.is_set():
+                        return None
+                    raise TimeoutError("tracking camera frame timed out")
+        if stop_event.is_set():
             return None
-        return cv2.cvtColor(captured[0], cv2.COLOR_YUV2BGR_I420)
+        return cv2.cvtColor(data, cv2.COLOR_YUV2BGR_I420)
 
     def list_recordings(self) -> list[Recording]:
         recordings = []

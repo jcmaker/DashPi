@@ -134,3 +134,10 @@ def test_worker_inference_failure_is_reported_without_result():
     assert not worker.thread.is_alive()
     assert worker.snapshot() == (None, 'inference failed')
     worker.stop()
+
+
+@pytest.mark.parametrize('fps', [0, -1, 11, float('nan'), float('inf')])
+def test_worker_enforces_finite_ten_hz_maximum(fps):
+    from dashpi.live_tracking import TrackingWorker
+    with pytest.raises(ValueError):
+        TrackingWorker(None, None, None, fps)

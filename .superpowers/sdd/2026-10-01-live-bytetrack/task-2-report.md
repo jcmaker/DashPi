@@ -34,3 +34,18 @@ Worker shutdown deliberately waits for an in-progress synchronous OpenCV inferen
 No physical Pi tests were performed by this implementation agent; parent owns those operations.
 
 Final full suite: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q` → **494 passed, 14 existing warnings, 71.71s**.
+
+## Fix round 1 (review findings)
+
+Addressed all four Important findings and constructor validation:
+
+- Replaced transferred-request callbacks with verified native `capture_array("lores", wait=False)`. Picamera2 copies/release under its camera lock before dequeue; polling and cancellation now deal only with owned arrays. Removed manual callback lifetime machinery and its late-request shutdown concern.
+- Overlay clearing skips a closed camera and resets visibility in `finally`. Exceptions from render/apply/clear are contained, report tracking failure while preserving current status text, and signal only the tracking worker to stop. Failed overlay processing stays disabled until a new recording.
+- CLI, recorder and worker enforce finite FPS in `(0,10]`; recorder also validates confidence/activation ranges at its public constructor.
+- Regression checks enforce the native capture-array contract, late array signal after camera close without retained requests, closed-preview contract, optional overlay failure, status preservation, and invalid runtime values.
+
+RED: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_pi_camera.py tests/test_live_tracking.py tests/test_desktop.py -q` → **17 failed, 82 passed in 29.79s**, before these production fixes (capture API, missing validation, escaped closed-camera/apply errors).
+
+GREEN: same focused command → **99 passed in 28.31s**. Existing fake-MP4 demux diagnostics remain expected in GUI fixtures.
+
+`git diff --check` → clean. Self-review confirms native capture-array ownership eliminates the prior late request-release hazard; recorder shutdown still joins a running synchronous inference as documented. No Pi operations performed.

@@ -250,6 +250,7 @@ class DashPiWindow(QMainWindow):
         self._preview_widget = None
         self._tracking_overlay_visible = False
         self._tracking_error_reported = None
+        self._tracking_overlay_failed = False
         self.optical_session: OpticalSession | None = None
         self._optical_sequence = 0
         self._optical_generation = 0
@@ -544,6 +545,8 @@ class DashPiWindow(QMainWindow):
     def _started(self, future: Future):
         self._starting = False
         if self._report_error(future):
+            self._tracking_overlay_failed = False
+            self._tracking_error_reported = None
             self.record_status.setText("녹화 중")
             self.analyze_button.setEnabled(True)
             self.stop_button.setEnabled(True)
@@ -642,33 +645,56 @@ class DashPiWindow(QMainWindow):
             self._tick_future = self._executor.submit(lambda: self.session.tick(time.monotonic()))
         self._poll_tracking()
 
+    def _tracking_failed(self, error):
+        self._tracking_overlay_failed = True
+        worker = getattr(self.session.recorder, "tracking_worker", None)
+        if worker is not None:
+            worker.stop_event.set()
+        if str(error) != self._tracking_error_reported:
+            self._tracking_error_reported = str(error)
+            log.warning("추적 중단: %s", error)
+            self.record_status.setText(self.record_status.text() + f" · 추적 중단: {error}")
+
     def _clear_tracking_overlay(self):
-        if self._tracking_overlay_visible and self._preview_widget is not None:
-            self._preview_widget.set_overlay(None)
-        self._tracking_overlay_visible = False
+        try:
+            # Closed cameras no longer display their overlay and reject even None.
+            if (self._tracking_overlay_visible and self._preview_widget is not None
+                    and self.session.recorder.picam2 is not None):
+                self._preview_widget.set_overlay(None)
+        except Exception as error:
+            self._tracking_failed(error)
+        finally:
+            self._tracking_overlay_visible = False
 
     def _poll_tracking(self):
         recorder = self.session.recorder
         if not recorder.recording:
             self._clear_tracking_overlay()
             self._tracking_error_reported = None
+            self._tracking_overlay_failed = False
+            return
+        if self._tracking_overlay_failed:
             return
         worker = getattr(recorder, "tracking_worker", None)
         result, error = worker.snapshot() if worker is not None else (None, None)
         error = error or getattr(recorder, "tracking_error", None)
-        if error and error != self._tracking_error_reported:
-            self._tracking_error_reported = error
-            log.warning("추적 중단: %s", error)
-            self.record_status.setText(self.record_status.text() + f" · 추적 중단: {error}")
+        if error:
+            self._tracking_failed(error)
+            self._clear_tracking_overlay()
+            return
         if result is None or time.monotonic() - result[0] > 1:
             self._clear_tracking_overlay()
             return
         if self._preview_widget is not None:
-            from dashpi.live_tracking import render_overlay
-            _, (height, width), tracks = result
-            # Picamera2 scales its RGBA texture with the camera image, independent of widget size.
-            self._preview_widget.set_overlay(render_overlay(width, height, tracks))
-            self._tracking_overlay_visible = True
+            try:
+                from dashpi.live_tracking import render_overlay
+                _, (height, width), tracks = result
+                # Picamera2 scales the texture with the camera image, independent of widget size.
+                self._preview_widget.set_overlay(render_overlay(width, height, tracks))
+                self._tracking_overlay_visible = True
+            except Exception as error:
+                self._tracking_failed(error)
+                self._clear_tracking_overlay()
 
     def _report_error(self, future: Future) -> bool:
         try:
@@ -1247,7 +1273,7 @@ def main():
     args = parser.parse_args()
     if (not all(math.isfinite(value) for value in
                 (args.tracking_fps, args.tracking_confidence, args.tracking_activation))
-            or args.tracking_fps <= 0 or not 0 <= args.tracking_confidence < 1
+            or not 0 < args.tracking_fps <= 10 or not 0 <= args.tracking_confidence < 1
             or not 0 < args.tracking_activation < 1):
         parser.error("invalid tracking thresholds or FPS")
     root = args.data_root
