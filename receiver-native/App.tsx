@@ -7,6 +7,7 @@ import * as Application from 'expo-application'
 import { useVideoPlayer, VideoView } from 'expo-video'
 import { Alert, AppState, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { WebView } from 'react-native-webview'
+import { openInChrome } from 'dashpi-share'
 import { verifiedHtmlWebViewProps } from './src/webview-policy'
 import { handleBarcodeScan, type BarcodeScan } from './src/barcode'
 import { cameraGate } from './src/camera-gate'
@@ -394,6 +395,12 @@ function Receiver({
   )
 }
 
+// The default browser on some phones never finishes the APK download; Chrome does.
+async function openUpdate(url: string) {
+  if (Platform.OS === 'android' && (await openInChrome(url).catch(() => false))) return
+  await Linking.openURL(url)
+}
+
 function useUpdatePrompt() {
   const shownAt = useRef(0)
   const checking = useRef(false)
@@ -410,7 +417,7 @@ function useUpdatePrompt() {
         `DashPi ${update.version}이 나왔어요. 지금 받아서 설치할까요?`,
         [
           { text: '나중에', style: 'cancel' },
-          { text: '업데이트', onPress: () => void Linking.openURL(update.url) },
+          { text: '업데이트', onPress: () => void openUpdate(update.url) },
         ],
       )
     } finally {
