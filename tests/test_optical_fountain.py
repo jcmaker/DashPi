@@ -20,7 +20,8 @@ def test_systematic_symbols_recover_in_any_order():
 def test_one_megabyte_survives_loss_duplicates_and_reordering():
     payload = random.Random(9).randbytes(1024 * 1024)
     encoder = FountainEncoder(payload, block_size=1024, seed=11)
-    frames = [encoder.symbol(sequence) for sequence in range(encoder.block_count * 2)]
+    # After the first pass, half the frames repeat plain blocks so late receivers can start.
+    frames = [encoder.symbol(sequence) for sequence in range(encoder.block_count * 3)]
     kept = [frame for index, frame in enumerate(frames) if index % 20 not in {1, 7, 13}]
     kept += kept[:20]
     random.Random(5).shuffle(kept)
@@ -32,6 +33,31 @@ def test_one_megabyte_survives_loss_duplicates_and_reordering():
             break
 
     assert decoder.result() == payload
+
+
+def test_receiver_joining_after_the_first_pass_still_recovers():
+    # The Pi keeps the QR loop running; a phone may start long after sequence block_count.
+    payload = random.Random(3).randbytes(64 * 1024)
+    encoder = FountainEncoder(payload, block_size=512, seed=21)
+    start = encoder.block_count * 4 + 5
+    decoder = FountainDecoder(encoder.block_count, encoder.block_size, len(payload))
+
+    for sequence in range(start, start + encoder.block_count * 2):
+        if sequence % 7 == 3:
+            continue  # camera misses
+        decoder.add(*encoder.symbol(sequence))
+        if decoder.result() is not None:
+            break
+
+    assert decoder.result() == payload
+
+
+def test_plain_block_still_lands_after_the_equation_cap_is_full():
+    decoder = FountainDecoder(2000, 1, 2000)
+    for start in range(1100):
+        decoder.add((start, start + 1, start + 2), b"\0")
+    decoder.add((1500,), b"\0")
+    assert 1500 in decoder.blocks
 
 
 @pytest.mark.parametrize(

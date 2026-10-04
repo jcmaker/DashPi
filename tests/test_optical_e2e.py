@@ -17,7 +17,8 @@ def test_one_megabyte_survives_frame_loss_duplicates_and_reordering():
     )
     frames = [
         session.frame(sequence)
-        for sequence in range(session.encoder.block_count * 2)
+        # After the first pass, half the frames repeat plain blocks so late receivers can start.
+        for sequence in range(session.encoder.block_count * 3)
         if sequence % 20 not in {1, 7, 13}
     ]
     frames += frames[:20]

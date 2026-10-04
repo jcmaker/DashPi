@@ -118,7 +118,8 @@ export class FountainDecoder {
       if (!sameBytes(existing.value, equation.value)) throw new Error('conflicting equation');
       return;
     }
-    if (this.equations.length < 1024) this.equations.push(equation);
+    // A plain block peels right away, so it must never be dropped by the cap.
+    if (this.equations.length < 1024 || equation.indices.size === 1) this.equations.push(equation);
   }
 
   private peel(): void {
