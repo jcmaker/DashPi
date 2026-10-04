@@ -22,7 +22,9 @@ log = logging.getLogger("dashpi")
 FAKE_MODEL = "fake"
 OBSERVE_SECONDS = 3.0
 FRAME_COUNT = 12
-MAX_TOKENS = {"locate": 300, "observe": 1500, "report": 1200}
+# observe returns up to 24 frames of observations plus the 12-item review; measured
+# 1.5k–3k completion tokens (reasoning included), so 1500 truncated it.
+MAX_TOKENS = {"locate": 300, "observe": 4000, "report": 1200}
 RULES = (
     "당신은 블랙박스 사고 영상 분석 보조입니다. 화면에 보이는 사실만 쓰고, 보이지 않는 것은 추측하지 마세요. "
     "법적 과실이나 책임을 판단하지 마세요. 모든 문장은 한국어로 쓰세요."
