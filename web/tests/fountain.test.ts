@@ -113,3 +113,23 @@ test('rejects malformed symbols before changing decoder state', () => {
   decoder.add({ ...frame, sequence: 1, indices: [1], symbol: Uint8Array.of(98) });
   assert.deepEqual(decoder.result(), Uint8Array.of(97, 98));
 });
+
+test('a plain block still lands after the unresolved-equation cap is full', () => {
+  // A receiver that joins late first sees many repair symbols it cannot use yet.
+  const blockCount = 2000;
+  const decoder = new FountainDecoder(blockCount, 1, blockCount);
+  const frame = (sequence: number, indices: number[]) => ({
+    sessionId: 1,
+    sequence,
+    blockCount,
+    blockSize: 1,
+    totalLength: blockCount,
+    indices,
+    symbol: Uint8Array.of(0),
+  });
+  for (let sequence = 0; sequence < 1100; sequence += 1) {
+    decoder.add(frame(sequence, [sequence, sequence + 1, sequence + 2]));
+  }
+  decoder.add(frame(5000, [1500]));
+  assert.equal(decoder.recoveredBlocks, 1);
+});
