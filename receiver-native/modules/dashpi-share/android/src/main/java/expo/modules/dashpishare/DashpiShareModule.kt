@@ -1,6 +1,7 @@
 package expo.modules.dashpishare
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ComponentName
 import android.content.Intent
@@ -53,6 +54,24 @@ class DashpiShareModule : Module() {
         failShare("Failed to open the share sheet: ${error.message}")
       }
     }.runOnQueue(Queues.MAIN)
+
+    // Update APKs go to Chrome, whose download notification opens the installer.
+    // false when Chrome is missing or disabled, so JS can fall back to the default browser.
+    AsyncFunction("openInChromeAsync") { url: String ->
+      val uri = Uri.parse(url)
+      if (uri.scheme != "https") throw SharePathException("Only an https URL can be opened.")
+      val context = appContext.reactContext ?: throw SharePathException("Android context is unavailable.")
+      val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+        setPackage("com.android.chrome")
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+      try {
+        context.startActivity(intent)
+        true
+      } catch (error: ActivityNotFoundException) {
+        false
+      }
+    }
 
     OnActivityResult { _, payload ->
       when (payload.requestCode) {

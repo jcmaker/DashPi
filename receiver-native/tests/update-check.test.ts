@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
   UPDATE_CHECK_INTERVAL_MS,
@@ -62,4 +63,17 @@ test('offers the Pages APK only after Pages advertises a newer version', async (
   assert.equal(await checkForUpdate('2.0.0', fetcher), null)
   const invalid = async () => new Response(JSON.stringify({ version: 'unknown' }), { status: 200 })
   assert.equal(await checkForUpdate('1.4.2', invalid), null)
+})
+
+test('the update button opens the APK in Chrome on Android, else the default browser', () => {
+  const app = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8')
+  const module = readFileSync(
+    new URL('../modules/dashpi-share/android/src/main/java/expo/modules/dashpishare/DashpiShareModule.kt', import.meta.url),
+    'utf8',
+  )
+  assert.match(app, /onPress: \(\) => void openUpdate\(update\.url\)/)
+  assert.match(app, /openInChrome\(url\)\.catch\(\(\) => false\)\)\) return\n\s+await Linking\.openURL\(url\)/)
+  assert.match(module, /setPackage\("com\.android\.chrome"\)/)
+  assert.match(module, /uri\.scheme != "https"/)
+  assert.match(module, /catch \(error: ActivityNotFoundException\) \{\s+false/)
 })
