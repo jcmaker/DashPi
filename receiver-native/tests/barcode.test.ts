@@ -202,4 +202,7 @@ test('expo-camera Android forwards ML Kit rawBytes as base64', () => {
   assert.match(view, /rawBytesBase64 = barcode\.rawBytes\?\.let \{ android\.util\.Base64\.encodeToString/)
   assert.match(view, /event\.rawBytesBase64 \?: event\.data/)
   assert.match(analyzer, /barcode\.rawBytes\?\.copyOf\(\)/)
+  // expo-camera ships a prebuilt AAR; without this, Gradle links it and the patched source never ships.
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+  assert.ok(pkg.expo?.autolinking?.android?.buildFromSource?.includes('expo-camera'))
 })
