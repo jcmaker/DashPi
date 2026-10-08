@@ -13,6 +13,18 @@ const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('h
 const sha256 = async (bytes: Uint8Array) => hash(bytes)
 const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value))
 
+test('print report expands all review and evidence details and includes all verified photos', async () => {
+  const report = await verifyReportImages(parseTransferReport(encode(fixture())), sha256)
+  const html = renderReportHtml(report, 'print')
+  assert.match(html, /<details open><summary>12개 항목 모두 보기/)
+  assert.match(html, /<details class="evidence" open>/)
+  assert.equal((html.match(/<img /g) ?? []).length, 3)
+  for (const [, label] of REVIEW_ITEMS) assert.ok(html.includes(label))
+  assert.match(html, /@page\{size:A4;margin:14mm\}/)
+  assert.match(html, /원본 클립 SHA-256/)
+  assert.doesNotMatch(html, /<script\b/)
+})
+
 function fixture() {
   return {
     format: 'dashpi.report', version: 1, incident_id: 'incident-1234',

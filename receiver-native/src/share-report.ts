@@ -34,7 +34,7 @@ export function shareCacheName(reportName: string, randomId: string): string {
 }
 
 export function randomShareId(
-  fill: (bytes: Uint8Array<ArrayBuffer>) => void = (bytes) => crypto.getRandomValues(bytes),
+  fill: (bytes: Uint8Array<ArrayBuffer>) => void,
 ): string {
   const bytes = new Uint8Array(new ArrayBuffer(16))
   fill(bytes)

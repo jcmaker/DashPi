@@ -18,6 +18,7 @@ import java.io.File
 
 private const val CHOOSER_REQUEST = 4817
 private const val TARGET_REQUEST = 4818
+private const val SAVE_PDF_REQUEST = 4819
 private const val SHARE_CACHE_DIRECTORY = "dashpi-share"
 
 class ShareInProgressException : CodedException("A share sheet is already open.")
@@ -91,6 +92,7 @@ class DashpiShareModule : Module() {
       when (payload.requestCode) {
         CHOOSER_REQUEST -> onChooserResult(payload.resultCode, payload.data)
         TARGET_REQUEST -> onChosenActivityResult()
+        SAVE_PDF_REQUEST -> onSavePdfResult(payload.resultCode, payload.data)
       }
     }
 
@@ -101,6 +103,23 @@ class DashpiShareModule : Module() {
 
   private fun onChooserResult(resultCode: Int, data: Intent?) {
     if (pendingPromise == null) return
+    if (resultCode == Activity.RESULT_OK &&
+      data?.getBooleanExtra(DashpiShareChooserActivity.EXTRA_SAVE_PDF, false) == true &&
+      pendingMime == "application/pdf") {
+      chosenActivityOpen = true
+      try {
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+          addCategory(Intent.CATEGORY_OPENABLE)
+          type = "application/pdf"
+          putExtra(Intent.EXTRA_TITLE, "DashPi-report.pdf")
+        }
+        appContext.throwingActivity.startActivityForResult(intent, SAVE_PDF_REQUEST)
+      } catch (error: Exception) {
+        chosenActivityOpen = false
+        failShare("PDF 저장 창을 열지 못했습니다: ${error.message}")
+      }
+      return
+    }
     val packageName = data?.getStringExtra(DashpiShareChooserActivity.EXTRA_PACKAGE)
     val className = data?.getStringExtra(DashpiShareChooserActivity.EXTRA_CLASS)
     val uri = pendingUri
@@ -128,6 +147,33 @@ class DashpiShareModule : Module() {
     if (!chosenActivityOpen && pendingPromise == null) return
     chosenActivityOpen = false
     finishShare()
+  }
+
+  private fun onSavePdfResult(resultCode: Int, data: Intent?) {
+    if (pendingPromise == null) return
+    val destination = data?.data
+    val file = pendingFile
+    if (resultCode != Activity.RESULT_OK || destination == null || file == null) {
+      chosenActivityOpen = false
+      finishShare()
+      return
+    }
+    val activity = appContext.throwingActivity
+    // Keep the temporary PDF and its promise alive until the copy finishes.
+    Thread {
+      val result = runCatching {
+        val output = activity.contentResolver.openOutputStream(destination, "wt")
+          ?: throw SharePathException("PDF 저장 위치를 열지 못했습니다.")
+        output.use { stream -> file.inputStream().use { it.copyTo(stream) } }
+      }
+      activity.runOnUiThread {
+        chosenActivityOpen = false
+        result.fold(
+          onSuccess = { finishShare() },
+          onFailure = { failShare("PDF를 저장하지 못했습니다: ${it.message}") },
+        )
+      }
+    }.start()
   }
 
   private fun sendIntent(uri: Uri, mimeType: String, component: ComponentName): Intent {

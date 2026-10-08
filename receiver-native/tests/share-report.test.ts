@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { randomFillSync } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
@@ -65,8 +66,16 @@ test('random ids are 128-bit hex and do not depend on the report name', () => {
   assert.match(first, /^[0-9a-f]{32}$/)
   assert.notEqual(first, second)
   assert.equal(first.includes('report'), false)
-  const live = randomShareId()
-  assert.notEqual(live, randomShareId())
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'crypto')
+  Object.defineProperty(globalThis, 'crypto', { configurable: true, get() { throw new Error("Property 'crypto' doesn't exist") } })
+  try {
+    assert.match(randomShareId(randomFillSync), /^[0-9a-f]{32}$/)
+  } finally {
+    if (original) Object.defineProperty(globalThis, 'crypto', original)
+    else Reflect.deleteProperty(globalThis, 'crypto')
+  }
+  const live = randomShareId(randomFillSync)
+  assert.notEqual(live, randomShareId(randomFillSync))
   assert.equal(shareCacheName('report.html', live).includes('report'), false)
 })
 

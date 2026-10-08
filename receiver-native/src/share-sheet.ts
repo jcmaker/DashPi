@@ -1,7 +1,9 @@
 import { Directory, File, Paths } from 'expo-file-system'
 import { presentShareSheet } from 'dashpi-share'
 import * as Crypto from 'expo-crypto'
-import { prepareReportShare } from './saved-reports'
+import * as Print from 'expo-print'
+import { isNativeReportFile, prepareReportShare } from './saved-reports'
+import { shareReportPdf } from './report-pdf'
 import type { ValidatedNativeReport } from './native-report'
 import {
   isShareCacheName,
@@ -48,7 +50,7 @@ export function shareReceivedReport(report: {
     reportName: report.name,
     mediaType: report.mediaType,
     payload: report.payload,
-    randomId: randomShareId(),
+    randomId: randomShareId(Crypto.getRandomValues),
     openCacheFile: openDashpiShareFile,
     present: (file, mediaType) => presentUntilCleanup(file.uri, mediaType),
   })
@@ -82,7 +84,17 @@ export async function shareReport(file: {
   if (shareInProgress) return { status: 'busy' }
   shareInProgress = true
   try {
-    await shareReceivedReport(await prepareReportShare(file, digestReportImage, verified))
+    const prepared = await prepareReportShare(file, digestReportImage, verified)
+    if (isNativeReportFile(file) && prepared.mediaType === 'text/html') {
+      await shareReportPdf(prepared, {
+        print: (html) => Print.printToFileAsync({ html, width: 595, height: 842 }),
+        read: (uri) => new File(uri).bytes(),
+        remove: (uri) => { const pdf = new File(uri); if (pdf.exists) pdf.delete() },
+        share: shareReceivedReport,
+      })
+    } else {
+      await shareReceivedReport(prepared)
+    }
     return { status: 'shared' }
   } catch (error) {
     const reason = error instanceof Error && error.message.trim()
