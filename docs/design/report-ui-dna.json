@@ -1,0 +1,59 @@
+{
+  "reference": "사용자 제공 AI 사고 분석 화면 (2026-10-09)",
+  "intent": "참고 화면의 시각 구성에 가깝게 재구성하며 이미지 3장 전송과 검증·공유 흐름 유지",
+  "palette": {
+    "background": "#fafcff",
+    "heading": "#0b1735",
+    "body": "#172747",
+    "secondary": "#667797",
+    "primary": "#1253e8",
+    "card": "#eff6ff",
+    "cardBorder": "#c5ddff",
+    "outline": "#c7d1e5",
+    "received": "#13886f",
+    "unknownBackground": "#fff1df",
+    "unknownText": "#995413"
+  },
+  "geometry": {
+    "pagePadding": 12,
+    "sectionGap": 20,
+    "cardRadius": 12,
+    "buttonRadius": 10,
+    "touchMinimum": 44,
+    "photoAspectRatio": "16:9, contain (증거 장면 자르지 않음)",
+    "photoTabs": 3,
+    "reviewPreviewColumns": 2,
+    "smallScreenOrLargeFontReviewColumns": 1
+  },
+  "typography": {
+    "header": 21,
+    "sectionTitle": 19,
+    "body": 15,
+    "timeline": 14,
+    "metadata": 12
+  },
+  "order": [
+    "헤더: AI 사고 분석·수신 완료",
+    "기록 시각",
+    "대표 이미지·전체화면 보기",
+    "사고 전/순간/후 실제 상대 시각",
+    "AI 요약 카드",
+    "12개 항목 요약·대표4개·상세 펼침",
+    "사진과 연동된 세로 타임라인",
+    "관찰된 관련 장면 태그",
+    "영상 확인의 한계",
+    "긴급 번호·원본 영상 미전송 안내",
+    "접힌 증거 상세",
+    "고정 버튼: 분석 결과 저장·공유 / 새로 받기"
+  ],
+  "contentRules": [
+    "관찰됨 항목만 태그로 표시. 새로운 AI 호출이나 위험도 추정 없음.",
+    "확인 불가 항목 수를 요약에서 밝힘. 모든 항목 확인 불가면 판단할 수 없음으로 표시.",
+    "법규 위반·중과실 유무를 단정하지 않음.",
+    "영상 플레이어·재생 버튼·임의 객체 박스 없음.",
+    "원본 수신 파일·손상 이미지 안내·HTML 원본 공유 분기 유지.",
+    "공유 HTML도 같은 색상·카드·내용 순서. 3장 사진 모두 포함."
+  ],
+  "assets": "직접 작성한 24x24 선 아이콘 경로(source.json)를 72x72 투명 PNG로 렌더링. 앱 의존성 추가 없음.",
+  "validationLimit": "실제 React Native 컴포넌트를 React Native Web에서 렌더링하되 네이티브 공유/인셋은 스텁. Android 기기 검증 대체 불가."
+}
