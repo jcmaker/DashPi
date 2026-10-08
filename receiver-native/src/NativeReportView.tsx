@@ -221,7 +221,7 @@ export default function NativeReportView({ file, onNewReceive, onDelete }: {
     <View style={styles.footer}>
       {shareError ? <Text accessibilityLiveRegion="polite" style={styles.shareError}>{shareError}</Text> : null}
       <View style={styles.footerButtons}>
-        <Pressable accessibilityRole="button" accessibilityState={{ disabled: preparing || decoding || sharing }} disabled={preparing || decoding || sharing} onPress={() => void share()} style={[styles.shareButton, (preparing || decoding || sharing) && styles.disabled]}><ReportIcon name="download" color="#ffffff" size={20} /><Text style={styles.shareLabel}>{sharing ? '공유 준비 중…' : decoding ? '이미지 확인 중…' : '분석 결과 저장·공유'}</Text></Pressable>
+        <Pressable accessibilityRole="button" accessibilityState={{ disabled: preparing || decoding || sharing }} disabled={preparing || decoding || sharing} onPress={() => void share()} style={[styles.shareButton, (preparing || decoding || sharing) && styles.disabled]}><ReportIcon name="download" color="#ffffff" size={20} /><Text style={styles.shareLabel}>{sharing ? '공유 준비 중…' : decoding ? '이미지 확인 중…' : 'PDF 저장·공유'}</Text></Pressable>
         <Pressable accessibilityRole="button" onPress={onNewReceive} style={styles.newButton}><ReportIcon name="refresh" size={20} /><Text style={styles.newLabel}>새로 받기</Text></Pressable>
       </View>
     </View>

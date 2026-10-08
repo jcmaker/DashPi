@@ -17,18 +17,25 @@ class DashpiShareChooserActivity : Activity() {
     super.onCreate(savedInstanceState)
     val mimeType = intent.getStringExtra(EXTRA_MIME_TYPE) ?: "*/*"
     val targets = shareTargets(mimeType)
-    if (targets.isEmpty()) {
+    val canSave = mimeType == "application/pdf"
+    if (targets.isEmpty() && !canSave) {
       setResult(RESULT_CANCELED)
       finish()
       return
     }
 
     title = intent.getStringExtra(EXTRA_TITLE)
-    val labels = targets.map { it.loadLabel(packageManager).toString() }
+    val labels = (if (canSave) listOf("PDF 파일 저장") else emptyList()) +
+      targets.map { it.loadLabel(packageManager).toString() }
     val list = ListView(this)
     list.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, labels)
     list.setOnItemClickListener { _, _, which, _ ->
-      val activityInfo = targets[which].activityInfo
+      if (canSave && which == 0) {
+        setResult(RESULT_OK, Intent().putExtra(EXTRA_SAVE_PDF, true))
+        finish()
+        return@setOnItemClickListener
+      }
+      val activityInfo = targets[which - if (canSave) 1 else 0].activityInfo
       setResult(
         RESULT_OK,
         Intent().apply {
@@ -56,6 +63,7 @@ class DashpiShareChooserActivity : Activity() {
   }
 
   companion object {
+    const val EXTRA_SAVE_PDF = "expo.modules.dashpishare.SAVE_PDF"
     const val EXTRA_MIME_TYPE = "expo.modules.dashpishare.MIME_TYPE"
     const val EXTRA_TITLE = "expo.modules.dashpishare.TITLE"
     const val EXTRA_PACKAGE = "expo.modules.dashpishare.PACKAGE"

@@ -63,7 +63,7 @@ export async function prepareReportShare(
   return {
     name: `dashpi-${report.incident_id}.html`,
     mediaType: 'text/html',
-    payload: new TextEncoder().encode(renderReportHtml(report)),
+    payload: new TextEncoder().encode(renderReportHtml(report, 'print')),
   }
 }
 
