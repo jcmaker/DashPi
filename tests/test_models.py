@@ -40,6 +40,7 @@ def test_incident_metadata_includes_configured_windows_and_artifact_contract(tmp
             "duration": 44.9,
         },
         "annotated": None,
+        "report_transfer": None,
         "report_json": {
             "filename": "report.json",
             "path": str(tmp_path / "report.json"),
@@ -98,10 +99,12 @@ def test_metadata_written_before_retry_fields_still_loads(tmp_path):
     path = store.directory("old") / "metadata.json"
     raw = json.loads(path.read_text())
     del raw["analysis_attempts"], raw["next_analysis_at"]
+    del raw["report_transfer"]
     path.write_text(json.dumps(raw))
 
     loaded = store.load("old")
     assert (loaded.analysis_attempts, loaded.next_analysis_at) == (0, None)
+    assert loaded.report_transfer is None
 
 
 def test_list_includes_awaiting_analysis_incidents(tmp_path):

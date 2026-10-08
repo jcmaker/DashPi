@@ -5,7 +5,7 @@ import { useKeepAwake } from 'expo-keep-awake'
 import { StatusBar } from 'expo-status-bar'
 import * as Application from 'expo-application'
 import { useVideoPlayer, VideoView } from 'expo-video'
-import { Alert, AppState, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { Alert, AppState, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { WebView } from 'react-native-webview'
 import { openInChrome } from 'dashpi-share'
 import { verifiedHtmlWebViewProps } from './src/webview-policy'
@@ -15,6 +15,8 @@ import { documentReportStore } from './src/document-reports'
 import {
   ReportSaveError,
   saveVerifiedReport,
+  describeSavedReports,
+  isNativeReportFile,
   type ReportStore,
   type SavedReport,
 } from './src/saved-reports'
@@ -37,7 +39,8 @@ import {
   screenShouldStayAwake,
   stallMessage,
 } from './src/scan-session'
-import { applyShareOutcome, shareReport } from './src/share-sheet'
+import { applyShareOutcome, digestReportImage, shareReport } from './src/share-sheet'
+import NativeReportView, { localReportTime } from './src/NativeReportView'
 
 type Phase = 'scanning' | 'receiving' | 'verifying' | 'verified'
 
@@ -117,14 +120,11 @@ function VerifiedPreview({ file }: { file: OpticalFile }) {
 
   useEffect(() => {
     let cancelled = false
-    setStored(null)
-    setPrepareError(false)
-    try {
-      const written = writePreview(model, file.payload)
-      if (!cancelled) setStored(written)
-    } catch {
+    void Promise.resolve().then(() => {
+      if (!cancelled) setStored(writePreview(model, file.payload))
+    }).catch(() => {
       if (!cancelled) setPrepareError(true)
-    }
+    })
     return () => {
       cancelled = true
     }
@@ -277,9 +277,16 @@ function Receiver({
 
   const openSaved = useCallback(
     (name: string) => {
-      const stored = store.get(name)
+      let stored
+      try {
+        stored = store.get(name)
+      } catch {
+        setScreen((current) => ({ ...current, error: '리포트를 열 수 없습니다. 저장 목록에서 삭제할 수 있습니다.' }))
+        return
+      }
       if (!stored) {
         reloadSaved()
+        setScreen((current) => ({ ...current, error: '리포트를 열 수 없습니다. 저장 목록에서 삭제할 수 있습니다.' }))
         return
       }
       generation.current += 1
@@ -320,6 +327,10 @@ function Receiver({
   const scanning = screen.phase !== 'verified'
   const discard = offerDiscard(screen.phase, screen.error)
 
+  if (screen.phase === 'verified' && screen.file && isNativeReportFile(screen.file)) {
+    return <NativeReportView key={screen.file.name} file={screen.file} onNewReceive={reset} onDelete={() => deleteSaved(screen.file!.name)} />
+  }
+
   return (
     <View style={styles.screen}>
       {screenShouldStayAwake(screen.phase) ? <ScanKeepAwake /> : null}
@@ -335,7 +346,7 @@ function Receiver({
           />
         </View>
       ) : (
-        screen.file ? <VerifiedPreview file={screen.file} /> : null
+        screen.file ? <VerifiedPreview key={screen.file.name} file={screen.file} /> : null
       )}
       <Text style={styles.status}>
         {screen.phase === 'scanning' && 'DashPi QR 화면을 카메라 안에 맞추세요.'}
@@ -364,13 +375,18 @@ function Receiver({
           <ScrollView style={styles.savedList} nestedScrollEnabled>
             {saved.map((item) => (
               <View key={item.name} style={styles.savedRow}>
-                <Text style={styles.savedName} numberOfLines={1}>
-                  {item.name}
-                </Text>
-                <Pressable style={styles.savedOpen} onPress={() => openSaved(item.name)}>
+                {item.thumbnailUri ? <Image source={{ uri: item.thumbnailUri }} style={styles.savedThumbnail} accessibilityLabel="사고 순간 사진" /> : null}
+                <View style={styles.savedDescription}>
+                  <Text style={styles.savedName} numberOfLines={1}>
+                    {item.unreadable ? '열 수 없는 리포트' : item.triggeredAt ? localReportTime(item.triggeredAt) : item.name}
+                  </Text>
+                  {item.summary ? <Text style={styles.savedSummary} numberOfLines={1}>{item.summary}</Text> : null}
+                  {item.unreadable ? <Text style={styles.savedSummary} numberOfLines={1}>{item.name}</Text> : null}
+                </View>
+                <Pressable accessibilityRole="button" accessibilityLabel={`${item.name} 열기`} style={styles.savedOpen} onPress={() => openSaved(item.name)}>
                   <Text style={styles.savedOpenLabel}>열기</Text>
                 </Pressable>
-                <Pressable style={styles.savedDelete} onPress={() => deleteSaved(item.name)}>
+                <Pressable accessibilityRole="button" accessibilityLabel={`${item.name} 저장본 삭제`} style={styles.savedDelete} onPress={() => deleteSaved(item.name)}>
                   <Text style={styles.savedDeleteLabel}>삭제</Text>
                 </Pressable>
               </View>
@@ -430,15 +446,15 @@ function useUpdatePrompt() {
 export default function App() {
   const [permission, requestPermission, getPermission] = useCameraPermissions()
   const checkUpdate = useUpdatePrompt()
-  const store = useRef(documentReportStore())
+  const [store] = useState(documentReportStore)
   const [saved, setSaved] = useState<SavedReport[]>([])
+  const savedGeneration = useRef(0)
   const reloadSaved = useCallback(() => {
-    try {
-      setSaved(store.current.list())
-    } catch {
-      setSaved([])
-    }
-  }, [])
+    const ticket = ++savedGeneration.current
+    void describeSavedReports(store, digestReportImage).then((rows) => {
+      if (ticket === savedGeneration.current) setSaved(rows)
+    }).catch(() => {})
+  }, [store])
 
   useEffect(() => {
     reloadSaved()
@@ -464,7 +480,7 @@ export default function App() {
           <Text style={styles.body}>카메라 권한을 확인하고 있습니다.</Text>
         </View>
       )}
-      {gate === 'scan' && <Receiver store={store.current} saved={saved} reloadSaved={reloadSaved} />}
+      {gate === 'scan' && <Receiver store={store} saved={saved} reloadSaved={reloadSaved} />}
       {(gate === 'request' || gate === 'settings') && (
         <PermissionScreen
           canAskAgain={gate === 'request'}
@@ -538,12 +554,15 @@ const styles = StyleSheet.create({
   savedTitle: { color: '#94a3b8', fontSize: 13, marginBottom: 8 },
   savedList: { maxHeight: 160 },
   savedRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
-  savedName: { color: '#f8fafc', flex: 1, fontSize: 15 },
+  savedDescription: { flex: 1 },
+  savedThumbnail: { width: 56, height: 42, borderRadius: 6 },
+  savedName: { color: '#f8fafc', fontSize: 15 },
+  savedSummary: { color: '#cbd5e1', fontSize: 13, marginTop: 3 },
   savedOpen: {
     borderColor: '#38bdf8',
     borderRadius: 8,
     borderWidth: 1,
-    minHeight: 36,
+    minHeight: 44,
     justifyContent: 'center',
     paddingHorizontal: 12,
   },
@@ -552,7 +571,7 @@ const styles = StyleSheet.create({
     borderColor: '#fecaca',
     borderRadius: 8,
     borderWidth: 1,
-    minHeight: 36,
+    minHeight: 44,
     justifyContent: 'center',
     paddingHorizontal: 12,
   },

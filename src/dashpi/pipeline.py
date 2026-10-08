@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from dataclasses import replace
 import json
+import logging
 from collections.abc import Callable
 from pathlib import Path
 import shutil
@@ -19,7 +20,7 @@ from dashpi.media import (
 )
 from dashpi.models import IncidentMetadata, IncidentState, Segment
 from dashpi.optical.container import MAX_PAYLOAD
-from dashpi.reports import render_report_html, validate_report
+from dashpi.reports import build_transfer_report, render_report_html, validate_report
 from dashpi.ranges import _open_verified_file, _sha256_descriptor
 from dashpi.storage import IncidentStore, atomic_write, sha256_file
 from dashpi.vision import annotate_clip
@@ -141,6 +142,7 @@ class IncidentPipeline:
             start, end = transfer_window(incident_offset, incident.clip.duration)
             active_overlays = overlays or self.settings.overlays
             keyframe_dir = directory / "keyframes"
+            keyframe_timestamps = {}
             try:
                 if self.detector is None:
                     raise RuntimeError("detector unavailable")
@@ -156,6 +158,7 @@ class IncidentPipeline:
                     keyframe_dir,
                     480,
                     "900k",
+                    keyframe_timestamps=keyframe_timestamps,
                 )
                 incident.annotated = annotated
                 if probe_duration(annotated.path) < end - start - 0.1:
@@ -174,11 +177,12 @@ class IncidentPipeline:
                 incident.annotated = annotated
                 last_frame = max(0.0, end - start - 0.1)
                 moment = min(incident_offset - start, last_frame)
+                selections = (max(0.0, moment - 2.0), moment, min(last_frame, moment + 2.0))
                 keyframes = [
-                    extract_frame(annotated.path, keyframe_dir / "before.jpg", max(0.0, moment - 2.0)),
-                    extract_frame(annotated.path, keyframe_dir / "moment.jpg", moment),
-                    extract_frame(annotated.path, keyframe_dir / "after.jpg", min(last_frame, moment + 2.0)),
+                    extract_frame(annotated.path, keyframe_dir / f"{role}.jpg", timestamp)
+                    for role, timestamp in zip(("before", "moment", "after"), selections, strict=True)
                 ]
+                keyframe_timestamps = dict(zip(("before", "moment", "after"), (start + value for value in selections)))
                 observations = []
                 warnings = ["Object tracking failed; the transfer video has no boxes."]
             annotated = replace(annotated, duration=probe_duration(annotated.path))
@@ -188,6 +192,7 @@ class IncidentPipeline:
                     "incident_id": incident.incident_id,
                     "triggered_at": incident.triggered_at,
                     "transfer_window": {"start": start, "end": end},
+                    "keyframe_timestamps": keyframe_timestamps,
                     "object_observations": observations,
                     "warnings": warnings,
                     "overlays": active_overlays.to_dict(),
@@ -233,6 +238,14 @@ class IncidentPipeline:
                 directory / "report.json", json.dumps(report, sort_keys=True).encode()
             )
             incident.report_html = atomic_write(directory / "report.html", report_html)
+            incident.report_transfer = None
+            try:
+                incident.report_transfer = atomic_write(
+                    directory / "report.transfer.json",
+                    build_transfer_report(report, [frame.path.read_bytes() for frame in keyframes], incident.clip.duration),
+                )
+            except Exception:
+                logging.getLogger("dashpi").warning("Image report unavailable; HTML report preserved", exc_info=True)
             progress.emit("build", "done", f"{len(report_html) / 1_000_000:.1f} MB")
             if (
                 sha256_file(evidence_path) != clip_before

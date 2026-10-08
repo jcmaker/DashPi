@@ -1,8 +1,149 @@
 import base64
+from datetime import datetime
+import hashlib
 import html
 import json
 import math
+import hmac
+import os
 import re
+
+import cv2
+import numpy as np
+
+from dashpi.optical.container import MAX_PAYLOAD
+from dashpi.ranges import _open_verified_file
+from dashpi.storage import _open_directory, atomic_write, open_regular_file_at
+
+
+TRANSFER_MEDIA_TYPE = "application/vnd.dashpi.report+json"
+MAX_TRANSFER_BYTES = 60_000
+KEYFRAME_ROLES = ("before", "moment", "after")
+
+
+def create_transfer_artifact(store, incident, descriptor: int, directory):
+    """Convert verified existing report/images; never reopen metadata-supplied paths."""
+    artifact = incident.report_json
+    if artifact is None or artifact.path != directory / "report.json" or artifact.byte_length > MAX_PAYLOAD:
+        raise ValueError("invalid source report artifact")
+    source, _ = _open_verified_file(descriptor, "report.json", artifact.byte_length, artifact.sha256)
+    with source:
+        source.seek(0)
+        report = json.loads(source.read())
+    if (
+        incident.clip is None or incident.clip.duration is None
+        or incident.clip.path != directory / "clip.mp4"
+        or report["incident_id"] != incident.incident_id
+        or report["digests"]["clip.mp4"] != incident.clip.sha256
+    ):
+        raise ValueError("source report does not match incident evidence")
+    keyframe_descriptor = _open_directory("keyframes", dir_fd=descriptor)
+    try:
+        keyframes = []
+        for role in KEYFRAME_ROLES:
+            name = f"{role}.jpg"
+            with open_regular_file_at(keyframe_descriptor, name) as image:
+                content = image.read(MAX_PAYLOAD + 1)
+                if len(content) > MAX_PAYLOAD:
+                    raise ValueError("source keyframe exceeds 16 MiB")
+                if not hmac.compare_digest(hashlib.sha256(content).hexdigest(), report["digests"][name]):
+                    raise ValueError("keyframe digest changed")
+                keyframes.append(content)
+    finally:
+        os.close(keyframe_descriptor)
+    transfer = atomic_write(
+        directory / "report.transfer.json", build_transfer_report(report, keyframes, incident.clip.duration),
+        directory_descriptor=descriptor,
+    )
+    previous = incident.report_transfer
+    incident.report_transfer = transfer
+    try:
+        store.save(incident, directory_descriptor=descriptor)
+    except Exception:
+        incident.report_transfer = previous
+        raise
+    return transfer
+
+
+def build_transfer_report(report: dict, keyframes: list[bytes], clip_duration: float) -> bytes:
+    """Compress copies of the evidence images without shortening the analysis."""
+    if len(keyframes) != 3:
+        raise ValueError("report requires three keyframes")
+    if not math.isfinite(clip_duration) or clip_duration <= 0:
+        raise ValueError("invalid clip duration")
+    for key in ("incident_id", "triggered_at", "generated_at", "model"):
+        if not isinstance(report.get(key), str) or not report[key]:
+            raise ValueError(f"invalid {key}")
+    for key in ("triggered_at", "generated_at"):
+        if not re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)", report[key]
+        ) or datetime.fromisoformat(report[key].replace("Z", "+00:00")).tzinfo is None:
+            raise ValueError(f"invalid {key}")
+    clip_digest = report["digests"]["clip.mp4"]
+    if not isinstance(clip_digest, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", clip_digest):
+        raise ValueError("invalid evidence digest")
+    validated = validate_report(
+        {key: report[key] for key in (
+            "incident_timestamp", "summary", "observations", "limitations", "major_negligence_review"
+        ) if key in report},
+        clip_digest, report["model"], report["generated_at"], clip_duration,
+    )
+    warnings = report.get("warnings", [])
+    if not isinstance(warnings, list) or any(not isinstance(warning, str) for warning in warnings):
+        raise ValueError("invalid report warnings")
+    transfer = {
+        "format": "dashpi.report", "version": 1,
+        "incident_id": report["incident_id"], "triggered_at": report["triggered_at"],
+        **{key: validated[key] for key in (
+            "generated_at", "model", "incident_timestamp", "summary", "observations",
+            "limitations", "major_negligence_review",
+        )},
+        "warnings": list(warnings),
+        "digests": {"clip.mp4": clip_digest},
+    }
+    times = report.get("keyframe_timestamps")
+    if times is None:
+        start, end = report["transfer_window"]["start"], report["transfer_window"]["end"]
+        if not 0 <= start < end <= clip_duration:
+            raise ValueError("invalid transfer window")
+        last = max(start, end - 0.1)
+        moment = min(max(start, validated["incident_timestamp"]), last)
+        times = dict(zip(KEYFRAME_ROLES, (max(start, moment - 2), moment, min(last, moment + 2))))
+        transfer["warnings"].append("예전 기록의 대표 이미지 시각은 추출 규칙과 영상 범위로 추정했습니다.")
+    if not isinstance(times, dict) or set(times) != set(KEYFRAME_ROLES) or any(
+        isinstance(value, bool) or not isinstance(value, (int, float))
+        or not math.isfinite(value) or not 0 <= value <= clip_duration
+        for value in times.values()
+    ) or not times["before"] <= times["moment"] <= times["after"]:
+        raise ValueError("invalid keyframe timestamps")
+    images = []
+    for content in keyframes:
+        if not content.startswith(b"\xff\xd8"):
+            raise ValueError("invalid JPEG keyframe")
+        image = cv2.imdecode(np.frombuffer(content, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if image is None:
+            raise ValueError("invalid JPEG keyframe")
+        images.append(image)
+    for width in (480, 400, 320, 240, 160):
+        resized = [cv2.resize(image, (width, max(1, round(image.shape[0] * width / image.shape[1]))),
+                              interpolation=cv2.INTER_AREA) for image in images]
+        for quality in (75, 60, 45, 30):
+            encoded_frames = []
+            for role, image in zip(KEYFRAME_ROLES, resized, strict=True):
+                ok, data = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, quality])
+                if not ok:
+                    raise ValueError("could not encode transfer JPEG")
+                content = data.tobytes()
+                encoded_frames.append({
+                    "role": role, "timestamp": times[role],
+                    "jpeg_base64": base64.b64encode(content).decode("ascii"),
+                    "sha256": hashlib.sha256(content).hexdigest(),
+                })
+            transfer["keyframes"] = encoded_frames
+            payload = json.dumps(transfer, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+            if len(payload) <= MAX_TRANSFER_BYTES:
+                return payload
+    raise ValueError("image report exceeds 60,000 bytes")
 
 
 NEGLIGENCE_ITEMS = (

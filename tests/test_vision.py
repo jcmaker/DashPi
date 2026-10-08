@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import pytest
 
 from dashpi.config import OverlaySettings
 from dashpi.vision import YoloDetector, annotate_clip, assign_track_ids, draw_overlays
@@ -42,6 +43,7 @@ def test_annotation_uses_detector_for_all_categories_but_hides_optional_boxes(tm
             {"label": "traffic light", "confidence": 0.8, "box": [70, 5, 90, 40]},
         ]
 
+    times = {}
     artifact, observations, keyframes = annotate_clip(
         source,
         tmp_path / "annotated.mp4",
@@ -53,11 +55,13 @@ def test_annotation_uses_detector_for_all_categories_but_hides_optional_boxes(tm
         tmp_path / "keyframes",
         480,
         "900k",
+        keyframe_timestamps=times,
     )
     assert calls
     assert {item["label"] for item in observations} == {"car", "traffic light"}
     assert len(keyframes) == 3
     assert artifact.path.exists()
+    assert times == pytest.approx({"before": 0.0, "moment": 1.0, "after": 1.9})
 
 
 def test_iou_tracking_keeps_id_for_overlapping_detection():

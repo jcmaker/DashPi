@@ -5,6 +5,7 @@ from contextlib import contextmanager
 import hashlib
 import json
 import os
+import secrets
 import shutil
 from pathlib import Path
 import stat
@@ -30,22 +31,54 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def atomic_write(path: Path, data: bytes) -> FileArtifact:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    partial = path.with_name(path.name + ".partial")
-    with partial.open("wb") as output:
-        output.write(data)
-        output.flush()
-        os.fsync(output.fileno())
-    digest, byte_length = sha256_file(partial), partial.stat().st_size
-    partial.replace(path)
-    # Without syncing the directory the rename itself can be lost on power loss.
-    directory = os.open(path.parent, os.O_RDONLY)
+def atomic_write(path: Path, data: bytes, *, directory_descriptor: int | None = None) -> FileArtifact:
+    owned_directory = directory_descriptor is None
+    if owned_directory:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        directory_descriptor = _open_directory(path.parent)
+    partial = f".{path.name}.{secrets.token_hex(8)}.partial"
+    created = False
     try:
-        os.fsync(directory)
+        _verify_directory(path.parent, directory_descriptor)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+        descriptor = os.open(partial, flags, 0o600, dir_fd=directory_descriptor)
+        created = True
+        try:
+            output = os.fdopen(descriptor, "wb")
+        except BaseException:
+            os.close(descriptor)
+            raise
+        with output:
+            output.write(data)
+            output.flush()
+            os.fsync(output.fileno())
+        _verify_directory(path.parent, directory_descriptor)
+        os.replace(partial, path.name, src_dir_fd=directory_descriptor, dst_dir_fd=directory_descriptor)
+        created = False
+        # Sync the rename so the completed artifact survives power loss.
+        os.fsync(directory_descriptor)
+        _verify_directory(path.parent, directory_descriptor)
     finally:
-        os.close(directory)
-    return FileArtifact(path, byte_length, digest)
+        try:
+            if created:
+                try:
+                    os.unlink(partial, dir_fd=directory_descriptor)
+                except FileNotFoundError:
+                    pass
+        finally:
+            if owned_directory:
+                os.close(directory_descriptor)
+    return FileArtifact(path, len(data), hashlib.sha256(data).hexdigest())
+
+
+def _verify_directory(path: Path, descriptor: int) -> None:
+    current = _open_directory(path)
+    try:
+        expected, actual = os.fstat(descriptor), os.fstat(current)
+        if (expected.st_dev, expected.st_ino) != (actual.st_dev, actual.st_ino):
+            raise OSError("incident directory changed during publication")
+    finally:
+        os.close(current)
 
 
 class IncidentStore:
@@ -60,10 +93,11 @@ class IncidentStore:
             raise KeyError("invalid incident id")
         return self.root / "incidents" / incident_id
 
-    def save(self, item: IncidentMetadata) -> None:
+    def save(self, item: IncidentMetadata, *, directory_descriptor: int | None = None) -> None:
         atomic_write(
             self.directory(item.incident_id) / "metadata.json",
             json.dumps(item.to_dict(), default=str, sort_keys=True).encode(),
+            directory_descriptor=directory_descriptor,
         )
 
     def load(self, incident_id: str) -> IncidentMetadata:
@@ -102,7 +136,7 @@ class IncidentStore:
             raw.setdefault("analysis_attempts", 0)
             raw.setdefault("next_analysis_at", None)
             raw.setdefault("manual_offset_seconds", None)
-            for key in ("clip", "annotated", "report_json", "report_html"):
+            for key in ("clip", "annotated", "report_json", "report_html", "report_transfer"):
                 if raw.get(key):
                     raw[key] = FileArtifact(
                         Path(raw[key]["path"]),

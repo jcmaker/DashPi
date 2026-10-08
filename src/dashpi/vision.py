@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -196,6 +197,7 @@ def annotate_clip(
     keyframe_dir: Path,
     output_height: int,
     bitrate: str,
+    keyframe_timestamps: dict[str, float] | None = None,
 ) -> tuple[FileArtifact, list[dict], list[FileArtifact]]:
     capture = cv2.VideoCapture(str(source))
     if not capture.isOpened():
@@ -219,7 +221,7 @@ def annotate_clip(
         ("moment.jpg", incident_offset - start),
         ("after.jpg", min(duration - 0.001, incident_offset - start + 2.0)),
     ]
-    nearest: dict[str, tuple[float, np.ndarray] | None] = {name: None for name, _target in targets}
+    nearest: dict[str, tuple[float, np.ndarray, float] | None] = {name: None for name, _target in targets}
     observations, previous, next_id, frame_index = [], [], 1, 0
     try:
         capture.set(cv2.CAP_PROP_POS_MSEC, start * 1000)
@@ -227,7 +229,9 @@ def annotate_clip(
             ok, frame = capture.read()
             if not ok:
                 break
-            source_seconds = start + frame_index / fps
+            source_seconds = capture.get(cv2.CAP_PROP_POS_MSEC) / 1000
+            if not math.isfinite(source_seconds) or source_seconds < start or (frame_index > 0 and source_seconds <= start):
+                source_seconds = start + frame_index / fps
             current = [
                 {
                     "label": item["label"],
@@ -250,9 +254,9 @@ def annotate_clip(
             annotated = draw_overlays(frame, tracked, overlays)
             for name, target in targets:
                 candidate = nearest[name]
-                difference = abs(frame_index / fps - target)
+                difference = abs(source_seconds - start - target)
                 if candidate is None or difference < candidate[0]:
-                    nearest[name] = (difference, annotated.copy())
+                    nearest[name] = (difference, annotated.copy(), source_seconds)
             if process.stdin is None:
                 raise RuntimeError("ffmpeg stdin unavailable")
             process.stdin.write(annotated.tobytes())
@@ -271,11 +275,13 @@ def annotate_clip(
         raise RuntimeError("could not create all keyframes")
     keyframes = []
     for name, _target in targets:
-        _difference, image = nearest[name]  # type: ignore[misc]
+        _difference, image, timestamp = nearest[name]  # type: ignore[misc]
         encoded, data = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 88])
         if not encoded:
             raise RuntimeError("could not encode keyframe")
         keyframes.append(atomic_write(keyframe_dir / name, data.tobytes()))
+        if keyframe_timestamps is not None:
+            keyframe_timestamps[Path(name).stem] = timestamp
     with partial.open("rb") as completed:
         completed.flush()
         os.fsync(completed.fileno())

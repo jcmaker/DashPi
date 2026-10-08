@@ -1,5 +1,8 @@
 import { Directory, File, Paths } from 'expo-file-system'
 import { presentShareSheet } from 'dashpi-share'
+import * as Crypto from 'expo-crypto'
+import { prepareReportShare } from './saved-reports'
+import type { ValidatedNativeReport } from './native-report'
 import {
   isShareCacheName,
   randomShareId,
@@ -75,11 +78,11 @@ export async function shareReport(file: {
   name: string
   mediaType: string
   payload: Uint8Array
-}): Promise<ShareOutcome> {
+}, verified?: ValidatedNativeReport): Promise<ShareOutcome> {
   if (shareInProgress) return { status: 'busy' }
   shareInProgress = true
   try {
-    await shareReceivedReport(file)
+    await shareReceivedReport(await prepareReportShare(file, digestReportImage, verified))
     return { status: 'shared' }
   } catch (error) {
     const reason = error instanceof Error && error.message.trim()
@@ -89,4 +92,11 @@ export async function shareReport(file: {
   } finally {
     shareInProgress = false
   }
+}
+
+export async function digestReportImage(payload: Uint8Array): Promise<string> {
+  const input = new Uint8Array(payload.byteLength)
+  input.set(payload)
+  const digest = new Uint8Array(await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, input))
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('')
 }

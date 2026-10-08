@@ -40,6 +40,7 @@ class IncidentMetadata:
     annotated: FileArtifact | None = None
     report_json: FileArtifact | None = None
     report_html: FileArtifact | None = None
+    report_transfer: FileArtifact | None = None
     report_model: str | None = None
     report_generated_at: str | None = None
     transitions: list[dict[str, str]] = field(default_factory=list)
@@ -77,7 +78,7 @@ class IncidentMetadata:
 
     def to_dict(self) -> dict:
         data = asdict(self)
-        for key in ("clip", "annotated", "report_json", "report_html"):
+        for key in ("clip", "annotated", "report_json", "report_html", "report_transfer"):
             artifact = getattr(self, key)
             if artifact:
                 data[key] = {

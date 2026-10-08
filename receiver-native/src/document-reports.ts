@@ -50,14 +50,18 @@ export function documentReportStore(): ReportStore {
     list() {
       const files = directory('files')
       const types = directory('types')
-      if (!files.exists || !types.exists) return []
+      if (!files.exists) return []
       const saved: SavedReport[] = []
       for (const entry of files.list()) {
         if (!(entry instanceof File)) continue
         if (!isSafeReportName(entry.name)) continue
-        const media = new File(types, entry.name)
-        if (!media.exists) continue
-        saved.push({ name: entry.name, mediaType: media.textSync(), size: entry.size })
+        try {
+          const media = new File(types, entry.name)
+          if (!media.exists) throw new Error('missing media type')
+          saved.push({ name: entry.name, mediaType: media.textSync(), size: entry.size })
+        } catch {
+          saved.push({ name: entry.name, mediaType: 'application/octet-stream', size: 0, unreadable: true })
+        }
       }
       saved.sort((left, right) => left.name.localeCompare(right.name))
       return saved
