@@ -211,6 +211,26 @@ python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 ```
 
+### 저장 영상 객체 추적 (YOLO + ByteTrack)
+
+GPT API나 인터넷 연결 없이 저장된 영상에 차량·사람 등의 박스, 추적 ID와 최근 2초 이동 경로를 표시합니다. 원본과 이미 존재하는 출력 파일은 덮어쓰지 않습니다. Pi에 준비된 YOLOv8n ONNX 모델을 사용하는 예시입니다.
+
+```bash
+dashpi track ~/Videos/input.mp4 \
+  --detector-model ~/DashPi-native/models/yolov8n.onnx \
+  --output ~/Videos/input-tracked.mp4
+```
+
+결과는 별도 480p MP4이며 Pi 앱의 **녹화기록 → 전체**에서 열 수 있습니다. 전체 영상에 추적이 적용되고 오디오는 포함하지 않습니다. 현재 YOLO와 ByteTrack은 CPU에서 실행합니다. Hailo-8 가속은 PCIe 리본 연결, Hailo 드라이버와 호환 HEF 모델을 연동한 뒤 사용할 수 있습니다.
+
+Pi에서 기존 `--no-deps` 설치를 사용한다면 추적 라이브러리도 준비해야 합니다. apt의 NumPy/OpenCV를 유지하면서 필요한 패키지만 설치합니다.
+
+```bash
+python -m pip install --no-deps 'supervision>=0.27,<0.28'
+```
+
+Supervision은 SciPy·Matplotlib·Pillow 등을 필요로 합니다. 현재 Pi와 개발 환경에는 이미 설치되어 있습니다. 새 환경에서는 Supervision의 의존성을 함께 준비하세요.
+
 ### 사고 처리 시뮬레이션
 
 먼저 45초 이상의 테스트 영상을 저장소 루트에 `input.mp4`라는 이름으로 준비합니다. 다음 예시는 30초 지점을 trigger로 사용하여 기본 `30초 전 + 15초 후` 구간을 처리합니다.

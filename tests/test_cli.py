@@ -64,3 +64,18 @@ def test_cli_fake_model_runs_offline_and_records_window(tmp_path, monkeypatch, c
 
     output = json.loads(capsys.readouterr().out)
     assert (output["pre_seconds"], output["post_seconds"], output["state"]) == (2.0, 2.0, "ready")
+
+
+def test_tracking_command_runs_offline_and_produces_a_separate_video(tmp_path, monkeypatch, capsys):
+    video = make_video(tmp_path / "source.mp4", 2)
+    output = tmp_path / "tracked.mp4"
+    monkeypatch.setattr("dashpi.cli.YoloDetector", lambda *_args, **_kwargs:
+                        lambda _frame: [{"label": "car", "confidence": 0.9, "box": [10, 10, 60, 60]}])
+    monkeypatch.setattr("dashpi.cli.load_ai_config", lambda *_:
+                        (_ for _ in ()).throw(AssertionError("tracking must not call the AI API")))
+    monkeypatch.setattr(sys, "argv", ["dashpi", "track", str(video), "--detector-model", "model.onnx",
+                                      "--output", str(output)])
+    main()
+    result = json.loads(capsys.readouterr().out)
+    assert Path(result["path"]) == output
+    assert output.is_file()

@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 import math
 import os
 from pathlib import Path
 import subprocess
+from tempfile import TemporaryDirectory
 
 import cv2
 import numpy as np
 
 from dashpi.config import OverlaySettings
 from dashpi.models import FileArtifact
+from dashpi.media import probe_duration
 from dashpi.storage import atomic_write, sha256_file
 
 
@@ -109,33 +112,57 @@ def should_draw(label: str, overlays: OverlaySettings) -> bool:
     )
 
 
-def box_iou(left: list[int], right: list[int]) -> float:
-    x1, y1 = max(left[0], right[0]), max(left[1], right[1])
-    x2, y2 = min(left[2], right[2]), min(left[3], right[3])
-    intersection = max(0, x2 - x1) * max(0, y2 - y1)
-    left_area = max(0, left[2] - left[0]) * max(0, left[3] - left[1])
-    right_area = max(0, right[2] - right[0]) * max(0, right[3] - right[1])
-    union = left_area + right_area - intersection
-    return intersection / union if union else 0.0
+class ByteTracker:
+    def __init__(self, fps: float):
+        import supervision as sv
 
+        self.sv = sv
+        # ByteTrack adds 0.1 for new tracks; 0.35 keeps the detector's 0.45 birth threshold.
+        self.trackers = {
+            COCO_LABELS.index(label): sv.ByteTrack(track_activation_threshold=0.35,
+                                                  frame_rate=max(1, round(fps)))
+            for label in sorted(DETECTABLE_LABELS)
+        }
+        self.track_ids: dict[tuple[int, int], int] = {}
+        self.next_id = 1
+        self.traces = sv.TraceAnnotator(position=sv.Position.BOTTOM_CENTER,
+                                       trace_length=max(2, round(fps * 2)))
 
-def assign_track_ids(previous: list[dict], current: list[dict], next_id: int) -> tuple[list[dict], int]:
-    assigned, used = [], set()
-    for detection in current:
-        matches = [
-            item
-            for item in previous
-            if item["track_id"] not in used
-            and item["label"] == detection["label"]
-            and box_iou(item["box"], detection["box"]) >= 0.30
+    def update(self, frame: np.ndarray, current: list[dict], overlays: OverlaySettings) -> list[dict]:
+        detections = self.sv.Detections(
+            xyxy=np.array([item["box"] for item in current], dtype=np.float32).reshape(-1, 4),
+            confidence=np.array([item["confidence"] for item in current], dtype=np.float32),
+            class_id=np.array([COCO_LABELS.index(item["label"]) for item in current], dtype=int),
+        )
+        classes = []
+        alive = set()
+        for class_id, tracker in self.trackers.items():
+            tracked_class = tracker.update_with_detections(detections[detections.class_id == class_id])
+            alive.update((class_id, track.external_track_id)
+                         for track in tracker.tracked_tracks + tracker.lost_tracks)
+            for index, local_id in enumerate(tracked_class.tracker_id):
+                key = (class_id, int(local_id))
+                if key not in self.track_ids:
+                    self.track_ids[key] = self.next_id
+                    self.next_id += 1
+                tracked_class.tracker_id[index] = self.track_ids[key]
+            classes.append(tracked_class)
+        self.track_ids = {key: value for key, value in self.track_ids.items() if key in alive}
+        tracked = self.sv.Detections.merge(classes)
+        if not len(tracked):
+            tracked.tracker_id = np.array([], dtype=int)
+        # Supervision 0.27 trims by populated frames; expire paths by video time across gaps.
+        trace = self.traces.trace
+        keep = trace.frame_id >= trace.current_frame_id - trace.max_size + 1
+        trace.frame_id, trace.xy, trace.tracker_id = trace.frame_id[keep], trace.xy[keep], trace.tracker_id[keep]
+        visible = np.array([should_draw(COCO_LABELS[index], overlays) for index in tracked.class_id], dtype=bool)
+        self.traces.annotate(frame, tracked[visible])
+        return [
+            {"label": COCO_LABELS[class_id], "confidence": float(confidence),
+             "box": box.astype(int).tolist(), "track_id": int(track_id)}
+            for box, confidence, class_id, track_id in
+            zip(tracked.xyxy, tracked.confidence, tracked.class_id, tracked.tracker_id, strict=True)
         ]
-        if matches:
-            track_id = max(matches, key=lambda item: box_iou(item["box"], detection["box"]))["track_id"]
-        else:
-            track_id, next_id = next_id, next_id + 1
-        used.add(track_id)
-        assigned.append({**detection, "track_id": track_id})
-    return assigned, next_id
 
 
 def lane_lines(frame: np.ndarray) -> list[tuple[int, int, int, int]]:
@@ -159,6 +186,7 @@ def lane_lines(frame: np.ndarray) -> list[tuple[int, int, int, int]]:
 
 
 def draw_overlays(frame: np.ndarray, detections: list[dict], overlays: OverlaySettings) -> np.ndarray:
+    label_scale = max(1.0, frame.shape[0] / 480)
     detected_lanes = lane_lines(frame) if overlays.lanes else []
     relevant = max(
         (item for item in detections if item["label"] in ROAD_USERS),
@@ -174,11 +202,11 @@ def draw_overlays(frame: np.ndarray, detections: list[dict], overlays: OverlaySe
         cv2.putText(
             frame,
             f'{item["label"]} #{item["track_id"]}',
-            (x1, max(18, y1 - 5)),
+            (x1, max(round(18 * label_scale), y1 - 5)),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
+            0.5 * label_scale,
             color,
-            1,
+            max(1, round(label_scale)),
             cv2.LINE_AA,
         )
     for x1, y1, x2, y2 in detected_lanes:
@@ -198,6 +226,7 @@ def annotate_clip(
     output_height: int,
     bitrate: str,
     keyframe_timestamps: dict[str, float] | None = None,
+    collect_observations: bool = True,
 ) -> tuple[FileArtifact, list[dict], list[FileArtifact]]:
     capture = cv2.VideoCapture(str(source))
     if not capture.isOpened():
@@ -222,8 +251,9 @@ def annotate_clip(
         ("after.jpg", min(duration - 0.001, incident_offset - start + 2.0)),
     ]
     nearest: dict[str, tuple[float, np.ndarray, float] | None] = {name: None for name, _target in targets}
-    observations, previous, next_id, frame_index = [], [], 1, 0
+    observations, frame_index = [], 0
     try:
+        tracker = ByteTracker(fps)
         capture.set(cv2.CAP_PROP_POS_MSEC, start * 1000)
         while frame_index / fps < duration:
             ok, frame = capture.read()
@@ -240,17 +270,18 @@ def annotate_clip(
                 }
                 for item in detector(frame)
             ]
-            tracked, next_id = assign_track_ids(previous, current, next_id)
-            observations.extend(
-                {
-                    "timestamp": round(source_seconds, 3),
-                    "track_id": item["track_id"],
-                    "label": item["label"],
-                    "confidence": round(item["confidence"], 4),
-                    "box": item["box"],
-                }
-                for item in tracked
-            )
+            tracked = tracker.update(frame, current, overlays)
+            if collect_observations:
+                observations.extend(
+                    {
+                        "timestamp": round(source_seconds, 3),
+                        "track_id": item["track_id"],
+                        "label": item["label"],
+                        "confidence": round(item["confidence"], 4),
+                        "box": item["box"],
+                    }
+                    for item in tracked
+                )
             annotated = draw_overlays(frame, tracked, overlays)
             for name, target in targets:
                 candidate = nearest[name]
@@ -260,7 +291,7 @@ def annotate_clip(
             if process.stdin is None:
                 raise RuntimeError("ffmpeg stdin unavailable")
             process.stdin.write(annotated.tobytes())
-            previous, frame_index = tracked, frame_index + 1
+            frame_index += 1
         if process.stdin is not None and not process.stdin.closed:
             process.stdin.close()
         if process.wait() != 0:
@@ -288,3 +319,25 @@ def annotate_clip(
     artifact = FileArtifact(output, partial.stat().st_size, sha256_file(partial))
     partial.replace(output)
     return artifact, observations, keyframes
+
+
+def track_video(source: Path, output: Path, detector) -> FileArtifact:
+    if not source.is_file():
+        raise FileNotFoundError(f"영상을 찾을 수 없습니다: {source}")
+    if output.exists() or output.is_symlink() or source.resolve() == output.resolve():
+        raise FileExistsError(f"원본이나 기존 파일을 덮어쓰지 않습니다: {output}")
+    duration = probe_duration(source)
+    if not math.isfinite(duration) or duration <= 0:
+        raise ValueError("재생 가능한 영상 길이를 확인할 수 없습니다.")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix=".dashpi-track-", dir=output.parent) as temporary:
+        work = Path(temporary)
+        artifact, _, _ = annotate_clip(source, work / "tracked.mp4", 0, duration, duration / 2,
+                                       detector, OverlaySettings(), work / "keyframes", 480, "900k",
+                                       collect_observations=False)
+        completed = replace(artifact, path=output, duration=probe_duration(artifact.path))
+        if not math.isfinite(completed.duration) or completed.duration < duration - 0.15:
+            raise RuntimeError("incomplete tracking video: decoding stopped before the end")
+        # A hard link publishes atomically and rejects a destination created during processing.
+        output.hardlink_to(artifact.path)
+        return completed
