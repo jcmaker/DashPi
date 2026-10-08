@@ -2,6 +2,8 @@
 
 Android 앱은 태그를 푸시하면 GitHub Actions가 서명된 APK를 만들어 GitHub Release로 올립니다.
 
+1.2.0부터 LCD QR은 대표 이미지 3장과 JSON을 보내고 앱이 리포트를 표시합니다. 앱을 먼저 릴리스·설치한 뒤 Pi를 업데이트하세요. 예전 HTML 리포트도 계속 열립니다. [1.2.0 변경 사항](../docs/releases/1.2.0.md)
+
 Pi 없이 수신을 확인하려면 [테스트 QR](../docs/assets/optical-scan-check.png)을 다른 화면에 띄워 앱으로 비춥니다. 정상 수신 시 `scan-check.html` 검증 완료가 표시됩니다.
 
 ```bash

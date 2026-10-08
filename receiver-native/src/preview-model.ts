@@ -1,3 +1,6 @@
+import { parseTransferReport, REPORT_MEDIA_TYPE, REPORT_OPEN_FAILED } from './native-report.ts'
+import type { NativeReport } from './native-report.ts'
+
 export const PLAYBACK_UNAVAILABLE = '이 영상은 재생할 수 없습니다. 공유하거나 파일로 저장하세요.'
 export const PREVIEW_OPEN_FAILED = '미리보기를 열지 못했습니다. 공유해서 저장할 수 있습니다.'
 export const PREVIEW_PREPARING = '미리보기를 준비하고 있습니다.'
@@ -21,6 +24,7 @@ export type EmbeddedVideo = {
 }
 
 export type PreviewModel =
+  | { kind: 'native-report'; report: NativeReport }
   | { kind: 'html'; html: string; videos: EmbeddedVideo[]; playbackNotice: string | null }
   | { kind: 'video'; filename: string }
   | { kind: 'message'; message: string }
@@ -153,6 +157,13 @@ function prepareHtml(html: string): { html: string; videos: EmbeddedVideo[]; pla
 
 export function previewForFile(file: PreviewFile): PreviewModel {
   const mediaType = baseMediaType(file.mediaType)
+  if (mediaType === REPORT_MEDIA_TYPE) {
+    try {
+      return { kind: 'native-report', report: parseTransferReport(file.payload) }
+    } catch {
+      return { kind: 'message', message: REPORT_OPEN_FAILED }
+    }
+  }
   if (mediaType === 'text/html') {
     const html = decodeUtf8(file.payload)
     if (html === null || !html.trim()) return { kind: 'message', message: PREVIEW_OPEN_FAILED }

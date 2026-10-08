@@ -7,6 +7,8 @@ import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
 import androidx.core.content.FileProvider
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
@@ -31,6 +33,18 @@ class DashpiShareModule : Module() {
 
   override fun definition() = ModuleDefinition {
     Name("DashpiShare")
+
+    AsyncFunction("getSystemInsetsAsync") {
+      val view = appContext.throwingActivity.window.decorView
+      val windowInsets = ViewCompat.getRootWindowInsets(view)
+        ?: throw SharePathException("System insets are not available yet.")
+      val insets = windowInsets.getInsets(
+        WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+      )
+      val density = view.resources.displayMetrics.density
+      mapOf("top" to insets.top / density, "bottom" to insets.bottom / density,
+        "left" to insets.left / density, "right" to insets.right / density)
+    }.runOnQueue(Queues.MAIN)
 
     // The in-app chooser only returns the component the user picked. Read access is
     // granted by starting that activity with FLAG_GRANT_READ_URI_PERMISSION and ClipData.

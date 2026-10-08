@@ -22,7 +22,9 @@ function writeBytes(directory: Directory, name: string, content: string | Uint8A
 }
 
 export function writePreview(model: PreviewModel, payload: Uint8Array): WrittenPreview {
-  if (model.kind === 'message') return { htmlUri: null, readAccessUri: null, videoUris: [] }
+  if (model.kind === 'message' || model.kind === 'native-report') {
+    return { htmlUri: null, readAccessUri: null, videoUris: [] }
+  }
   const root = previewDirectory()
   if (model.kind === 'video') {
     return {

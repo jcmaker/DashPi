@@ -101,6 +101,10 @@ def test_pipeline_creates_ten_second_annotated_report_without_mutating_evidence(
     assert report["transfer_window"] == {"start": 17.5, "end": 27.5}
     assert report["digests"]["clip.mp4"] == result.clip.sha256
     assert report["digests"]["annotated.mp4"] == result.annotated.sha256
+    assert report["keyframe_timestamps"] == {"before": 20.5, "moment": 22.5, "after": 24.5}
+    transfer = json.loads(result.report_transfer.path.read_text())
+    assert result.report_transfer.byte_length <= 60_000
+    assert [frame["timestamp"] for frame in transfer["keyframes"]] == [20.5, 22.5, 24.5]
 
 
 def test_tracker_failure_creates_unannotated_ten_second_report_with_warning(
@@ -119,6 +123,7 @@ def test_tracker_failure_creates_unannotated_ten_second_report_with_warning(
     report = json.loads(result.report_json.path.read_text())
     assert report["object_observations"] == []
     assert "Object tracking failed; the transfer video has no boxes." in report["warnings"]
+    assert report["keyframe_timestamps"] == {"before": 20.5, "moment": 22.5, "after": 24.5}
 
 
 def test_short_successful_annotation_uses_ten_second_tracking_fallback(
@@ -326,3 +331,72 @@ def test_report_write_failure_persists_exposed_clip(pipeline_fixture, monkeypatc
     for artifact in (reloaded.report_json, reloaded.report_html):
         if artifact is not None:
             assert artifact.sha256 == sha256_file(artifact.path)
+
+
+@pytest.mark.parametrize('failure', ['encode', 'write'])
+def test_transfer_failure_keeps_existing_ready_report_and_evidence(pipeline_fixture, monkeypatch, failure):
+    pipeline, incident, segments = pipeline_fixture
+    if failure == 'encode':
+        monkeypatch.setattr(pipeline_module, 'build_transfer_report', lambda *_: (_ for _ in ()).throw(ValueError('cannot fit images')))
+    else:
+        real_write = pipeline_module.atomic_write
+        def fail_transfer_write(path, data):
+            if path.name == 'report.transfer.json':
+                raise OSError('disk full')
+            return real_write(path, data)
+        monkeypatch.setattr(pipeline_module, 'atomic_write', fail_transfer_write)
+    result = pipeline.process(incident, segments, lambda *_: localized_analysis())
+    assert result.state is IncidentState.READY
+    reloaded = pipeline.store.load(incident.incident_id)
+    assert reloaded.report_transfer is None
+    for artifact in (reloaded.clip, reloaded.report_json, reloaded.report_html):
+        assert artifact.sha256 == sha256_file(artifact.path)
+
+
+@pytest.mark.parametrize('moment', [0.0, 6.0])
+def test_new_report_times_remain_inside_evidence_at_boundaries(pipeline_fixture, moment):
+    pipeline, incident, segments = pipeline_fixture
+    result = pipeline.process(incident, segments, lambda *_: localized_analysis(moment))
+    assert result.state is IncidentState.READY
+    transfer = json.loads(result.report_transfer.path.read_text())
+    timestamps = [frame['timestamp'] for frame in transfer['keyframes']]
+    assert 0 <= timestamps[0] <= timestamps[1] <= timestamps[2] < result.clip.duration
+    assert transfer['incident_timestamp'] == moment
+    assert not any('추정' in warning for warning in transfer['warnings'])
+
+
+def test_regeneration_replaces_transfer_and_preserves_original_clip(pipeline_fixture):
+    pipeline, incident, segments = pipeline_fixture
+    first = pipeline.process(incident, segments, lambda *_: localized_analysis())
+    original_clip = first.clip
+    original_transfer = first.report_transfer
+    def replacement(*_args):
+        report = localized_analysis()
+        report['summary'] = '정차한 차량에 다른 차량이 접근합니다.'
+        return report
+    regenerated = pipeline.regenerate_report(incident.incident_id, replacement)
+    assert regenerated.state is IncidentState.READY
+    assert regenerated.clip == original_clip
+    assert regenerated.clip.sha256 == sha256_file(regenerated.clip.path)
+    assert regenerated.report_transfer.sha256 != original_transfer.sha256
+    transfer = json.loads(pipeline.store.load(incident.incident_id).report_transfer.path.read_text())
+    assert transfer['summary'] == replacement()['summary']
+
+
+@pytest.mark.parametrize('collision', [False, True])
+def test_new_transfer_write_cannot_follow_partial_symlink_to_evidence(pipeline_fixture, monkeypatch, collision):
+    import dashpi.storage as storage
+    pipeline, incident, segments = pipeline_fixture
+    real_build = pipeline_module.build_transfer_report
+    monkeypatch.setattr(storage.secrets, 'token_hex', lambda _size: 'collision')
+    def plant_partial(*args):
+        name = '.report.transfer.json.collision.partial' if collision else 'report.transfer.json.partial'
+        partial = pipeline.store.directory(incident.incident_id) / name
+        partial.symlink_to(incident.clip.path)
+        return real_build(*args)
+    monkeypatch.setattr(pipeline_module, 'build_transfer_report', plant_partial)
+    result = pipeline.process(incident, segments, lambda *_: localized_analysis())
+    assert result.state is IncidentState.READY
+    assert result.clip.sha256 == sha256_file(result.clip.path)
+    assert (result.report_transfer is None) == collision
+    assert result.report_html.sha256 == sha256_file(result.report_html.path)

@@ -1046,7 +1046,11 @@ def test_second_launch_exits_while_first_holds_the_lock(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("size", [(480, 320), (800, 480)])
-def test_optical_qr_and_back_button_fit_on_small_lcd(qapp, tmp_path, size):
+@pytest.mark.parametrize("message", [
+    "이미지 리포트 60,000 B · 최소 30.0초 · 손실 시 추가 시간이 필요합니다.",
+    "이미지 전환 실패: 기존 영상 포함 HTML 전송으로 오래 걸릴 수 있습니다. 최소 630.0초.",
+])
+def test_optical_qr_and_back_button_fit_on_small_lcd(qapp, tmp_path, size, message):
     from PySide6.QtWidgets import QPushButton
     from dashpi.desktop import DashPiWindow
 
@@ -1055,7 +1059,7 @@ def test_optical_qr_and_back_button_fit_on_small_lcd(qapp, tmp_path, size):
         window.showNormal()
         window.setFixedSize(*size)
         window.pages.setCurrentWidget(window.optical_page)
-        window.optical_status.setText("휴대폰 수신 PWA로 QR 프레임을 계속 비추세요.")
+        window.optical_status.setText(message)
         window.optical_session = OpticalSession.from_bytes("report.html", bytes(range(256)) * 16, "text/html", 512, 123)
         window.qr_label.resize(640, 480)  # the first frame can land before the page is laid out
         window._render_optical_frame()
@@ -1285,5 +1289,75 @@ def test_detail_video_gets_real_room_on_the_800x480_lcd(qapp, tmp_path):
         corner = window.video.mapTo(window, window.video.rect().bottomRight())
         assert corner.x() < 800 and corner.y() < 480
         assert window.minimumSizeHint().height() <= 480
+    finally:
+        window.close()
+
+
+def test_native_optical_converts_old_report_once_and_reuses_verified_json(qapp, tmp_path, monkeypatch):
+    import dashpi.desktop as desktop
+    from tests.test_report_transfer import make_stored_legacy
+    from dashpi.reports import TRANSFER_MEDIA_TYPE
+
+    store, item, _report = make_stored_legacy(tmp_path)
+    window = desktop.DashPiWindow(FakeSession(), store, tmp_path / 'settings.json')
+    calls = []
+    real_convert = desktop.create_transfer_artifact
+    def count_convert(*args):
+        calls.append(True)
+        return real_convert(*args)
+    monkeypatch.setattr(desktop, 'create_transfer_artifact', count_convert)
+    try:
+        window.start_optical(item)
+        wait_until(qapp, lambda: window.optical_session is not None)
+        session = window.optical_session
+        received = unpack_container(session.encoder.data)
+        assert received.name == 'dashpi-legacy-i.json'
+        assert received.media_type == TRANSFER_MEDIA_TYPE
+        assert len(received.payload) <= 60_000
+        assert '최소' in window.optical_status.text()
+        assert '손실' in window.optical_status.text()
+        assert store.load(item.incident_id).report_transfer is not None
+        window._leave_optical()
+        window.start_optical(item)
+        wait_until(qapp, lambda: window.optical_session is not None)
+        assert calls == [True]
+        assert unpack_container(window.optical_session.encoder.data).payload == received.payload
+    finally:
+        window.close()
+
+
+@pytest.mark.parametrize('damage', ['source', 'transfer_hash', 'transfer_path', 'transfer_symlink'])
+def test_native_optical_falls_back_to_html_with_notice_for_invalid_image_report(qapp, tmp_path, damage):
+    import dashpi.desktop as desktop
+    from tests.test_report_transfer import make_stored_legacy
+    from dashpi.reports import create_transfer_artifact
+    from dataclasses import replace
+
+    store, item, _report = make_stored_legacy(tmp_path / 'data')
+    if damage == 'source':
+        (store.directory(item.incident_id) / 'keyframes' / 'before.jpg').write_bytes(b'corrupted')
+    else:
+        with store.open_incident(item.incident_id) as (current, descriptor, directory):
+            transfer = create_transfer_artifact(store, current, descriptor, directory)
+        item = store.load(item.incident_id)
+        if damage == 'transfer_hash':
+            transfer.path.write_bytes(b'forged')
+        elif damage == 'transfer_path':
+            item.report_transfer = replace(transfer, path=tmp_path / 'outside.json')
+            store.save(item)
+        else:
+            outside = tmp_path / 'outside.json'
+            outside.write_bytes(transfer.path.read_bytes())
+            transfer.path.unlink()
+            transfer.path.symlink_to(outside)
+    window = desktop.DashPiWindow(FakeSession(), store, tmp_path / 'settings.json')
+    try:
+        window.start_optical(item)
+        wait_until(qapp, lambda: window.optical_session is not None)
+        received = unpack_container(window.optical_session.encoder.data)
+        assert received.media_type == 'text/html'
+        assert received.payload == item.report_html.path.read_bytes()
+        assert '기존 영상 포함 HTML' in window.optical_status.text()
+        assert store.load(item.incident_id).state is IncidentState.READY
     finally:
         window.close()

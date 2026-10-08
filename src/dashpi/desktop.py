@@ -44,6 +44,7 @@ from dashpi.optical.session import OpticalSession
 from dashpi.pi_camera import PiCameraRecorder
 from dashpi.pipeline import IncidentPipeline
 from dashpi.ranges import _open_verified_file
+from dashpi.reports import MAX_TRANSFER_BYTES, TRANSFER_MEDIA_TYPE, create_transfer_artifact
 from dashpi.storage import IncidentStore
 from dashpi import theme
 
@@ -466,12 +467,13 @@ class DashPiWindow(QMainWindow):
     def _build_optical(self):
         self.optical_page, layout = page("광학 리포트 전송", back=self._leave_optical)
         self.optical_page.heading.hide()  # the QR needs the height; the title stays for the screen log
-        warning = QLabel("이 QR은 호환 수신기로 누구나 촬영할 수 있습니다. 휴대폰 DashPi 수신 PWA를 여세요.")
+        warning = QLabel("이 QR은 호환 수신기로 누구나 촬영할 수 있습니다. 휴대폰 DashPi 수신 앱을 여세요.")
         warning.setObjectName("caption")
         warning.setWordWrap(True)
         layout.addWidget(warning)
         self.optical_status = QLabel("")
         self.optical_status.setObjectName("status")
+        self.optical_status.setWordWrap(True)
         layout.addWidget(self.optical_status)
         self.qr_label = QLabel()
         self.qr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1118,8 +1120,24 @@ class DashPiWindow(QMainWindow):
 
     def _prepare_optical(self, incident):
         with self.store.open_incident(incident.incident_id) as (current, descriptor, directory):
+            if current.state is not IncidentState.READY:
+                raise ValueError("리포트가 준비되지 않았습니다.")
+            try:
+                artifact = current.report_transfer or create_transfer_artifact(self.store, current, descriptor, directory)
+                if artifact.path != directory / "report.transfer.json" or artifact.byte_length > MAX_TRANSFER_BYTES:
+                    raise ValueError("invalid transfer report artifact")
+                source, _ = _open_verified_file(
+                    descriptor, "report.transfer.json", artifact.byte_length, artifact.sha256
+                )
+                with source:
+                    source.seek(0)
+                    payload = source.read()
+                name = f"dashpi-{current.incident_id[:8]}.json"
+                return OpticalSession.from_bytes(name, payload, TRANSFER_MEDIA_TYPE, 512, secrets.randbits(32))
+            except Exception:
+                log.warning("이미지 리포트 전환 실패; 기존 HTML 전송 사용", exc_info=True)
             artifact = current.report_html
-            if current.state is not IncidentState.READY or artifact is None:
+            if artifact is None:
                 raise ValueError("리포트가 준비되지 않았습니다.")
             if artifact.byte_length > MAX_PAYLOAD:
                 return None
@@ -1148,7 +1166,13 @@ class DashPiWindow(QMainWindow):
             self.optical_status.setText("16 MiB를 초과해 QR 전송을 사용할 수 없습니다. 로컬 리포트는 보존됩니다.")
             return
         self._optical_sequence = 0
-        self.optical_status.setText("휴대폰 수신 PWA로 QR 프레임을 계속 비추세요.")
+        seconds = self.optical_session.encoder.block_count * 0.25
+        # Container bytes include compression and headers; lost frames extend this minimum.
+        if self.optical_session.media_type == TRANSFER_MEDIA_TYPE:
+            message = f"이미지 리포트 {self.optical_session.payload_length:,} B · 최소 {seconds:.1f}초 · 손실 시 추가 시간이 필요합니다."
+        else:
+            message = f"이미지 전환 실패: 기존 영상 포함 HTML 전송으로 오래 걸릴 수 있습니다. 최소 {seconds:.1f}초."
+        self.optical_status.setText(message)
         self._render_optical_frame()
         self.optical_timer.start(250)
 

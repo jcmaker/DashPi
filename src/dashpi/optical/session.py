@@ -11,6 +11,8 @@ class OpticalSession:
     session_id: int
     encoder: FountainEncoder
     total_length: int
+    media_type: str = ""
+    payload_length: int = 0
 
     @classmethod
     def from_file(
@@ -33,7 +35,7 @@ class OpticalSession:
         if not 1 <= block_count < 2**16:
             raise ValueError("invalid optical block count")
         encoder = FountainEncoder(packed, block_size, session_id)
-        return cls(session_id, encoder, len(packed))
+        return cls(session_id, encoder, len(packed), media_type, len(payload))
 
     def frame(self, sequence: int) -> bytes:
         if type(sequence) is not int or not 0 <= sequence < 2**32:

@@ -174,3 +174,42 @@ def test_capture_cut_short_by_a_restart_becomes_a_visible_clip_failure(tmp_path)
     assert store.load("analyzing").state is IncidentState.ANALYZING  # the analysis retrier owns this one
     assert {item.incident_id for item in store.list()} >= {"collecting", "clipping"}  # now listed and deletable
     assert not leftover.exists()
+
+
+def test_atomic_write_never_follows_existing_partial_symlink(tmp_path, monkeypatch):
+    import dashpi.storage as storage
+    evidence = tmp_path / 'clip.mp4'
+    evidence.write_bytes(b'original evidence')
+    monkeypatch.setattr(storage.secrets, 'token_hex', lambda _size: 'collision')
+    partial = tmp_path / '.report.transfer.json.collision.partial'
+    partial.symlink_to(evidence)
+    with pytest.raises(FileExistsError):
+        atomic_write(tmp_path / 'report.transfer.json', b'report')
+    assert evidence.read_bytes() == b'original evidence'
+    assert partial.is_symlink()
+    assert not (tmp_path / 'report.transfer.json').exists()
+
+
+def test_atomic_write_cleans_its_temp_after_file_fsync_failure(tmp_path, monkeypatch):
+    import dashpi.storage as storage
+    destination = tmp_path / 'metadata.json'
+    destination.write_bytes(b'original metadata')
+    monkeypatch.setattr(storage.os, 'fsync', lambda _fd: (_ for _ in ()).throw(OSError('disk failure')))
+    with pytest.raises(OSError, match='disk failure'):
+        atomic_write(destination, b'new metadata')
+    assert destination.read_bytes() == b'original metadata'
+    assert not list(tmp_path.glob('*.partial'))
+
+
+def test_atomic_write_closes_descriptor_when_fdopen_fails(tmp_path, monkeypatch):
+    import dashpi.storage as storage
+    descriptors = []
+    def fail_fdopen(descriptor, mode):
+        descriptors.append(descriptor)
+        raise OSError('cannot create file stream')
+    monkeypatch.setattr(storage.os, 'fdopen', fail_fdopen)
+    with pytest.raises(OSError, match='cannot create file stream'):
+        atomic_write(tmp_path / 'report.transfer.json', b'report')
+    with pytest.raises(OSError):
+        storage.os.fstat(descriptors[0])
+    assert not list(tmp_path.glob('*.partial'))

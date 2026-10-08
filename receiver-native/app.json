@@ -2,7 +2,7 @@
   "expo": {
     "name": "DashPi",
     "slug": "dashpi-receiver",
-    "version": "1.0.0",
+    "version": "1.2.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -19,7 +19,7 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "versionCode": 10000
+      "versionCode": 10200
     },
     "web": {
       "favicon": "./assets/favicon.png"
