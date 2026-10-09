@@ -1225,6 +1225,80 @@ def test_detail_actions_stay_on_the_lcd_and_the_back_arrow_returns_to_records(qa
         window.close()
 
 
+def test_tracking_overlay_is_main_thread_and_cleared_on_stale_and_stop(qapp, tmp_path):
+    import threading
+    from dashpi.desktop import DashPiWindow
+    session = FakeSession()
+    window = DashPiWindow(session, IncidentStore(tmp_path), tmp_path / 'settings.json')
+    calls = []
+    class Preview:
+        def set_overlay(self, overlay):
+            assert threading.current_thread() is threading.main_thread()
+            calls.append(overlay)
+    window._preview_widget = Preview()
+    result = [time.monotonic(), (360, 640), []]
+    session.recorder.tracking_worker = SimpleNamespace(snapshot=lambda: (result, None))
+    session.recorder.recording = True
+    window._poll_tracking()
+    assert calls[-1].shape == (360, 640, 4)
+    result[0] -= 2
+    window._poll_tracking()
+    assert calls[-1] is None
+    result[0] = time.monotonic()
+    window._poll_tracking()
+    session.recorder.recording = False
+    window._poll_tracking()
+    assert calls[-1] is None
+    window._preview_widget = None
+    window.close()
+
+
+def test_tracking_clear_skips_closed_camera_and_resets_visibility(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+    session = FakeSession()
+    window = DashPiWindow(session, IncidentStore(tmp_path), tmp_path / 'settings.json')
+    class ClosedPreview:
+        def set_overlay(self, overlay):
+            raise RuntimeError('camera_config is empty')
+    window._preview_widget = ClosedPreview()
+    session.recorder.picam2 = None
+    window._tracking_overlay_visible = True
+    window._clear_tracking_overlay()
+    assert not window._tracking_overlay_visible
+    window._preview_widget = None
+    window.close()
+
+
+def test_tracking_overlay_failure_disables_only_tracking_and_preserves_status(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+    session = FakeSession()
+    window = DashPiWindow(session, IncidentStore(tmp_path), tmp_path / 'settings.json')
+    calls = []
+    class FailedPreview:
+        def set_overlay(self, overlay):
+            calls.append(overlay)
+            raise RuntimeError('overlay failed')
+    window._preview_widget = FailedPreview()
+    session.recorder.recording = True
+    stopped = Event()
+    session.recorder.tracking_worker = SimpleNamespace(
+        snapshot=lambda: ((time.monotonic(), (360, 640), []), None), stop_event=stopped)
+    window.record_status.setText('사고 이후 15초 수집 중')
+    window._poll_tracking()
+    window._poll_tracking()
+    assert session.recorder.recording
+    assert stopped.is_set()
+    assert len(calls) == 1
+    assert window.record_status.text().startswith('사고 이후 15초 수집 중')
+    assert 'overlay failed' in window.record_status.text()
+    window._tracking_overlay_visible = True
+    window._clear_tracking_overlay()  # Cleanup errors must also be contained.
+    assert not window._tracking_overlay_visible
+    window._preview_widget = None
+    session.recorder.recording = False
+    window.close()
+
+
 def test_preview_is_dropped_once_the_camera_closes_under_it(qapp, tmp_path):
     from dashpi.desktop import DashPiWindow
 
