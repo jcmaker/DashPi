@@ -1,174 +1,108 @@
-<div align="center">
-  <img src="src/dashpi/web/icon.svg" width="88" alt="DashPi 로고">
-  <h1>DashPi</h1>
-  <p><strong>인터넷 없이 사고 영상을 보존하고, 로컬 AI로 분석하는 스마트 대시캠</strong></p>
-  <p>School Capstone Project · Offline-first · Evidence-first</p>
-  <p>
-    <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python 3.11 이상">
-    <img src="https://img.shields.io/badge/FastAPI-0.116%2B-009688?logo=fastapi&logoColor=white" alt="FastAPI 0.116 이상">
-    <img src="https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white" alt="TypeScript 5.9">
-    <img src="https://img.shields.io/badge/Cloud-Not%20Required-222222" alt="클라우드 불필요">
-  </p>
-</div>
+<p align="center">
+  <img src="src/dashpi/web/icon.svg" width="80" alt="DashPi 로고" />
+</p>
 
-> **현재 단계:** 사고 처리·광학 전송과 Pi용 PySide6 네이티브 앱의 데스크톱 자동 테스트를 통과했습니다. Pi 5 카메라·LCD 실기에서 동시 프리뷰/녹화, 성능, 전원 차단 복구는 아직 검증하지 않았습니다. 현재 장치는 카메라와 화면만 사용합니다.
+<h1 align="center">DashPi</h1>
 
-## 프로젝트 소개
+<p align="center">
+  <strong>사고 영상은 먼저 지키고, AI 분석은 그다음에 합니다.</strong><br />
+  Raspberry Pi에서 사고 구간을 보존하고, 장면을 정리한 리포트를 휴대폰으로 전하는 스마트 대시캠
+</p>
 
-사고 증거가 가장 필요한 순간에 인터넷 연결이나 외부 서버를 신뢰할 수 없다면 어떻게 해야 할까요?
+<p align="center">
+  <a href="#why">무엇을 해결하나요?</a> ·
+  <a href="#status">현재 가능한 일</a> ·
+  <a href="#start">직접 실행하기</a> ·
+  <a href="#architecture">구조</a> ·
+  <a href="#docs">문서 길잡이</a>
+</p>
 
-DashPi는 사고 영상을 먼저 안전하게 보존하고, AI 분석으로 사고 시점과 장면을 정리합니다. Pi에서는 네이티브 앱으로 녹화를 제어하며, 휴대폰에는 별도 네이티브 앱 없이 수신 PWA를 사용합니다. 기존 웹 프로토타입에는 다음 전송 경로가 있습니다.
+> **현재 구현 기준:** Pi용 PySide6 앱과 사고 처리·광학 QR 전송 코드는 구현되어 자동 테스트를 거쳤습니다. 휴대폰에는 Expo 수신 앱 1.2.2와 웹 수신기가 있습니다. Pi 5 카메라·LCD의 장시간 동작과 전원 차단 복구, Android 실기의 PDF 저장·공유는 아직 검증하지 않았습니다. AI 분석은 현재 외부 API 연결이 필요하며, 오프라인에서는 원본 영상을 보존하고 분석을 기다립니다.
 
-- **Local Wi-Fi:** 영상처럼 큰 파일을 HTTP Range 기반으로 재생·이어받기
-- **Optical QR:** 네트워크 없이 최대 16 MiB 파일을 애니메이션 QR로 전송
+<a id="why"></a>
 
-주 사용자는 연결이 불안정하거나 클라우드 업로드를 원하지 않는 운전자입니다. 핵심 가치는 다음 한 문장으로 요약됩니다.
+## 무엇을 해결하나요?
 
-> **Understand and preserve an accident without depending on the cloud.**
+사고 직후에는 영상을 남기는 일이 분석보다 먼저입니다. 인터넷이 끊기거나 AI가 실패하더라도 증거 영상이 없어지면 안 됩니다. DashPi는 사고 전후 구간을 **원본 clip으로 먼저 저장·검증**하고, 그다음 AI가 화면에 보이는 장면을 시간순으로 정리합니다.
 
-## 왜 DashPi인가
+운전자는 Pi 화면에서 사고를 표시하거나 보관된 MP4를 열어 분석할 수 있습니다. 완성된 리포트는 Pi에 남고, 애니메이션 QR로 휴대폰에 전달할 수 있습니다. **AI 리포트는 참고용 장면 정리이며 과실이나 법적 책임을 판정하지 않습니다.**
 
-| 설계 원칙 | 적용 방식 |
-| --- | --- |
-| Offline-first | 녹화 처리, clip 생성, AI 분석, 결과 조회가 외부 클라우드 없이 동작합니다. |
-| Evidence-first | AI 분석 실패가 유효한 사고 영상을 삭제하거나 무효화하지 않습니다. |
-| Dual transfer | 대용량은 Local Wi-Fi, 소용량은 Animated QR로 전송합니다. |
-| Verifiable | 결과 저장과 전송 완료 여부를 SHA-256으로 검증합니다. |
-| Hardware-aware | QR 크기·FPS·block size 등 물리 환경에 민감한 값을 보정할 수 있습니다. |
+### 우리가 지키는 원칙
 
-## 동작 화면
+| 원칙 | 제품에 반영하는 방식 |
+|---|---|
+| **증거가 분석보다 먼저** | 사고 전 30초·후 15초의 `clip.mp4`를 저장하고 SHA-256으로 검증합니다. AI 실패는 유효한 clip을 지우지 않습니다. |
+| **연결이 없어도 기록** | 녹화·clip 생성은 네트워크 없이 진행합니다. 외부 AI API가 닿지 않으면 `awaiting_analysis`로 남겨 재시도합니다. |
+| **원본과 해석을 분리** | 원본 clip, 파생 영상, JSON·HTML 리포트와 휴대폰 전송용 자료를 따로 보관합니다. |
+| **받은 파일도 검증** | QR 수신기는 복원한 파일의 길이와 SHA-256이 맞은 뒤에만 저장·열람을 허용합니다. |
 
-목업이 아니라 Raspberry Pi 5에서 실행한 네이티브 앱을 800×480으로 캡처한 화면입니다. 녹화기록은 기기에 있던 실제 기록이며, QR 송신 화면만 데모 리포트로 캡처했습니다.
+### 운전자가 거치는 흐름
 
-### Raspberry Pi 앱
+| 단계 | Pi에서 하는 일 | 휴대폰에서 하는 일 |
+|---|---|---|
+| **기록** | 카메라로 주행 영상을 녹화하거나 기존 MP4를 엽니다. | 필요하지 않습니다. |
+| **사고 표시** | 화면의 **사고 분석**을 눌러 앞뒤 영상을 원본 clip으로 보존합니다. | 필요하지 않습니다. |
+| **분석** | 연결되면 외부 AI API로 장면을 분석하고 리포트를 만듭니다. 연결이 없으면 기다립니다. | 필요하지 않습니다. |
+| **전송·열람** | 검증된 리포트를 애니메이션 QR로 표시합니다. | DashPi 수신 앱으로 QR을 읽고 검증된 리포트를 저장·봅니다. |
 
-| 홈 | 녹화 시작 | 녹화기록 |
-| --- | --- | --- |
-| ![녹화기록, 주행시작, 설정 세 개의 큰 터치 타일이 있는 DashPi 홈 화면](docs/assets/pi-home.png) | ![주행 녹화와 주차 녹화 중 하나를 고르는 녹화 시작 화면](docs/assets/pi-start.png) | ![외부 영상과 날짜별 사고 기록을 보여주는 녹화기록 화면](docs/assets/pi-records.png) |
+이 표는 **현재 코드의 주요 흐름**입니다. 자동 충돌 감지, 물리 트리거, Pi의 핫스팟 자동 제어는 포함하지 않습니다.
 
-| 광학 QR 송신 | 설정 |
-| --- | --- |
-| ![보안 안내와 계속 바뀌는 QR 프레임을 표시하는 광학 리포트 전송 화면](docs/assets/pi-optical-qr.png) | ![녹화 화질, 프레임, 비트레이트, 화면 밝기, 분석 모델과 저장 공간을 보여주는 설정 화면](docs/assets/pi-settings.png) |
+<a id="status"></a>
 
-### 휴대폰과 Local Wi-Fi 웹 UI
+## 지금 어디까지 만들었나요?
 
-| Offline Receiver PWA | 사고 영상·리포트 조회 (웹) | Animated QR 송신 (웹) |
-| --- | --- | --- |
-| ![카메라 프레임과 명시적 저장 동작을 제공하는 DashPi 광학 수신 화면](docs/assets/dashpi-optical-receiver.jpg) | ![사고 영상과 리포트를 함께 보여주는 DashPi 인시던트 웹 화면](docs/assets/dashpi-incidents.jpg) | ![보안 경고와 보정 옵션 및 실제 QR 프레임을 표시하는 DashPi 광학 송신 웹 화면](docs/assets/dashpi-optical-sender.jpg) |
+| 구분 | 현재 상태와 경계 |
+|---|---|
+| **Pi 앱 · 구현/자동 검증** | PySide6 홈·녹화·기록·설정·리포트·QR 화면과 Picamera2 연결 코드를 갖췄습니다. 실제 Pi 화면 캡처가 있지만, 카메라·LCD의 장시간 동시 동작과 성능은 수락 시험 전입니다. |
+| **사고 보존 · 구현/자동 검증** | 세그먼트에서 사고 구간을 추출하고 `.partial` → flush → SHA-256 → 원자적 교체로 저장합니다. AI 분석 실패 후에도 clip을 보존합니다. |
+| **AI·리포트 · 구현/자동 검증** | 기본 OpenRouter인 OpenAI 호환 API로 사고 시점 탐지 → 장면 관찰 → 요약을 수행합니다. 출력 형식을 검증하고 JSON·자급형 HTML 리포트를 만듭니다. 실제 사고 영상에서의 품질은 별도 검증이 필요합니다. |
+| **QR 전송 · 구현/자동 검증** | 기본 전송은 사진 3장과 분석 결과를 담은 60,000바이트 이하 JSON입니다. 변환할 수 없으면 기존 HTML 전송을 시도합니다. 광학 프로토콜 한도는 16 MiB이며 QR은 암호화되지 않습니다. |
+| **휴대폰 앱 · 구현/부분 검증** | Expo 수신 앱 1.2.2가 QR 복원·검증·리포트 열람·PDF 저장/공유 코드를 갖췄습니다. Node 테스트와 Android export는 확인했지만 실제 Android PDF 저장 선택창·공유는 미검증입니다. [1.2.2 기록](docs/releases/1.2.2.md) |
+| **웹 경로 · 별도 프로토타입** | FastAPI가 사고 목록·리포트·HTTP Range 영상 응답을 제공하고, 웹 수신 PWA도 있습니다. Local Wi-Fi 서버와 핫스팟 제어는 Pi 앱에 통합되지 않았습니다. |
+| **실기 수락 시험 필요** | Pi 5 프리뷰/녹화·타임스탬프, LCD 터치, QR 수신률, 발열·메모리·분석 지연, 갑작스러운 전원 차단 후 복구를 측정해야 합니다. |
 
-휴대폰에는 네이티브 앱 없이 사전 설치한 수신 PWA만 사용합니다. 웹 화면은 Local Wi-Fi 전송용 FastAPI 프로토타입이며 Pi 앱 실행에는 필요하지 않습니다.
+완성된 소프트웨어 경로와 **실제 차량·휴대폰에서의 신뢰성**은 다릅니다. 코드·테스트·스크린샷을 실기 수락 시험의 대체 근거로 사용하지 않습니다. 현재 장치 구성은 Pi 5, 카메라, LCD이며 마이크·GPS·배터리 센서는 사용하지 않습니다.
 
-## 시스템 아키텍처
+<a id="start"></a>
 
-DashPi는 마이크로서비스 묶음이 아니라 Raspberry Pi에서 실행되는 하나의 로컬 Python 애플리케이션입니다. 스마트폰에는 Local Wi-Fi용 브라우저 화면과 사전 설치 가능한 Optical Receiver PWA만 존재합니다.
+## 직접 실행하기
 
-```mermaid
-flowchart LR
-    subgraph Device["DashPi / Raspberry Pi"]
-        Source["카메라 또는 샘플 MP4"] --> Segments["2초 영상 세그먼트"]
-        Trigger["Pi 화면의 사고 분석 버튼"] --> Incident["Incident Coordinator"]
-        Segments --> Clip["사고 구간 Clip"]
-        Incident --> Clip
-        Clip --> Hash["SHA-256 + Atomic Storage"]
-        Hash --> AI["AI 분석 (시점 탐지·장면 관찰·요약)"]
-        AI --> Report["JSON + HTML Report"]
-        Report --> Store["Incident Store"]
-        Hash --> Store
-        Store --> API["FastAPI"]
-        Store --> Optical["LT-style Fountain Encoder"]
-    end
+**가장 빠른 확인은 PC에서 테스트 MP4와 가짜 분석기(`fake`)를 사용하는 방법**입니다. 이 경로에는 API 키가 필요하지 않습니다. Python 3.11 이상과 FFmpeg·ffprobe가 필요합니다. macOS에서는 `brew install ffmpeg`로 준비할 수 있습니다.
 
-    subgraph Phone["스마트폰"]
-        Web["Local Web UI"]
-        PWA["Offline Receiver PWA"]
-    end
+### 1. 설치
 
-    API -->|"On-demand Local Wi-Fi / HTTP Range"| Web
-    Optical -->|"Animated QR / Camera"| PWA
+```sh
+git clone https://github.com/jcmaker/DashPi.git
+cd DashPi
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev]"
 ```
 
-## 사고 처리 흐름
+### 2. 사고 처리 시뮬레이션
 
-기본 사고 구간은 trigger 전 30초부터 trigger 후 15초까지입니다. Clip 생성 실패와 AI 분석 실패를 분리하여, 분석기 장애가 이미 확보한 증거에 영향을 주지 않게 했습니다.
+저장소 루트에 **45초 이상의 테스트 영상**을 `input.mp4`로 둔 뒤 실행합니다.
 
-```mermaid
-stateDiagram-v2
-    [*] --> collecting_post_trigger
-    collecting_post_trigger --> clipping: 후속 15초 수집 완료
-    clipping --> analyzing: clip 저장 및 SHA-256 완료
-    clipping --> clip_failed: clip 생성 실패
-    analyzing --> ready: 리포트 검증 및 저장 완료
-    analyzing --> analysis_failed: 모델 오류 또는 잘못된 출력
-    analyzing --> awaiting_analysis: 인터넷 없음·일시 오류
-    awaiting_analysis --> analyzing: 연결 후 자동 재시도
-    ready --> [*]
-    analysis_failed --> [*]: 유효한 clip은 보존
-    clip_failed --> [*]
+```sh
+dashpi simulate input.mp4 --trigger-seconds 30 --data-root ./demo-data --ai-model fake
 ```
 
-1. 짧은 영상 세그먼트를 계속 생성합니다.
-2. 사고 trigger가 들어오면 앞·뒤 구간과 겹치는 세그먼트를 선택합니다.
-3. `clip.mp4.partial`을 완성하고 flush·hash 후 원자적으로 이름을 바꿉니다.
-4. 12개 프레임과 clip 기준 timestamp로 사고 시점을 찾고, 그 전후를 더 촘촘히 관찰합니다.
-5. 사고 시점 앞뒤 5초를 10초 파생 영상으로 만들고, 선택한 항목만 detection·tracking overlay로 표시합니다.
-6. 검증된 JSON과 자급형 HTML 리포트를 저장한 뒤 Local Wi-Fi 또는 Optical QR 전송 방식을 제공합니다.
+결과는 `demo-data/incidents/<incident_id>/`에 저장됩니다. `clip.mp4`는 원본 사고 구간, `annotated.mp4`는 파생 영상이며 `report.json`, `report.html`, `metadata.json`이 함께 생성됩니다. `fake` 결과는 동작 확인용이며 실제 AI 분석 품질을 보여 주지 않습니다.
 
-## 두 가지 전송 방식
+### 3. 로컬 웹 프로토타입에서 보기
 
-| | Local Wi-Fi | Optical QR |
-| --- | --- | --- |
-| 적합한 데이터 | 전체 사고 영상, 리포트 | 리포트와 16 MiB 이하 파일 |
-| 연결 | 필요할 때만 켜는 로컬 핫스팟 | 화면과 카메라의 line-of-sight |
-| 전송 | FastAPI + HTTP Range | Animated QR + LT-style fountain symbols |
-| 손실 대응 | Range 재요청·이어받기 | 순서가 바뀌거나 일부 유실된 frame 복원 |
-| 완료 조건 | 저장된 digest와 파일 검증 | 전체 길이 및 SHA-256 일치 |
-| 기밀성 | WPA2 핫스팟 운영을 전제로 설계 | **암호화되지 않음** — 주변 카메라가 캡처 가능 |
+```sh
+dashpi-server --data-root ./demo-data --host 127.0.0.1 --port 8000
+```
 
-Optical QR은 일반 카메라 앱만으로 복원할 수 없으므로, 수신 PWA를 온라인 환경에서 미리 설치해야 합니다. PWA shell은 오프라인 캐시되며 검증을 통과한 파일만 저장 버튼을 노출합니다.
+브라우저에서 <http://127.0.0.1:8000/>을 엽니다. 이 서버는 **별도 로컬 프로토타입**이며 공용 인터넷에 직접 노출하는 운영 모드가 아닙니다.
 
-## 구현 현황
+<details>
+<summary><strong>Raspberry Pi 5에서 네이티브 앱 실행</strong> · 실기 수락 시험 전</summary>
 
-### 구현 및 자동 검증 완료
+Raspberry Pi OS Desktop 64-bit, Pi 카메라 모듈과 LCD가 필요합니다. Picamera2/OpenCV는 Pi OS 패키지를 쓰고, 가상환경에서 시스템 패키지가 보이게 합니다.
 
-- 샘플 MP4 기반 세그먼트 생성, 사고 구간 선택 및 clip 생성
-- AI 분석 요청·출력 schema 검증, 인터넷이 없을 때 분석 대기와 자동 재시도, 하루 분석 한도
-- clip 기준 timestamp를 이용한 사고 시점 localization과 앞뒤 5초 annotated video 생성
-- 신호등·차선·표지판 독립 overlay 설정, object tracking 및 tracking 실패 fallback
-- 영상·핵심 장면·통계가 포함된 자급형 HTML 리포트와 브라우저 PDF 저장
-- 비동기 리포트 재생성, 진행 상태 polling 및 16 MiB Optical 크기 fallback
-- `.partial` → flush → SHA-256 → atomic rename 저장 순서
-- AI 실패 시 `analysis_failed` 상태와 clip 보존
-- incident 목록, 리포트 조회, ranged video 응답을 제공하는 FastAPI
-- 독립적으로 정의한 DashPi Optical v1 frame·container protocol
-- Python sender와 TypeScript receiver 간 golden vector 호환
-- 중복·순서 변경·결정적 15% frame loss가 포함된 1 MiB 복구 시나리오
-- 설치 가능한 offline optical receiver PWA
-
-### Raspberry Pi 하드웨어 수락 시험 필요
-
-- Pi 5 Picamera2 단일 카메라로 동시 Qt 프리뷰·MP4 녹화, 장시간 안정성 및 timestamp 정확도
-- LCD 터치 제어, 15초 후 자동 종료 및 바탕화면 실행 아이콘
-- 실제 화면 밝기·QR scale·FPS·휴대폰 decode rate 보정
-- AI 분석 응답 지연, 메모리, 발열 및 전력 측정
-- 갑작스러운 전원 차단 이후 저장소 복구
-
-현재 Pi 앱에는 물리 트리거와 핫스팟 제어가 없습니다. Local Wi-Fi 서버는 별도의 기존 웹 프로토타입이며 Pi 앱 실행에 필요하지 않습니다.
-
-### MVP 범위 밖
-
-- 클라우드 업로드·클라우드 AI·원격 계정
-- iOS·Android 네이티브 앱
-- 자동 충돌 감지 및 Bluetooth trigger
-- Optical QR 암호화·pairing
-- 사고 과실에 대한 법적 판단
-
-## 빠른 시작
-
-### Raspberry Pi 5 네이티브 앱 (실기 수락 시험 전)
-
-Raspberry Pi OS Desktop 64-bit, Pi 카메라 모듈, LCD가 필요합니다. 마이크·GPS·배터리 센서는 사용하지 않습니다. Picamera2는 Pi OS의 libcamera와 맞는 apt 패키지로 설치합니다. 가상환경은 apt의 Picamera2/OpenCV가 보이도록 `--system-site-packages`로 만들고, pip의 OpenCV wheel이 apt NumPy를 덮어쓰지 않도록 앱 자체는 `--no-deps`로 설치합니다.
-
-```bash
+```sh
 sudo apt update
 sudo apt install python3-venv python3-picamera2 python3-opencv ffmpeg
 python3 -m venv --system-site-packages .venv
@@ -181,184 +115,99 @@ mkdir -p ~/.config/dashpi && cp ai.env.example ~/.config/dashpi/ai.env && chmod 
 dashpi-app
 ```
 
-`dashpi-install-desktop`은 sudo로 앱 메뉴 항목을 등록하고 현재 사용자의 바탕화면에 해당 항목의 바로가기를 만듭니다. Raspberry Pi OS의 PCManFM은 일반 실행형 `.desktop` 파일 클릭에 확인창을 띄우므로, 이 바로가기가 있어야 확인창 없이 전체화면 앱이 열립니다. 녹화는 자동 시작되지 않습니다. 홈의 **주행시작**에서 주행/수동 주차를 고른 뒤, 녹화 화면 아래 **사고 분석** 또는 **종료**를 누릅니다. 사고 분석은 누른 시점을 기준으로 이전 30초와 이후 15초를 보존합니다. 이후 15초 중 종료를 누르면 수집 완료 후 자동 종료합니다. 완성된 사고 상세에서 **리포트 QR 전송**을 누르고 휴대폰의 사전 설치된 DashPi 수신 PWA로 애니메이션 QR을 읽습니다. 일반 QR 카메라 앱만으로는 복원할 수 없습니다.
+실제 AI 분석에는 `~/.config/dashpi/ai.env`의 `DASHPI_AI_API_KEY`가 필요합니다. 기본 API 주소는 `ai.env.example`에서 확인할 수 있습니다. 녹화는 자동으로 시작하지 않습니다. 앱에서 **주행시작 → 주행/주차 선택 → 사고 분석**을 누릅니다. 기존 MP4는 Pi의 `~/Videos`에 넣고 **녹화기록 → 전체**에서 열 수 있습니다.
 
-Pi의 `~/Videos`에 넣은 MP4는 **녹화기록 → 전체**에 외부 영상으로 보입니다. 영상을 재생하며 **사고 분석**을 누르면 재생 위치를 사고 시점으로 삼고, 실제로 존재하는 영상 범위 안에서 최대 30초 전·15초 후를 분석합니다. 결과가 준비되면 QR 화면이 자동으로 열리며 원본 MP4는 변경하지 않습니다. 카메라 녹화 없이도 이 경로를 사용할 수 있습니다.
+Pi 5에는 H.264 하드웨어 인코더가 없어 소프트웨어 인코더를 사용합니다. 실기에서 부담이 크면 설정에서 720p/24 FPS로 낮춰 측정해야 합니다. `dashpi-install-desktop`은 앱 메뉴와 바탕화면 바로가기를 설치합니다.
 
-Pi 5에는 H.264 하드웨어 인코더가 없어 Picamera2의 소프트웨어 인코더를 사용합니다. 실제 장치에서 1080p30 동시 프리뷰/녹화, 사고 시점 오차, 앱 시작 시간, 버튼 반응, RAM·CPU 온도·AI 분석 응답 지연, QR 수신률을 측정해야 합니다. 무겁거나 스왑이 생기면 설정에서 720p/24 FPS로 낮춰 다시 측정하세요. AI 분석은 외부 API로 수행하므로 Pi RAM은 녹화·영상 처리·객체 추적에 사용합니다. 인터넷이 없으면 사고는 '분석 대기'로 남고 연결되면 자동 분석됩니다. 현재 이 실기 수락 시험은 수행되지 않았습니다.
+</details>
 
-### 요구사항
+<details>
+<summary><strong>휴대폰 수신 앱 개발 빌드</strong> · Android</summary>
 
-- Python 3.11 이상
-- FFmpeg와 ffprobe
-- AI 분석 API 키 (`ai.env.example`을 ~/.config/dashpi/ai.env로 복사)
-- Node.js — 웹 소스를 수정하거나 테스트할 때만 필요하며 현재 검증 환경은 v22입니다.
+Android 개발 환경과 기기를 준비한 뒤 저장소 루트에서 실행합니다. 카메라 원시 프레임을 읽는 네이티브 모듈을 사용하므로 Expo Go 대신 개발 빌드가 필요합니다.
 
-macOS에서는 다음 명령으로 시스템 도구를 준비할 수 있습니다.
-
-```bash
-brew install ffmpeg
+```sh
+cd receiver-native
+npm ci
+npx expo run:android
 ```
 
-### 설치
+실제 기기에서 QR 수신률과 PDF 저장·공유까지 확인해야 합니다.
 
-```bash
-git clone https://github.com/jcmaker/DashPi.git
-cd DashPi
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
-```
+</details>
 
-### 사고 처리 시뮬레이션
+<details>
+<summary><strong>실행이 막혔나요?</strong> 영상 · AI · QR 확인</summary>
 
-먼저 45초 이상의 테스트 영상을 저장소 루트에 `input.mp4`라는 이름으로 준비합니다. 다음 예시는 30초 지점을 trigger로 사용하여 기본 `30초 전 + 15초 후` 구간을 처리합니다.
+- **영상 처리 실패:** `ffmpeg`와 `ffprobe`가 설치되어 있는지, 입력 영상이 45초 이상인지 확인합니다.
+- **AI가 분석 대기:** 네트워크와 `DASHPI_AI_API_KEY`를 확인합니다. `fake` 시뮬레이션은 키 없이 실행됩니다.
+- **QR을 못 읽음:** 일반 카메라 앱 대신 호환 DashPi 수신 앱을 사용합니다. 웹 PWA는 사용 전에 온라인에서 설치해야 합니다. 실제 LCD 밝기·QR 크기·수신 속도는 실기 보정 대상입니다.
+- **QR 파일이 너무 큼:** 16 MiB를 넘으면 Pi 앱이 전송 불가를 알리고 로컬 리포트를 보존합니다. Local Wi-Fi로 자동 전환하지 않습니다.
 
-```bash
-dashpi simulate input.mp4 --trigger-seconds 30 --data-root ./demo-data --ai-model fake
-```
+</details>
 
-성공하면 incident metadata가 JSON으로 출력되고 다음 결과가 `demo-data/incidents/<incident_id>/`에 생성됩니다.
+<a id="architecture"></a>
 
-- `clip.mp4` — trigger 전 30초와 후 15초를 보존한 원본 증거 영상이며, overlay를 적용하지 않습니다.
-- `annotated.mp4` — 사고 시점 전후 5초를 담은 10초 전송용 파생 영상입니다.
-- `report.json`
-- `report.html` — `annotated.mp4`와 before·incident·after 핵심 장면 3장을 data URL로 포함한 자급형 오프라인 리포트입니다.
-- `metadata.json`
+## 어떻게 구성했나요?
 
-선택 overlay는 기본적으로 모두 OFF입니다. YOLOv8 COCO ONNX detector와 함께 필요할 때만 다음 flags를 사용합니다.
+<img src="docs/assets/dashpi-system-architecture.svg" width="100%" alt="DashPi 현재 구조: Pi 카메라·기존 MP4와 화면 트리거 → 세그먼트·사고 clip·SHA-256 원본 저장 → 외부 AI API의 장면 분석 → JSON·HTML 리포트와 사진 3장이 담긴 전송용 JSON → 광학 QR로 휴대폰 수신 앱에 전달. Local Wi-Fi 웹 서버는 별도 프로토타입" />
 
-```bash
-dashpi simulate input.mp4 \
-  --trigger-seconds 30 \
-  --data-root ./demo-data \
-  --ai-model fake \
-  --detector-model yolov8n.onnx \
-  --show-traffic-lights --show-lanes --show-traffic-signs
-```
+**현재 구현 구조**입니다. Pi의 네이티브 앱이 녹화와 사고 처리, 원본 보존, AI 요청, 리포트 생성, QR 송신을 맡습니다. 실제 파일은 Pi에 남고, AI 요청에는 추출한 장면 프레임이 외부 공급자에게 전달됩니다. 원본 전체 영상을 클라우드에 보관하는 기능은 없습니다.
 
-Detector는 YOLOv8 COCO ONNX의 `[1,84,8400]` 또는 `[1,8400,84]` output 형식만 지원합니다.
+- **사고 보존:** 화면 트리거 또는 기존 MP4 재생 위치 → 전후 구간 clip 생성 → SHA-256과 metadata 기록. AI가 실패해도 이 파일을 보존합니다.
+- **AI 분석:** 기본 외부 API에 샘플 프레임을 보내 사고 시점·관찰·요약을 받습니다. 응답을 검증한 뒤 리포트를 만듭니다. 네트워크 오류에는 분석 대기와 재시도가 있습니다.
+- **휴대폰 전송:** Pi는 검증된 전송용 리포트를 애니메이션 QR로 표시합니다. Expo 수신 앱은 파일 길이·digest를 확인한 뒤 저장·열람합니다. 웹 수신 PWA도 별도 구현되어 있습니다.
+- **Local Wi-Fi:** FastAPI·HTTP Range로 전체 영상과 리포트를 조회하는 기존 웹 프로토타입입니다. Pi 앱이 핫스팟을 켜거나 QR 실패 시 자동으로 전환하지 않습니다.
 
-## 사고 리포트와 전송
+[SVG 크게 보기](docs/assets/dashpi-system-architecture.svg) · [AI 분석 설계](docs/superpowers/specs/2026-09-25-openrouter-ai-analysis-design.md) · [광학 전송 설계](docs/superpowers/specs/2026-09-02-offline-transfer-design.md)
 
-`report.html`의 **Download HTML**은 재생 가능한 10초 annotated video를 포함한 오프라인 단일 파일을 저장합니다. **Save as PDF**는 브라우저의 인쇄 대화상자를 사용해 작성 분석과 핵심 장면 3장을 정적 PDF로 저장하므로, 재생 가능한 영상은 HTML에만 남습니다.
+### 실제 화면
 
-Optical QR 전송은 안전하게 정차한 뒤에 시작합니다. 완성된 `report.html`이 16 MiB를 넘으면 DashPi는 전송용 `annotated.mp4`만 낮은 품질로 다시 인코딩하며 원본 `clip.mp4`는 바꾸지 않습니다. 그래도 16 MiB를 초과하면 Optical QR 대신 Local Wi-Fi를 사용합니다.
+아래 Pi 화면은 800×480 네이티브 앱을 실제 Pi에서 캡처했습니다. QR 화면에는 데모 리포트를 사용했습니다. 화면 캡처만으로 장시간 녹화·전원 차단 복구가 검증된 것은 아닙니다.
 
-### 로컬 UI 실행
+| 홈 | 녹화 시작 | 녹화기록 |
+|---|---|---|
+| ![녹화기록·주행시작·설정이 있는 Pi 홈 화면](docs/assets/pi-home.png) | ![주행·주차 녹화를 고르는 화면](docs/assets/pi-start.png) | ![영상과 사고 기록 목록 화면](docs/assets/pi-records.png) |
 
-```bash
-dashpi-server --data-root ./demo-data --host 127.0.0.1 --port 8000
-```
+| QR 전송 | 설정 |
+|---|---|
+| ![애니메이션 QR로 리포트를 전송하는 화면](docs/assets/pi-optical-qr.png) | ![녹화·화면·AI 설정 화면](docs/assets/pi-settings.png) |
 
-- Incident viewer: <http://127.0.0.1:8000/>
-- Optical sender: `http://127.0.0.1:8000/sender.html?incident=<incident_id>`
-- Optical receiver PWA: <http://127.0.0.1:8000/receiver.html>
+### 저장·전송의 경계
 
-> 이 서버는 device-local network용입니다. 공용 인터넷에 직접 노출하는 운영 모드는 MVP에 포함되지 않습니다.
+`<data-root>/incidents/<incident_id>/`에는 `clip.mp4`와 파생 영상·리포트가 분리되어 저장됩니다. API는 파일 경로·크기·digest를 metadata와 대조하고, QR 수신기도 전체 길이와 SHA-256을 확인합니다. **QR은 암호화되지 않아 주변 카메라가 촬영할 수 있습니다.** 민감한 장면은 전송 환경을 확인해야 합니다.
 
-## 테스트와 재현성
+<details>
+<summary><strong>개발 검증 명령</strong> Python · 웹 · 휴대폰 수신 앱</summary>
 
-### Python
-
-```bash
-PYTHONPATH=. python -m pytest -q
-```
-
-### TypeScript
-
-```bash
+```sh
+python -m pytest -q
 npm ci --prefix web
 npm test --prefix web
 npm run build --prefix web
+npm ci --prefix receiver-native
+npm test --prefix receiver-native
 ```
 
-2026-09-06 기준 병합 결과에서 **Python 306개**, **TypeScript 27개** 테스트를 통과했습니다. 검증 범위에는 다음이 포함됩니다.
+Python 테스트는 사고 구간, AI 실패 후 clip 보존, 파일 무결성, API 접근을 확인합니다. 웹 테스트는 광학 프레임 손실·중복·순서 변경과 Python/TypeScript 호환을 확인합니다. 휴대폰 수신 앱의 Node 테스트는 Android·iOS 실기 검증을 대신하지 않습니다.
 
-- 사고 clip의 pre/post 경계와 중첩 trigger 병합
-- AI 실패 후 clip 보존 및 상태 전이
-- HTTP Range, ETag, digest 불일치 및 안전한 파일 접근
-- Optical frame CRC, container SHA-256 및 크기 제한
-- 1 MiB payload의 frame loss·중복·재정렬 복구
-- Python ↔ TypeScript golden vector
-- 외부 네트워크 연결을 차단한 incident pipeline
-- 45초 증거부터 자급형 report까지의 기존 Optical frame loss·중복·재정렬 복구
-- wheel 설치 후 packaged local UI smoke test
+</details>
 
-## 데이터 무결성과 안전 원칙
+<a id="docs"></a>
 
-- 완성 전 파일에는 `.partial` suffix를 사용합니다.
-- 파일을 flush한 뒤 SHA-256을 계산하고 최종 이름으로 원자적 교체합니다.
-- metadata는 필요한 digest가 기록된 뒤에만 결과를 완료 상태로 표시합니다.
-- API는 metadata의 경로·크기·digest와 실제 파일을 다시 대조합니다.
-- Optical receiver는 전체 길이와 SHA-256 검증 전 파일을 노출하지 않습니다.
-- incident ID와 파일 접근은 path traversal 및 symlink 교체를 방어하도록 제한합니다.
+## 문서 길잡이
 
-AI 리포트는 화면에 보이는 정황을 정리하는 **보조 자료**입니다. 사각지대, 화질, sampling, model 특성 때문에 불완전할 수 있으며 사고 과실이나 법적 책임을 결정하지 않습니다.
+| 알고 싶은 것 | 먼저 읽을 곳 | 담긴 내용 |
+|---|---|---|
+| **제품의 목표는?** | [PRD](docs/PRD.md) | 초기 제품 목표. 로컬 Ollama와 네이티브 앱 제외 등 과거 범위가 남아 있으므로 현재 구현 상태는 이 README와 코드 기준으로 확인합니다. |
+| **기술 경계는?** | [TRD](docs/TRD.md) · [AI 분석 설계](docs/superpowers/specs/2026-09-25-openrouter-ai-analysis-design.md) | 사고 처리·전송 요구와 외부 AI API로의 변경 배경 |
+| **광학 QR의 설계는?** | [광학 전송 설계](docs/superpowers/specs/2026-09-02-offline-transfer-design.md) | [Decimen Optical Transfer](https://github.com/bashalarmistalt/decimen-optical-transfer)의 LT 방식에서 착안한 독자 규격과 수신 검증 |
+| **앱에서 무엇이 달라졌나?** | [앱 1.2.2 릴리스 기록](docs/releases/1.2.2.md) | 이미지 리포트의 PDF 저장·공유, 자동 검증과 실기 미검증 범위 |
+| **코드는 어디에 있나?** | [`src/dashpi/`](src/dashpi/) · [`receiver-native/`](receiver-native/) · [`web/`](web/) | Pi 앱·사고 처리, Expo 수신 앱, 광학 전송 웹 코드 |
+| **어떻게 검증하나?** | [`tests/`](tests/) · [`receiver-native/tests/`](receiver-native/tests/) | Python 파이프라인과 휴대폰 수신기 테스트 |
 
-## 저장 구조
+README는 프로젝트의 입구입니다. 오래된 설계 문서의 **목표**와 현재 코드의 **구현 상태**가 다르면 위 상태 표와 실제 코드를 먼저 확인해 주세요.
 
-실제 장치의 기본 data root는 `/var/lib/dashpi`이며, 개발 시에는 `--data-root`로 별도 경로를 지정할 수 있습니다.
+---
 
-```text
-<data-root>/
-├── raw/
-├── ai-usage.json
-├── logs/
-└── incidents/
-    └── <incident_id>/
-        ├── clip.mp4
-        ├── annotated.mp4
-        ├── metadata.json
-        ├── report.json
-        └── report.html
-```
-
-## API 요약
-
-| Method | Endpoint | 역할 |
-| --- | --- | --- |
-| `GET` | `/api/incidents` | 완료·실패 incident 목록 |
-| `GET` | `/api/incidents/{incident_id}` | incident metadata와 JSON report |
-| `GET` | `/api/incidents/{incident_id}/report.html` | 사람이 읽는 HTML report |
-| `GET` | `/api/incidents/{incident_id}/clip` | Range를 지원하는 사고 영상 |
-| `POST` | `/api/incidents/{incident_id}/report` | 수동 사고 시점과 overlay 설정으로 report 재생성 |
-| `GET` | `/api/incidents/{incident_id}/report/status` | 비동기 report 재생성 진행·완료·실패 상태 |
-| `POST` | `/api/incidents/{incident_id}/optical` | Optical transfer session 생성 |
-| `GET` | `/api/optical/{session_id}` | Optical session 정보 |
-| `GET` | `/api/optical/{session_id}/frames/{sequence}` | 전송할 binary frame |
-
-## 저장소 구조
-
-```text
-DashPi/
-├── src/dashpi/           # Python incident pipeline, API, storage, optical sender
-│   ├── optical/          # DPQ1/DPC1 protocol과 fountain coding
-│   └── web/              # FastAPI가 제공하는 빌드된 web assets
-├── web/                  # TypeScript sender/receiver source와 tests
-├── tests/                # Python unit, integration, offline, packaging tests
-├── scripts/              # deterministic optical fixture 생성 도구
-└── docs/                 # PRD, TRD, 설계 및 구현 계획
-```
-
-더 자세한 제품·기술 결정은 다음 문서에 있습니다.
-
-- [Product Requirements Document](docs/PRD.md)
-- [Technical Requirements Document](docs/TRD.md)
-- [Offline Incident and Transfer Design](docs/superpowers/specs/2026-09-02-offline-transfer-design.md)
-- [Incident Analysis Report Design](docs/superpowers/specs/2026-09-06-incident-analysis-report-design.md)
-- [Agent Handoff Document](docs/AGENT_HANDOFF.md) — AI 코딩 에이전트를 위한 프로젝트 가이드
-
-## 설계 및 문서화 레퍼런스
-
-- [Decimen Optical Transfer](https://github.com/bashalarmistalt/decimen-optical-transfer): Animated QR, LT fountain coding, frame-loss tolerance와 SHA-256 검증을 참고한 화면→카메라 전송 프로젝트. DashPi는 소스나 wire format을 복사하지 않은 독자 규격입니다.
-- [GitHub Docs — About READMEs](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-readmes): README의 목적·시작 방법·유지보수 정보 구성과 상대 경로 권장사항
-- [GitHub Docs — Creating diagrams](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/creating-diagrams): GitHub-native Mermaid 작성 방식
-- [GitHub Open Source Guides — Starting a Project](https://opensource.guide/starting-a-project/): 처음 방문한 사용자가 목적과 사용법을 이해할 수 있는 공개 프로젝트 문서 구성
-- [ANU School of Engineering — Capstone Assessment Guide](https://eng.anu.edu.au/engage/capstone-design-project/information-students/assessment-guide-capstone-project): 문제·stakeholder·가치·성과·prototype evidence와 시각적 일관성 중심의 평가 기준
-- [Michael Luby — LT Codes](https://doi.org/10.1109/SFCS.2002.1181950): 손실 환경에서 사용하는 fountain code의 기반 연구
-
-## 라이선스
-
-현재 저장소에는 라이선스가 지정되어 있지 않습니다. 별도 라이선스가 추가되기 전까지 소스 코드의 사용·수정·재배포 권한이 자동으로 부여되지는 않습니다.
+**라이선스** · 저장소 전체에 적용되는 `LICENSE`는 아직 없습니다. 별도 허락이나 라이선스가 추가되기 전에는 소스 코드 사용·수정·재배포 권한이 자동으로 부여되지 않습니다.
