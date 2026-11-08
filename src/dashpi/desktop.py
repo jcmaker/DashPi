@@ -19,12 +19,12 @@ import time
 import traceback
 from collections import deque
 
-from PySide6.QtCore import Qt, QtMsgType, QLockFile, QPointF, QRect, QRectF, QTimer, QUrl, QSize, qInstallMessageHandler
-from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPen, QPixmap, QTransform
+from PySide6.QtCore import Qt, QtMsgType, QLockFile, QPoint, QPointF, QRect, QRectF, QTimer, QUrl, QSize, qInstallMessageHandler
+from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPen, QPixmap, QRegion, QTransform
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
+    QApplication, QComboBox, QDoubleSpinBox, QFormLayout, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QScrollArea, QScroller,
     QSizePolicy,
     QStackedWidget, QStyle, QStyleOptionToolButton, QStylePainter, QToolButton, QVBoxLayout, QWidget,
@@ -261,6 +261,7 @@ class DashPiWindow(QMainWindow):
         self._starting = False
         self._recording_mode = "drive"
         self._preview_widget = None
+        self._record_overlay_key = None
         self.optical_session: OpticalSession | None = None
         self._optical_sequence = 0
         self._optical_generation = 0
@@ -325,21 +326,38 @@ class DashPiWindow(QMainWindow):
 
     def _build_recording(self):
         self.recording_page, layout = page("DashPi")
+        layout.setContentsMargins(0, 0, 0, 20)
         self.record_heading = self.recording_page.heading
+        layout.removeWidget(self.record_heading)
+        self.record_overlay = QWidget()
+        self.record_overlay.setObjectName("recordOverlay")
+        self.record_overlay.setStyleSheet(
+            "QWidget#recordOverlay { background: transparent; }"
+        )
+        self.record_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        overlay_layout = QVBoxLayout(self.record_overlay)
+        overlay_layout.setContentsMargins(12, 8, 12, 8)
+        overlay_layout.setSpacing(2)
+        overlay_layout.addWidget(self.record_heading)
         self.record_clock = QLabel(time.strftime("%H:%M", time.localtime()))
         self.record_clock.setObjectName("clock")
-        layout.addWidget(self.record_clock)
+        overlay_layout.addWidget(self.record_clock)
         self.record_status = QLabel("카메라 준비 중")
         self.record_status.setObjectName("status")
-        layout.addWidget(self.record_status)
+        self.record_status.setWordWrap(True)
+        overlay_layout.addWidget(self.record_status)
         self.preview_host = QWidget()
-        self.preview_layout = QVBoxLayout(self.preview_host)
+        self.preview_layout = QGridLayout(self.preview_host)
         self.preview_layout.setContentsMargins(0, 0, 0, 0)
         self.preview = QLabel("카메라 연결 중")
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_layout.addWidget(self.preview)
+        self.preview_layout.addWidget(self.preview, 0, 0)
+        self.preview_layout.addWidget(
+            self.record_overlay, 0, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft
+        )
         layout.addWidget(self.preview_host, 1)
         controls = QHBoxLayout()
+        controls.setContentsMargins(24, 0, 24, 0)
         self.analyze_button = button("사고 분석", self._trigger, primary=True)
         self.stop_button = button("종료", self._stop)
         controls.addWidget(self.analyze_button)
@@ -497,7 +515,10 @@ class DashPiWindow(QMainWindow):
         self.preview.deleteLater()
         self.preview = self.session.recorder.create_preview(self.preview_host)
         self._preview_widget = self.preview
-        self.preview_layout.addWidget(self.preview)
+        self.preview_layout.addWidget(self.preview, 0, 0)
+        self._record_overlay_key = None
+        self.record_overlay.setVisible(not hasattr(self.preview, "set_overlay"))
+        self.record_overlay.raise_()
         self.record_status.setText("녹화 시작 중")
         self.pages.setCurrentWidget(self.recording_page)
 
@@ -565,7 +586,7 @@ class DashPiWindow(QMainWindow):
     def _started(self, future: Future):
         self._starting = False
         if self._report_error(future):
-            self.record_status.setText("녹화 중")
+            self.record_status.clear()
             self.analyze_button.setEnabled(True)
             self.stop_button.setEnabled(True)
             if self._close_when_done:
@@ -581,7 +602,9 @@ class DashPiWindow(QMainWindow):
             self._preview_widget = None
             self.preview = QLabel("카메라 연결 중")
             self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.preview_layout.addWidget(self.preview)
+            self.preview_layout.addWidget(self.preview, 0, 0)
+            self.record_overlay.show()
+            self.record_overlay.raise_()
         self._submit(self.session.recorder.release, self._released)
         self.stop_button.setEnabled(True)
 
@@ -663,6 +686,27 @@ class DashPiWindow(QMainWindow):
                     self.show_home()
         if self.session.recorder.recording and self._tick_future is None:
             self._tick_future = self._executor.submit(lambda: self.session.tick(time.monotonic()))
+        self.record_status.setVisible(bool(self.record_status.text()))
+        self._update_record_overlay()
+
+    def _update_record_overlay(self):
+        if (not self.session.recorder.recording or not hasattr(self.preview, "set_overlay")
+                or self.pages.currentWidget() is not self.recording_page):
+            return
+        _, _, width, height = self.preview.recalculate_viewport()
+        key = (self.record_heading.text(), self.record_clock.text(), self.record_status.text(), width, height)
+        if key == self._record_overlay_key or width <= 0 or height <= 0:
+            return
+        # Picamera2's EGL preview needs its own RGBA overlay for transparent text.
+        import numpy as np
+
+        image = QImage(width, height, QImage.Format.Format_RGBA8888)
+        image.fill(Qt.GlobalColor.transparent)
+        self.record_overlay.adjustSize()
+        self.record_overlay.render(image, QPoint(), QRegion(), QWidget.RenderFlag.DrawChildren)
+        rgba = np.frombuffer(image.constBits(), dtype=np.uint8).reshape(height, width, 4)
+        self.preview.set_overlay(rgba)
+        self._record_overlay_key = key
 
     def _report_error(self, future: Future) -> bool:
         try:
