@@ -1,0 +1,167 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title description">
+  <title id="title">DashPi system architecture</title>
+  <desc id="description">Camera or imported video enters the Raspberry Pi application. Recording segments and a screen trigger produce a preserved, hashed incident clip. An external AI API helps locate and describe the accident; a validated report is stored separately from the original clip. A JSON transfer report with three images reaches the Expo phone receiver through animated QR. A separate local Wi-Fi prototype serves video and reports to a browser.</desc>
+  <defs>
+    <style>
+      text { font-family: Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
+      .title { fill: #f3f6fb; font-size: 38px; font-weight: 700; }
+      .overline { fill: #aab7ca; font-size: 18px; font-weight: 700; letter-spacing: 1.5px; }
+      .section { fill: #eef2f8; font-size: 24px; font-weight: 700; }
+      .section-sub { fill: #a8b5c8; font-size: 17px; }
+      .card-title { fill: #f5f7fb; font-size: 22px; font-weight: 700; }
+      .card-sub { fill: #aab7c9; font-size: 16px; }
+      .detail { fill: #c8d2df; font-size: 16px; }
+      .label { fill: #d9e2ef; font-size: 16px; font-weight: 600; }
+      .blue-label { fill: #75afff; font-size: 16px; font-weight: 600; }
+      .amber-label { fill: #f2bf78; font-size: 16px; font-weight: 600; }
+      .foot { fill: #b0bed0; font-size: 16px; }
+      .line { fill: none; stroke: #aebdd0; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; marker-end: url(#arrow); }
+      .blue { fill: none; stroke: #69a9ff; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; marker-end: url(#blue-arrow); }
+      .amber { fill: none; stroke: #e5ad65; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; marker-end: url(#amber-arrow); }
+    </style>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6.5" refY="4" orient="auto" markerUnits="strokeWidth"><path d="M1 1 7 4 1 7" fill="none" stroke="#aebdd0" stroke-width="1.5"/></marker>
+    <marker id="blue-arrow" markerWidth="8" markerHeight="8" refX="6.5" refY="4" orient="auto" markerUnits="strokeWidth"><path d="M1 1 7 4 1 7" fill="none" stroke="#69a9ff" stroke-width="1.5"/></marker>
+    <marker id="amber-arrow" markerWidth="8" markerHeight="8" refX="6.5" refY="4" orient="auto" markerUnits="strokeWidth"><path d="M1 1 7 4 1 7" fill="none" stroke="#e5ad65" stroke-width="1.5"/></marker>
+  </defs>
+
+  <rect width="1600" height="900" fill="#0b1018"/>
+  <text x="28" y="50" class="title">DashPi</text>
+  <text x="28" y="80" class="section-sub">Raspberry Pi 5 · 사고 영상 보존 / AI 분석 / 휴대폰 전송</text>
+  <text x="1572" y="48" class="overline" text-anchor="end">SYSTEM ARCHITECTURE</text>
+
+  <!-- Four visual lanes follow the physical system boundaries. -->
+  <rect x="24" y="112" width="248" height="678" rx="22" fill="#151c26"/>
+  <rect x="288" y="112" width="708" height="678" rx="22" fill="#151c26"/>
+  <rect x="1012" y="112" width="264" height="678" rx="22" fill="#151c26"/>
+  <rect x="1292" y="112" width="284" height="678" rx="22" fill="#151c26"/>
+
+  <text x="42" y="152" class="section">Input</text>
+  <text x="42" y="177" class="section-sub">운전자 · 영상 소스</text>
+  <text x="310" y="152" class="section">Application</text>
+  <text x="310" y="177" class="section-sub">Pi의 단일 Python 앱 · PySide6 화면</text>
+  <text x="1030" y="152" class="section">Local files</text>
+  <text x="1030" y="177" class="section-sub">원본과 결과를 분리 보관</text>
+  <text x="1310" y="152" class="section">Outside the Pi</text>
+  <text x="1310" y="177" class="section-sub">AI 공급자 · 운전자 휴대폰</text>
+
+  <!-- Connections are drawn first so cards remain legible. -->
+  <path class="line" d="M254 293 H310"/>
+  <path class="line" d="M254 466 H280 V399 H526 V316 H544"/>
+  <path class="line" d="M254 639 H280 V414 H530 V338 H544"/>
+  <path class="line" d="M515 293 H544"/>
+  <path class="line" d="M412 232 V202 H1144 V232"/>
+  <path class="line" d="M1144 360 V389 H648 V360"/>
+  <path class="line" d="M749 293 H778"/>
+  <path class="line" d="M973 293 H1000 V524 H1030"/>
+  <path class="line" d="M1030 549 H1000 V625 H412 V584"/>
+  <path class="line" d="M515 522 H544"/>
+  <path class="line" d="M648 460 V420 H1144 V460"/>
+  <path class="line" d="M1030 570 H973"/>
+  <path class="amber" d="M468 584 V688 H1282 V293 H1310"/>
+  <path class="blue" d="M881 584 V620 H1426 V584"/>
+  <path class="blue" d="M1258 548 H1284 V705 H1310"/>
+
+  <!-- Input cards -->
+  <rect x="42" y="232" width="212" height="128" rx="16" fill="#1b2430" stroke="#607087" stroke-width="1.5"/>
+  <rect x="58" y="249" width="35" height="26" rx="4" fill="none" stroke="#e6eef9" stroke-width="2"/>
+  <circle cx="75.5" cy="262" r="7" fill="none" stroke="#e6eef9" stroke-width="2"/>
+  <text x="58" y="310" class="card-title">Pi 카메라</text>
+  <text x="58" y="338" class="card-sub">Picamera2 · 주행 녹화</text>
+
+  <rect x="42" y="405" width="212" height="128" rx="16" fill="#1b2430" stroke="#607087" stroke-width="1.5"/>
+  <rect x="58" y="423" width="34" height="24" rx="4" fill="none" stroke="#e6eef9" stroke-width="2"/>
+  <path d="M69 452 H81" stroke="#e6eef9" stroke-width="2" stroke-linecap="round"/>
+  <text x="58" y="483" class="card-title">Pi 터치 화면</text>
+  <text x="58" y="511" class="card-sub">사고 분석 버튼 · 수동</text>
+
+  <rect x="42" y="578" width="212" height="128" rx="16" fill="#1b2430" stroke="#607087" stroke-width="1.5"/>
+  <rect x="59" y="595" width="33" height="26" rx="3" fill="none" stroke="#e6eef9" stroke-width="2"/>
+  <path d="M68 601 82 608 68 615Z" fill="#e6eef9"/>
+  <text x="58" y="655" class="card-title">외부 MP4</text>
+  <text x="58" y="683" class="card-sub">기존 영상도 분석 가능</text>
+
+  <!-- Application cards -->
+  <rect x="310" y="232" width="205" height="128" rx="16" fill="#1b2430" stroke="#607087" stroke-width="1.5"/>
+  <circle cx="338" cy="260" r="12" fill="none" stroke="#d9e8fa" stroke-width="2"/>
+  <circle cx="338" cy="260" r="4" fill="#75afff"/>
+  <text x="326" y="309" class="card-title">Segment recorder</text>
+  <text x="326" y="337" class="card-sub">짧은 영상 연속 저장</text>
+
+  <rect x="544" y="232" width="205" height="128" rx="16" fill="#1b2430" stroke="#607087" stroke-width="1.5"/>
+  <path d="M565 250 V274 M577 250 V274 M559 257 H583" fill="none" stroke="#d9e8fa" stroke-width="2" stroke-linecap="round"/>
+  <text x="560" y="309" class="card-title">Incident clip</text>
+  <text x="560" y="337" class="card-sub">트리거 전 30초 · 후 15초</text>
+
+  <rect x="778" y="232" width="195" height="128" rx="16" fill="#1b2430" stroke="#607087" stroke-width="1.5"/>
+  <path d="M808 247 822 253 V263 C822 272 816 278 808 282 800 278 794 272 794 263 V253Z" fill="none" stroke="#d9e8fa" stroke-width="2"/>
+  <path d="m802 264 4 4 8-9" fill="none" stroke="#75afff" stroke-width="2"/>
+  <text x="794" y="309" class="card-title">Evidence guard</text>
+  <text x="794" y="337" class="card-sub">flush · SHA-256 · 원자 저장</text>
+
+  <rect x="310" y="460" width="205" height="124" rx="16" fill="#1b2430" stroke="#607087" stroke-width="1.5"/>
+  <path d="m338 477-3 10-9 3 9 3 3 10 3-10 9-3-9-3Z" fill="none" stroke="#e5ad65" stroke-width="2"/>
+  <text x="326" y="531" class="card-title">AI analysis</text>
+  <text x="326" y="558" class="card-sub">시점 → 관찰 → 요약</text>
+
+  <rect x="544" y="460" width="205" height="124" rx="16" fill="#1b2430" stroke="#607087" stroke-width="1.5"/>
+  <path d="M565 477 H583 V501 H565Z M569 485 H579 M569 491 H579 M569 497 H576" fill="none" stroke="#d9e8fa" stroke-width="2"/>
+  <text x="560" y="531" class="card-title">Report builder</text>
+  <text x="560" y="558" class="card-sub">검증된 JSON · HTML</text>
+
+  <rect x="778" y="460" width="195" height="124" rx="16" fill="#1b2430" stroke="#607087" stroke-width="1.5"/>
+  <path d="M795 478 H818 V501 H795Z M802 478 V501 M795 486 H818 M810 486 V501" fill="none" stroke="#75afff" stroke-width="2"/>
+  <text x="794" y="531" class="card-title">Optical QR</text>
+  <text x="794" y="558" class="card-sub">이미지 3장 · ≤60,000 B</text>
+
+  <!-- Local files -->
+  <rect x="1030" y="232" width="228" height="128" rx="16" fill="#1b2430" stroke="#607087" stroke-width="1.5"/>
+  <ellipse cx="1058" cy="252" rx="15" ry="6" fill="none" stroke="#d9e8fa" stroke-width="2"/>
+  <path d="M1043 252 V271 C1043 279 1073 279 1073 271 V252" fill="none" stroke="#d9e8fa" stroke-width="2"/>
+  <text x="1046" y="309" class="card-title">Raw segments</text>
+  <text x="1046" y="337" class="card-sub">크기 제한된 순환 버퍼</text>
+
+  <rect x="1030" y="460" width="228" height="124" rx="16" fill="#1b2430" stroke="#607087" stroke-width="1.5"/>
+  <path d="M1046 480 H1062 L1067 485 H1079 V503 H1046Z" fill="none" stroke="#d9e8fa" stroke-width="2"/>
+  <text x="1046" y="531" class="card-title">Incident store</text>
+  <text x="1046" y="558" class="card-sub">clip · report · metadata</text>
+
+  <!-- External service and phone -->
+  <rect x="1310" y="232" width="248" height="128" rx="16" fill="#1b2430" stroke="#9d7755" stroke-width="1.5"/>
+  <path d="M1333 268 C1321 268 1322 250 1334 251 C1338 239 1357 241 1359 253 C1371 252 1374 269 1362 269Z" fill="none" stroke="#f2bf78" stroke-width="2"/>
+  <text x="1326" y="309" class="card-title">External AI API</text>
+  <text x="1326" y="337" class="card-sub">기본값 OpenRouter · HTTPS</text>
+
+  <rect x="1310" y="460" width="248" height="124" rx="16" fill="#1b2430" stroke="#607087" stroke-width="1.5"/>
+  <rect x="1328" y="477" width="23" height="31" rx="4" fill="none" stroke="#d9e8fa" stroke-width="2"/>
+  <path d="M1336 503 H1343" stroke="#d9e8fa" stroke-width="2"/>
+  <text x="1326" y="531" class="card-title">Phone receiver</text>
+  <text x="1326" y="558" class="card-sub">Expo 앱 · 웹 PWA 대안</text>
+
+  <rect x="1310" y="650" width="248" height="110" rx="16" fill="#1b2430" stroke="#607087" stroke-width="1.5"/>
+  <rect x="1328" y="667" width="27" height="22" rx="3" fill="none" stroke="#d9e8fa" stroke-width="2"/>
+  <path d="M1328 675 H1355 M1337 693 H1346" fill="none" stroke="#d9e8fa" stroke-width="2"/>
+  <text x="1326" y="716" class="card-title">Local web UI</text>
+  <text x="1326" y="742" class="card-sub">별도 FastAPI · HTTP Range</text>
+
+  <!-- Route labels and implementation notes -->
+  <rect x="362" y="368" width="384" height="26" rx="5" fill="#0b1018"/>
+  <text x="554" y="386" class="label" text-anchor="middle">세그먼트 선택 · 원본 증거 생성</text>
+  <rect x="520" y="599" width="390" height="26" rx="5" fill="#0b1018"/>
+  <text x="715" y="617" class="label" text-anchor="middle">원본은 AI 실패와 무관하게 보존</text>
+  <rect x="975" y="605" width="399" height="27" rx="5" fill="#0b1018"/>
+  <text x="1175" y="624" class="blue-label" text-anchor="middle">Animated QR · 화면 → 카메라</text>
+  <rect x="631" y="670" width="495" height="27" rx="5" fill="#0b1018"/>
+  <text x="879" y="689" class="amber-label" text-anchor="middle">HTTPS · 샘플 프레임 / 구조화된 응답</text>
+  <rect x="1006" y="744" width="270" height="27" rx="5" fill="#0b1018"/>
+  <text x="1141" y="763" class="blue-label" text-anchor="middle">Local Wi-Fi · 별도 웹 경로</text>
+
+  <path d="M28 832 H64" stroke="#aebdd0" stroke-width="2"/>
+  <text x="76" y="838" class="foot">회색: 영상·메타데이터 처리</text>
+  <path d="M360 832 H396" stroke="#69a9ff" stroke-width="2.5"/>
+  <text x="408" y="838" class="foot">파랑: 기기 → 휴대폰 전송</text>
+  <path d="M704 832 H740" stroke="#e5ad65" stroke-width="2.5"/>
+  <text x="752" y="838" class="foot">주황: 외부 AI 호출</text>
+  <text x="1572" y="838" class="foot" text-anchor="end">Pi 실기 성능·복구 검증 전</text>
+  <text x="28" y="872" class="foot">현재 구현 기준 · 과실 판정 없음 · 원본 clip과 파생 리포트 분리</text>
+  <text x="1572" y="872" class="foot" text-anchor="end">QR 전송은 비암호화 · 호환 수신 앱 필요</text>
+</svg>
