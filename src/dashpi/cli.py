@@ -1,6 +1,7 @@
 import argparse
 import json
 import uuid
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -13,7 +14,7 @@ from dashpi.media import segment_source
 from dashpi.models import IncidentMetadata
 from dashpi.pipeline import IncidentPipeline
 from dashpi.storage import IncidentStore
-from dashpi.vision import YoloDetector
+from dashpi.vision import YoloDetector, track_video
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -30,6 +31,11 @@ def build_parser() -> argparse.ArgumentParser:
     simulate.add_argument("--show-traffic-lights", action="store_true")
     simulate.add_argument("--show-lanes", action="store_true")
     simulate.add_argument("--show-traffic-signs", action="store_true")
+
+    track = subcommands.add_parser("track", help="저장 영상에 YOLO + ByteTrack 박스·ID·경로 표시")
+    track.add_argument("video", type=Path)
+    track.add_argument("--detector-model", type=Path, required=True)
+    track.add_argument("--output", type=Path, required=True)
 
     evaluate = subcommands.add_parser("eval")
     evaluate.add_argument("--cases", type=Path, required=True)
@@ -68,6 +74,11 @@ def run_eval(args) -> None:
 
 def main() -> None:
     args = build_parser().parse_args()
+    if args.command == "track":
+        # ByteTrack needs low-confidence detections to recover partially occluded objects.
+        result = track_video(args.video, args.output, YoloDetector(args.detector_model, confidence=0.1))
+        print(json.dumps(asdict(result), default=str))
+        return
     if args.command == "eval":
         return run_eval(args)
     settings = Settings(

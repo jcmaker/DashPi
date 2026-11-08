@@ -77,3 +77,17 @@ def test_external_analysis_reports_each_pipeline_step(tmp_path):
     assert [(step, state) for step, state, *_ in events] == [
         ("clip", "start"), ("clip", "done"), ("frames", "start"), ("frames", "done"), ("build", "start"), ("build", "done"),
     ]
+
+
+def test_external_video_never_marks_aigo_upload(tmp_path):
+    from dashpi.aigo_upload import AIGO_STATE
+    from dashpi.offline_video import analyze_external_video
+
+    source = make_video(tmp_path / "source.mp4", 6)
+    settings = Settings(tmp_path / "data", "test-model", frame_sample_count=3)
+    store = IncidentStore(settings.data_root)
+    result = analyze_external_video(
+        source, 3.0, settings, store,
+        lambda *_: {"incident_timestamp": 3.0, "summary": "s", "observations": [], "limitations": []},
+    )
+    assert not (store.directory(result.incident_id) / AIGO_STATE).exists()

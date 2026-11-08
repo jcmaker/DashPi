@@ -19,17 +19,18 @@ import time
 import traceback
 from collections import deque
 
-from PySide6.QtCore import Qt, QtMsgType, QLockFile, QPointF, QRect, QRectF, QTimer, QUrl, QSize, qInstallMessageHandler
-from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPen, QPixmap, QTransform
+from PySide6.QtCore import Qt, QtMsgType, QLockFile, QPoint, QPointF, QRect, QRectF, QTimer, QUrl, QSize, qInstallMessageHandler
+from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPen, QPixmap, QRegion, QTransform
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
+    QApplication, QComboBox, QDoubleSpinBox, QFormLayout, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QScrollArea, QScroller,
     QSizePolicy,
     QStackedWidget, QStyle, QStyleOptionToolButton, QStylePainter, QToolButton, QVBoxLayout, QWidget,
 )
 
+from dashpi.aigo_upload import AigoClient, AigoUploader, load_aigo_config, mark_pending, read_state
 from dashpi.analysis import api_key_configured, build_analyzer
 from dashpi.analysis_retry import AnalysisRetrier
 from dashpi.analysis_worker import AnalysisWorker
@@ -248,9 +249,11 @@ def home_tile(text: str, icon: QIcon, callback, *, primary: bool = False) -> QTo
 
 
 class DashPiWindow(QMainWindow):
-    def __init__(self, session: DeviceSession, store: IncidentStore, settings_path: Path):
+    def __init__(self, session: DeviceSession, store: IncidentStore, settings_path: Path,
+                 uploader: AigoUploader | None = None):
         super().__init__()
         self.session, self.store, self.settings_path = session, store, settings_path
+        self.uploader = uploader
         self.setWindowTitle("DashPi")
         self.resize(1024, 600)
         theme.apply(QApplication.instance())
@@ -261,6 +264,7 @@ class DashPiWindow(QMainWindow):
         self._starting = False
         self._recording_mode = "drive"
         self._preview_widget = None
+        self._record_overlay_key = None
         self.optical_session: OpticalSession | None = None
         self._optical_sequence = 0
         self._optical_generation = 0
@@ -293,6 +297,11 @@ class DashPiWindow(QMainWindow):
             self.retry_timer.timeout.connect(self._retry_tick)
             self.retry_timer.start(60_000)
             QTimer.singleShot(0, self._start_retries)
+        if self.uploader is not None:
+            self.upload_timer = QTimer(self)
+            self.upload_timer.timeout.connect(self._upload_tick)
+            self.upload_timer.start(10_000)
+            QTimer.singleShot(0, self._start_uploads)
         self.optical_timer = QTimer(self)
         self.optical_timer.timeout.connect(self._render_optical_frame)
         self.showFullScreen()
@@ -325,21 +334,38 @@ class DashPiWindow(QMainWindow):
 
     def _build_recording(self):
         self.recording_page, layout = page("DashPi")
+        layout.setContentsMargins(0, 0, 0, 20)
         self.record_heading = self.recording_page.heading
+        layout.removeWidget(self.record_heading)
+        self.record_overlay = QWidget()
+        self.record_overlay.setObjectName("recordOverlay")
+        self.record_overlay.setStyleSheet(
+            "QWidget#recordOverlay { background: transparent; }"
+        )
+        self.record_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        overlay_layout = QVBoxLayout(self.record_overlay)
+        overlay_layout.setContentsMargins(12, 8, 12, 8)
+        overlay_layout.setSpacing(2)
+        overlay_layout.addWidget(self.record_heading)
         self.record_clock = QLabel(time.strftime("%H:%M", time.localtime()))
         self.record_clock.setObjectName("clock")
-        layout.addWidget(self.record_clock)
+        overlay_layout.addWidget(self.record_clock)
         self.record_status = QLabel("카메라 준비 중")
         self.record_status.setObjectName("status")
-        layout.addWidget(self.record_status)
+        self.record_status.setWordWrap(True)
+        overlay_layout.addWidget(self.record_status)
         self.preview_host = QWidget()
-        self.preview_layout = QVBoxLayout(self.preview_host)
+        self.preview_layout = QGridLayout(self.preview_host)
         self.preview_layout.setContentsMargins(0, 0, 0, 0)
         self.preview = QLabel("카메라 연결 중")
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_layout.addWidget(self.preview)
+        self.preview_layout.addWidget(self.preview, 0, 0)
+        self.preview_layout.addWidget(
+            self.record_overlay, 0, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft
+        )
         layout.addWidget(self.preview_host, 1)
         controls = QHBoxLayout()
+        controls.setContentsMargins(24, 0, 24, 0)
         self.analyze_button = button("사고 분석", self._trigger, primary=True)
         self.stop_button = button("종료", self._stop)
         controls.addWidget(self.analyze_button)
@@ -443,6 +469,11 @@ class DashPiWindow(QMainWindow):
         report_scroll.setWidgetResizable(True)
         report_scroll.setWidget(self.report_text)
         side.addWidget(report_scroll, 1)
+        self.aigo_status = QLabel("")
+        self.aigo_status.setObjectName("status")
+        self.aigo_status.setWordWrap(True)
+        self.aigo_status.hide()
+        side.addWidget(self.aigo_status)
         body.addLayout(side, 2)
         layout.addLayout(body, 1)
         # One row: stacked, these buttons made the page taller than the 480px LCD, and the window
@@ -497,7 +528,10 @@ class DashPiWindow(QMainWindow):
         self.preview.deleteLater()
         self.preview = self.session.recorder.create_preview(self.preview_host)
         self._preview_widget = self.preview
-        self.preview_layout.addWidget(self.preview)
+        self.preview_layout.addWidget(self.preview, 0, 0)
+        self._record_overlay_key = None
+        self.record_overlay.setVisible(not hasattr(self.preview, "set_overlay"))
+        self.record_overlay.raise_()
         self.record_status.setText("녹화 시작 중")
         self.pages.setCurrentWidget(self.recording_page)
 
@@ -565,7 +599,7 @@ class DashPiWindow(QMainWindow):
     def _started(self, future: Future):
         self._starting = False
         if self._report_error(future):
-            self.record_status.setText("녹화 중")
+            self.record_status.clear()
             self.analyze_button.setEnabled(True)
             self.stop_button.setEnabled(True)
             if self._close_when_done:
@@ -581,7 +615,9 @@ class DashPiWindow(QMainWindow):
             self._preview_widget = None
             self.preview = QLabel("카메라 연결 중")
             self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.preview_layout.addWidget(self.preview)
+            self.preview_layout.addWidget(self.preview, 0, 0)
+            self.record_overlay.show()
+            self.record_overlay.raise_()
         self._submit(self.session.recorder.release, self._released)
         self.stop_button.setEnabled(True)
 
@@ -663,6 +699,27 @@ class DashPiWindow(QMainWindow):
                     self.show_home()
         if self.session.recorder.recording and self._tick_future is None:
             self._tick_future = self._executor.submit(lambda: self.session.tick(time.monotonic()))
+        self.record_status.setVisible(bool(self.record_status.text()))
+        self._update_record_overlay()
+
+    def _update_record_overlay(self):
+        if (not self.session.recorder.recording or not hasattr(self.preview, "set_overlay")
+                or self.pages.currentWidget() is not self.recording_page):
+            return
+        _, _, width, height = self.preview.recalculate_viewport()
+        key = (self.record_heading.text(), self.record_clock.text(), self.record_status.text(), width, height)
+        if key == self._record_overlay_key or width <= 0 or height <= 0:
+            return
+        # Picamera2's EGL preview needs its own RGBA overlay for transparent text.
+        import numpy as np
+
+        image = QImage(width, height, QImage.Format.Format_RGBA8888)
+        image.fill(Qt.GlobalColor.transparent)
+        self.record_overlay.adjustSize()
+        self.record_overlay.render(image, QPoint(), QRegion(), QWidget.RenderFlag.DrawChildren)
+        rgba = np.frombuffer(image.constBits(), dtype=np.uint8).reshape(height, width, 4)
+        self.preview.set_overlay(rgba)
+        self._record_overlay_key = key
 
     def _report_error(self, future: Future) -> bool:
         try:
@@ -683,6 +740,21 @@ class DashPiWindow(QMainWindow):
         except Exception:
             log.exception("중단된 분석 복구 실패")
         self._retry_tick()
+
+    def _start_uploads(self):
+        try:
+            self.uploader.recover()
+        except Exception:
+            log.exception("AIGO 업로드 복구 실패")
+        self._upload_tick()
+
+    def _upload_tick(self):
+        if self.uploader is None:
+            return
+        try:
+            self.uploader.tick()
+        except Exception:
+            log.exception("AIGO 업로드 확인 실패")
 
     def _retry_tick(self):
         if self.retrier is None:
@@ -814,6 +886,15 @@ class DashPiWindow(QMainWindow):
                 item.setData(Qt.ItemDataRole.UserRole, ("recording", recording))
                 self.record_list.addItem(item)
 
+    def _show_aigo_status(self, incident_id: str | None):
+        state = read_state(self.store, incident_id) if incident_id else None
+        labels = {"pending": "AIGO: 업로드 대기", "uploaded": "AIGO: 업로드 완료", "failed": "AIGO: 업로드 실패"}
+        text = labels.get((state or {}).get("state"), "")
+        if text and state.get("state") == "failed" and state.get("reason"):
+            text += f" · {state['reason']}"
+        self.aigo_status.setText(text)
+        self.aigo_status.setVisible(bool(text))
+
     def _open_record(self, item: QListWidgetItem):
         self._detail_generation += 1
         generation = self._detail_generation
@@ -833,6 +914,7 @@ class DashPiWindow(QMainWindow):
         self.reanalyze_button.setVisible(kind == "incident" and value.state is IncidentState.ANALYSIS_FAILED)
         self.segment_list.clear()
         self.report_text.setText("")
+        self._show_aigo_status(value.incident_id if kind == "incident" else None)
         self.detail_title.setText(item.text())
         if kind == "external":
             part = QListWidgetItem(value.name)
@@ -1248,6 +1330,9 @@ class DashPiWindow(QMainWindow):
         if self.retrier is not None:
             self.retry_timer.stop()
         self.optical_timer.stop()
+        if self.uploader is not None:
+            self.upload_timer.stop()
+            self.uploader.close()
         self.player.stop()
         self._executor.shutdown(wait=False, cancel_futures=False)
         event.accept()
@@ -1273,9 +1358,14 @@ def main():
     worker = AnalysisWorker()
     recorder = PiCameraRecorder(root, current)
     settings = Settings(root, current.ai_model, current.ai_report_model)
-    session = DeviceSession(recorder, settings, IncidentStore(root), worker,
-                            build_analyzer(settings.ai_model, settings.ai_report_model, root))
-    window = DashPiWindow(session, IncidentStore(root), root / "settings.json")
+    store = IncidentStore(root)
+    aigo = load_aigo_config()
+    uploader = AigoUploader(store, AigoClient(aigo)) if aigo else None
+    log.info("AIGO 업로드 %s", "켜짐" if uploader else "꺼짐 (aigo.env 없음)")
+    session = DeviceSession(recorder, settings, store, worker,
+                            build_analyzer(settings.ai_model, settings.ai_report_model, root),
+                            on_clip=(lambda incident: mark_pending(store, incident.incident_id)) if uploader else None)
+    window = DashPiWindow(session, store, root / "settings.json", uploader=uploader)
     try:
         app.exec()
     finally:

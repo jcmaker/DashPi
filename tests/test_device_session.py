@@ -51,12 +51,12 @@ class InlineWorker:
         return work()
 
 
-def make_session(tmp_path, recorder, monkeypatch, processed):
+def make_session(tmp_path, recorder, monkeypatch, processed, on_clip=None):
     from dashpi.device_session import DeviceSession
 
     class Pipeline:
-        def __init__(self, settings, store, detector=None):
-            pass
+        def __init__(self, settings, store, detector=None, on_clip=None):
+            Pipeline.on_clip = on_clip
 
         def process(self, incident, segments, analyze):
             processed.append((incident, list(segments)))
@@ -64,7 +64,9 @@ def make_session(tmp_path, recorder, monkeypatch, processed):
 
     monkeypatch.setattr("dashpi.device_session.IncidentPipeline", Pipeline)
     settings = Settings(tmp_path, "fake", pre_seconds=30, post_seconds=15)
-    return DeviceSession(recorder, settings, IncidentStore(tmp_path), InlineWorker(), lambda *_: {})
+    session = DeviceSession(recorder, settings, IncidentStore(tmp_path), InlineWorker(), lambda *_: {}, on_clip=on_clip)
+    session.pipeline_class = Pipeline
+    return session
 
 
 def test_stop_waits_for_post_window_and_submits_complete_window(tmp_path, monkeypatch):
@@ -263,3 +265,15 @@ def test_delete_recording_keeps_segments_an_incident_is_still_clipping(tmp_path,
     with pytest.raises(RuntimeError):
         session.delete_recording(recorder.session_dir)
     assert recorder.session_dir.exists()
+
+
+def test_device_session_passes_on_clip_to_pipeline(tmp_path, monkeypatch):
+    recorder = FakeRecorder(tmp_path)
+    processed = []
+    marker = lambda incident: None  # noqa: E731
+    session = make_session(tmp_path, recorder, monkeypatch, processed, on_clip=marker)
+    session.start("drive")
+    session.trigger(100.0)
+    recorder.now = 115.1
+    session.tick(115.1)
+    assert processed and session.pipeline_class.on_clip is marker

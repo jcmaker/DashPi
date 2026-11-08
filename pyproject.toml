@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "dashpi"
 version = "1.2.0"
 requires-python = ">=3.11"
-dependencies = ["fastapi>=0.116,<1", "uvicorn>=0.35,<1", "opencv-python-headless>=4.12,<5"]
+dependencies = ["fastapi>=0.116,<1", "uvicorn>=0.35,<1", "opencv-python-headless>=4.12,<5", "supervision>=0.27,<0.28"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<9", "httpx2>=2,<3"]

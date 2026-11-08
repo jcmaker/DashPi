@@ -404,7 +404,7 @@ def test_capture_controls_wait_for_first_recorded_frame(qapp, tmp_path):
         assert not window.analyze_button.isEnabled()
         assert not window.stop_button.isEnabled()
         gate.set()
-        wait_until(qapp, lambda: window.record_status.text() == "녹화 중")
+        wait_until(qapp, lambda: window.record_status.text() == "")
         assert all(control.isEnabled() for control in window.recording_controls())
     finally:
         gate.set()
@@ -426,6 +426,73 @@ def test_recording_header_tracks_actual_capture_state(qapp, tmp_path):
         session.recorder.recording = False
         window._poll()
         assert "REC" not in window.record_heading.text()
+    finally:
+        session.recorder.recording = False
+        window.close()
+
+
+@pytest.mark.parametrize("size", [(480, 320), (800, 480)])
+def test_recording_video_uses_header_space_with_readable_overlays(qapp, tmp_path, size):
+    from dashpi.desktop import DashPiWindow
+
+    window = DashPiWindow(FakeSession(), IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        window.showNormal()
+        window.setFixedSize(*size)
+        window.show_recording()
+        qapp.processEvents()
+        assert window.preview.mapTo(window, window.preview.rect().topLeft()).y() == 0
+        assert window.preview.width() == size[0]
+        assert window.preview.height() >= size[1] - 110
+        for label in (window.record_heading, window.record_clock, window.record_status):
+            top_left = label.mapTo(window.preview_host, label.rect().topLeft())
+            bottom_right = label.mapTo(window.preview_host, label.rect().bottomRight())
+            assert window.preview.geometry().contains(top_left)
+            assert window.preview.geometry().contains(bottom_right)
+            assert label.visibleRegion().contains(label.rect().center())
+        for control in window.recording_controls():
+            bottom_right = control.mapTo(window, control.rect().bottomRight())
+            assert window.rect().contains(bottom_right)
+            assert control.height() >= 52
+        window._release_camera()
+        wait_until(qapp, lambda: window._preview_widget is None)
+        assert window.record_heading.visibleRegion().contains(window.record_heading.rect().center())
+    finally:
+        window.close()
+
+
+def test_camera_overlay_has_only_text_and_clears_old_status(qapp, tmp_path, monkeypatch):
+    from dashpi.desktop import DashPiWindow
+    import numpy as np
+
+    monkeypatch.setattr("dashpi.desktop.time.strftime", lambda *_: "12:34")
+
+    class CameraPreview(QLabel):
+        def recalculate_viewport(self):
+            return 0, 0, self.width(), self.height()
+
+        def set_overlay(self, rgba):
+            self.rgba = rgba.copy()
+
+    session = FakeSession()
+    session.recorder.create_preview = lambda parent: CameraPreview(parent)
+    window = DashPiWindow(session, IncidentStore(tmp_path), tmp_path / "settings.json")
+    try:
+        window._begin("drive")
+        wait_until(qapp, lambda: session.recorder.recording and not window._starting)
+        window._poll()
+        assert window.record_status.text() == ""
+        rgba = window.preview.rgba
+        assert rgba.shape == (window.preview.height(), window.preview.width(), 4)
+        assert rgba[0, 0, 3] == rgba[-1, -1, 3] == 0
+        assert np.any(rgba[:, :, 3])
+        assert not np.any(rgba[100:, :, 3])
+        window.record_status.setText("사고 이후 15초 수집 중")
+        window._poll()
+        assert not np.array_equal(window.preview.rgba, rgba)
+        window.record_status.clear()
+        window._poll()
+        assert np.array_equal(window.preview.rgba, rgba)
     finally:
         session.recorder.recording = False
         window.close()
@@ -468,7 +535,7 @@ def test_capture_can_retry_after_failed_start(qapp, tmp_path):
         wait_until(qapp, lambda: "disk full" in window.record_status.text())
         wait_until(qapp, lambda: not session.recorder.prepared)
         window._begin("drive")
-        wait_until(qapp, lambda: window.record_status.text() == "녹화 중")
+        wait_until(qapp, lambda: window.record_status.text() == "")
         assert session.attempts == 2
     finally:
         session.recorder.recording = False
@@ -519,7 +586,7 @@ def test_double_start_tap_does_not_prepare_camera_twice(qapp, tmp_path):
         window._begin("drive")
         window._begin("drive")
         gate.set()
-        wait_until(qapp, lambda: window.record_status.text() == "녹화 중")
+        wait_until(qapp, lambda: window.record_status.text() == "")
         assert session.recorder.prepare_count == 1
         assert session.start_count == 1
     finally:
@@ -1359,5 +1426,65 @@ def test_native_optical_falls_back_to_html_with_notice_for_invalid_image_report(
         assert received.payload == item.report_html.path.read_bytes()
         assert '기존 영상 포함 HTML' in window.optical_status.text()
         assert store.load(item.incident_id).state is IncidentState.READY
+    finally:
+        window.close()
+
+
+class FakeUploader:
+    def __init__(self, fail=False):
+        self.fail, self.ticks, self.recovered, self.closed = fail, 0, 0, False
+
+    def recover(self):
+        self.recovered += 1
+
+    def tick(self):
+        self.ticks += 1
+        if self.fail:
+            raise RuntimeError("boom")
+
+    def close(self):
+        self.closed = True
+
+
+def test_uploader_recovers_ticks_and_survives_errors(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    uploader = FakeUploader(fail=True)
+    window = DashPiWindow(FakeSession(), IncidentStore(tmp_path), tmp_path / "settings.json", uploader=uploader)
+    try:
+        wait_until(qapp, lambda: uploader.ticks >= 1)
+        assert uploader.recovered == 1
+        window._upload_tick()
+        assert uploader.ticks >= 2
+    finally:
+        window.close()
+    assert uploader.closed
+
+
+@pytest.mark.parametrize("state,expected", [
+    (None, None),
+    ({"state": "pending", "attempts": 0}, "AIGO: 업로드 대기"),
+    ({"state": "uploaded", "analysis_id": 7}, "AIGO: 업로드 완료"),
+    ({"state": "failed", "reason": "AIGO 키 확인 필요"}, "AIGO: 업로드 실패 · AIGO 키 확인 필요"),
+])
+def test_incident_detail_shows_aigo_status(qapp, tmp_path, state, expected):
+    from dashpi.desktop import DashPiWindow
+
+    store = IncidentStore(tmp_path)
+    incident = IncidentMetadata.new("incident-aigo", datetime.now(UTC).isoformat(), 100.0, 15.0)
+    incident.transition(IncidentState.ANALYSIS_FAILED, datetime.now(UTC).isoformat(), "AI unavailable")
+    store.save(incident)
+    if state is not None:
+        atomic_write(store.directory("incident-aigo") / "aigo.json", json.dumps(state).encode())
+    window = DashPiWindow(FakeSession(), store, tmp_path / "settings.json")
+    try:
+        window.show_records()
+        item = next(window.record_list.item(i) for i in range(window.record_list.count())
+                    if window.record_list.item(i).data(Qt.ItemDataRole.UserRole)[0] == "incident")
+        window._open_record(item)
+        if expected is None:
+            assert window.aigo_status.isHidden()
+        else:
+            assert not window.aigo_status.isHidden() and window.aigo_status.text() == expected
     finally:
         window.close()

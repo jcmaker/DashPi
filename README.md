@@ -137,6 +137,29 @@ npx expo run:android
 </details>
 
 <details>
+<summary><strong>저장 영상 객체 추적</strong> · YOLO + ByteTrack</summary>
+
+GPT API나 인터넷 연결 없이 저장된 영상에 차량·사람 등의 박스, 추적 ID와 최근 2초 이동 경로를 표시합니다. 원본과 이미 존재하는 출력 파일은 덮어쓰지 않습니다. Pi에 준비된 YOLOv8n ONNX 모델을 사용하는 예시입니다.
+
+```bash
+dashpi track ~/Videos/input.mp4 \
+  --detector-model ~/DashPi-native/models/yolov8n.onnx \
+  --output ~/Videos/input-tracked.mp4
+```
+
+결과는 별도 480p MP4이며 Pi 앱의 **녹화기록 → 전체**에서 열 수 있습니다. 전체 영상에 추적이 적용되고 오디오는 포함하지 않습니다. 현재 YOLO와 ByteTrack은 CPU에서 실행합니다. Hailo-8 가속은 PCIe 리본 연결, Hailo 드라이버와 호환 HEF 모델을 연동한 뒤 사용할 수 있습니다.
+
+Pi에서 기존 `--no-deps` 설치를 사용한다면 추적 라이브러리도 준비해야 합니다. apt의 NumPy/OpenCV를 유지하면서 필요한 패키지만 설치합니다.
+
+```bash
+python -m pip install --no-deps 'supervision>=0.27,<0.28'
+```
+
+Supervision은 SciPy·Matplotlib·Pillow 등을 필요로 합니다. 현재 Pi와 개발 환경에는 이미 설치되어 있습니다. 새 환경에서는 Supervision의 의존성을 함께 준비하세요.
+
+</details>
+
+<details>
 <summary><strong>실행이 막혔나요?</strong> 영상 · AI · QR 확인</summary>
 
 - **영상 처리 실패:** `ffmpeg`와 `ffprobe`가 설치되어 있는지, 입력 영상이 45초 이상인지 확인합니다.
@@ -152,7 +175,7 @@ npx expo run:android
 
 <img src="docs/assets/dashpi-system-architecture.svg" width="100%" alt="DashPi 현재 구조: Pi 카메라·기존 MP4와 화면 트리거 → 세그먼트·사고 clip·SHA-256 원본 저장 → 외부 AI API의 장면 분석 → JSON·HTML 리포트와 사진 3장이 담긴 전송용 JSON → 광학 QR로 휴대폰 수신 앱에 전달. Local Wi-Fi 웹 서버는 별도 프로토타입" />
 
-**현재 구현 구조**입니다. Pi의 네이티브 앱이 녹화와 사고 처리, 원본 보존, AI 요청, 리포트 생성, QR 송신을 맡습니다. 실제 파일은 Pi에 남고, AI 요청에는 추출한 장면 프레임이 외부 공급자에게 전달됩니다. 원본 전체 영상을 클라우드에 보관하는 기능은 없습니다.
+**현재 구현 구조**입니다. Pi의 네이티브 앱이 녹화와 사고 처리, 원본 보존, AI 요청, 리포트 생성, QR 송신을 맡습니다. 실제 파일은 Pi에 남고, AI 요청에는 추출한 장면 프레임이 외부 공급자에게 전달됩니다. 원본 전체 영상을 클라우드에 보관하는 기능은 없습니다. AIGO 업로드를 켜면 사고 clip만 AIGO 서버에 올라갑니다.
 
 - **사고 보존:** 화면 트리거 또는 기존 MP4 재생 위치 → 전후 구간 clip 생성 → SHA-256과 metadata 기록. AI가 실패해도 이 파일을 보존합니다.
 - **AI 분석:** 기본 외부 API에 샘플 프레임을 보내 사고 시점·관찰·요약을 받습니다. 응답을 검증한 뒤 리포트를 만듭니다. 네트워크 오류에는 분석 대기와 재시도가 있습니다.
@@ -160,6 +183,22 @@ npx expo run:android
 - **Local Wi-Fi:** FastAPI·HTTP Range로 전체 영상과 리포트를 조회하는 기존 웹 프로토타입입니다. Pi 앱이 핫스팟을 켜거나 QR 실패 시 자동으로 전환하지 않습니다.
 
 [SVG 크게 보기](docs/assets/dashpi-system-architecture.svg) · [AI 분석 설계](docs/superpowers/specs/2026-09-25-openrouter-ai-analysis-design.md) · [광학 전송 설계](docs/superpowers/specs/2026-09-02-offline-transfer-design.md)
+
+<details>
+<summary><strong>AIGO 업로드</strong> · 선택</summary>
+
+설정하면 사고 분석 버튼으로 잘라낸 클립(`clip.mp4`)을 AIGO 서버에도 올립니다. AIGO가 따로 분석하고, 같은 계정으로 로그인한 AIGO 웹과 앱에 `DashPi` 배지가 붙은 분석으로 보입니다. Pi의 로컬 분석, 광학 QR, Local Wi-Fi는 그대로 동작하며 두 쪽은 서로를 기다리지 않습니다.
+
+```bash
+cp aigo.env.example ~/.config/dashpi/aigo.env && chmod 600 ~/.config/dashpi/aigo.env
+# DASHPI_AIGO_API_KEY에 AIGO에서 발급한 키를 넣는다(AIGO 저장소 README "DashPi 업로드 키")
+```
+
+- 키가 없으면 업로드는 꺼지고 지금과 똑같이 동작합니다. 외부 영상 분석과 다시 분석은 올리지 않습니다.
+- 업로드 상태는 사고 폴더의 `aigo.json`에 남고, 녹화기록 상세에 "AIGO: 업로드 대기 / 완료 / 실패"로 보입니다.
+- 인터넷이 없거나 서버 오류면 1·2·5·10·30분 간격으로, 하루 한도에 걸리면 다음 날 00:05에 다시 시도합니다. 키 오류는 앱을 다시 시작할 때 한 번 더 시도합니다.
+
+</details>
 
 ### 실제 화면
 
