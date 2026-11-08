@@ -38,6 +38,17 @@ class UploadDeferred(Exception):
         self.retry_at = retry_at
 
 
+class UploadRestart(Exception):
+    """서버가 업로드를 받지 못했다(제출 409). 분석을 새로 만들어 다시 올린다."""
+
+
+@dataclass(frozen=True)
+class Ticket:
+    analysis_id: int
+    upload_url: str
+    upload_headers: dict
+
+
 class UploadRejected(Exception):
     """다시 시도해도 안 됨. auth=True면 키 문제."""
 
@@ -72,21 +83,24 @@ class AigoClient:
         self.config, self.timeout = config, timeout
         self.opener = opener or urllib.request.build_opener(_NoRedirect())
 
-    def upload(self, clip: Path) -> int:
-        """생성 → presigned PUT → 제출. 분석 id를 돌려준다."""
-        size = clip.stat().st_size
-        ticket = self._api("POST", "/api/v1/analyses", {"filename": clip.name, "size": size, "consent": True})
+    # 생성 → presigned PUT → 제출. 단계를 나눠 두어, 제출만 실패하면 같은 분석을 다시 제출한다.
+    def create(self, clip: Path) -> Ticket:
+        ticket = self._api("POST", "/api/v1/analyses",
+                           {"filename": clip.name, "size": clip.stat().st_size, "consent": True})
         try:
-            analysis_id, url, headers = int(ticket["id"]), str(ticket["upload_url"]), dict(ticket["upload_headers"])
+            return Ticket(int(ticket["id"]), str(ticket["upload_url"]), dict(ticket["upload_headers"]))
         except (KeyError, TypeError, ValueError) as error:
             raise UploadDeferred("AIGO 응답 형식 오류") from error
+
+    def put(self, clip: Path, ticket: Ticket) -> None:
         with clip.open("rb") as body:
-            request = urllib.request.Request(url, data=body, method="PUT",
-                                             headers={**headers, "Content-Length": str(size)})
-            # presigned URL이 만료(403)되면 다음 시도에서 새로 만든다. 키는 보내지 않는다.
-            self._send(request, put=True)
+            request = urllib.request.Request(
+                ticket.upload_url, data=body, method="PUT",
+                headers={**ticket.upload_headers, "Content-Length": str(clip.stat().st_size)})
+            self._send(request, put=True)  # 저장소 주소에는 키를 보내지 않는다
+
+    def submit(self, analysis_id: int) -> None:
         self._api("POST", f"/api/v1/analyses/{analysis_id}/submit", None)
-        return analysis_id
 
     def _api(self, method: str, path: str, payload: dict | None) -> dict:
         request = urllib.request.Request(
@@ -112,10 +126,14 @@ class AigoClient:
     @staticmethod
     def _http_error(error: urllib.error.HTTPError, put: bool) -> Exception:
         status = error.code
-        if put or status == 408 or status >= 500:
+        if status == 408 or status >= 500:
             return UploadDeferred(f"AIGO 일시 오류 (HTTP {status})")
         if status == 429:
             return UploadDeferred("AIGO 하루 한도 도달", retry_at=next_day_0005(datetime.now().astimezone()))
+        if put:  # 저장소의 4xx는 키 문제가 아니고, 다시 해도 같다
+            return UploadRejected(f"AIGO 저장소 업로드 거부 (HTTP {status})")
+        if status == 409:
+            return UploadRestart("AIGO가 업로드를 받지 못함")
         if status in (401, 403):
             return UploadRejected(AUTH_REASON, auth=True)
         try:
@@ -204,11 +222,24 @@ class AigoUploader:
             return
         now = self.now()
         try:
-            analysis_id = self.client.upload(clip)
+            if state.get("phase") == "put" and state.get("analysis_id"):
+                analysis_id = int(state["analysis_id"])  # 지난번에 올려 둔 영상을 제출만 다시 한다
+            else:
+                ticket = self.client.create(clip)
+                analysis_id = ticket.analysis_id
+                self.client.put(clip, ticket)
+                state = {**state, "analysis_id": analysis_id, "phase": "put"}
+                _write_state(self.store, incident_id, {**state, "state": "pending"})
+            self.client.submit(analysis_id)
+        except UploadRestart as error:
+            state = {key: value for key, value in state.items() if key not in ("analysis_id", "phase")}
+            _write_state(self.store, incident_id, {**state, "state": "pending", "next_attempt_at": None,
+                                                   "reason": str(error)})
+            log.info("AIGO 업로드 다시 시작: %s", incident_id)
         except UploadDeferred as error:
             attempts = int(state.get("attempts", 0)) + 1
             retry_at = error.retry_at or now + retry_delay(attempts)
-            _write_state(self.store, incident_id, {"state": "pending", "attempts": attempts,
+            _write_state(self.store, incident_id, {**state, "state": "pending", "attempts": attempts,
                                                    "next_attempt_at": retry_at.isoformat(), "reason": str(error)})
             log.info("AIGO 업로드 대기: %s (%s)", incident_id, error)
         except UploadRejected as error:
@@ -217,7 +248,7 @@ class AigoUploader:
         except Exception as error:  # 예상 못 한 오류도 사고 기록을 건드리지 않고 다음에 다시 시도한다
             log.exception("AIGO 업로드 오류: %s", incident_id)
             attempts = int(state.get("attempts", 0)) + 1
-            _write_state(self.store, incident_id, {"state": "pending", "attempts": attempts,
+            _write_state(self.store, incident_id, {**state, "state": "pending", "attempts": attempts,
                                                    "next_attempt_at": (now + retry_delay(attempts)).isoformat(),
                                                    "reason": type(error).__name__})
         else:
@@ -226,4 +257,5 @@ class AigoUploader:
             log.info("AIGO 업로드 완료: %s → 분석 #%s", incident_id, analysis_id)
 
     def close(self) -> None:
-        self._executor.shutdown(wait=True, cancel_futures=True)
+        # 종료 때 화면을 붙잡지 않는다. 진행 중인 업로드는 다음 실행에서 이어서 한다.
+        self._executor.shutdown(wait=False, cancel_futures=True)

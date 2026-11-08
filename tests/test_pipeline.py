@@ -448,3 +448,14 @@ def test_on_clip_is_a_constructor_option(tmp_path):
     settings = Settings(tmp_path, "test-model")
     assert IncidentPipeline(settings, IncidentStore(tmp_path), on_clip=marker).on_clip is marker
     assert IncidentPipeline(settings, IncidentStore(tmp_path)).on_clip is None
+
+
+def test_on_clip_sees_clip_already_saved_to_metadata(pipeline_fixture):
+    pipeline, incident, segments = pipeline_fixture
+    saved = []
+    pipeline.on_clip = lambda item: saved.append(pipeline.store.load(item.incident_id).clip)
+    pipeline.process(
+        incident, segments,
+        lambda *_: {"incident_timestamp": 3.0, "summary": "Stopped", "observations": [], "limitations": []},
+    )
+    assert saved and saved[0] is not None and saved[0].sha256

@@ -1,5 +1,6 @@
 import json
 import threading
+import time
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from zoneinfo import ZoneInfo
@@ -7,7 +8,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from dashpi.aigo_upload import (
-    AigoClient, AigoConfig, UploadDeferred, UploadRejected, load_aigo_config, next_day_0005,
+    AigoClient, AigoConfig, Ticket, UploadDeferred, UploadRejected, UploadRestart, load_aigo_config, next_day_0005,
 )
 
 KEY = "ak_test_123"
@@ -64,6 +65,13 @@ def client_for(server):
     return AigoClient(AigoConfig(f"http://127.0.0.1:{server.server_port}", KEY))
 
 
+def full_upload(client, clip):
+    ticket = client.create(clip)
+    client.put(clip, ticket)
+    client.submit(ticket.analysis_id)
+    return ticket.analysis_id
+
+
 def test_config_missing_key_returns_none(tmp_path):
     (tmp_path / "aigo.env").write_text("DASHPI_AIGO_API_URL=https://aigo.example\n")
     assert load_aigo_config(tmp_path / "aigo.env", environ={}) is None
@@ -88,7 +96,7 @@ def test_upload_runs_create_put_submit(clip):
     seen = []
     server = fake_aigo(seen)
     try:
-        assert client_for(server).upload(clip) == 7
+        assert full_upload(client_for(server), clip) == 7
     finally:
         server.shutdown()
     (m1, p1, h1, b1), (m2, p2, h2, b2), (m3, p3, h3, _) = seen
@@ -106,7 +114,7 @@ def test_429_defers_to_next_day_0005(clip):
     server = fake_aigo([], create=(429, {"code": "DAILY_LIMIT", "message": "한도"}))
     try:
         with pytest.raises(UploadDeferred) as caught:
-            client_for(server).upload(clip)
+            full_upload(client_for(server), clip)
     finally:
         server.shutdown()
     assert caught.value.retry_at is not None
@@ -119,12 +127,12 @@ def test_next_day_0005_is_local_midnight_plus_five():
 
 
 @pytest.mark.parametrize("kwargs", [{"create": (500, None)}, {"create": (408, None)}, {"create": (503, None)},
-                                    {"submit": (502, {})}, {"put": 403}])
-def test_server_errors_and_expired_put_defer(clip, kwargs):
+                                    {"submit": (502, {})}, {"put": 500}])
+def test_server_errors_defer(clip, kwargs):
     server = fake_aigo([], **kwargs)
     try:
         with pytest.raises(UploadDeferred) as caught:
-            client_for(server).upload(clip)
+            full_upload(client_for(server), clip)
     finally:
         server.shutdown()
     assert caught.value.retry_at is None
@@ -133,7 +141,7 @@ def test_server_errors_and_expired_put_defer(clip, kwargs):
 def test_network_error_defers(clip):
     client = AigoClient(AigoConfig("http://127.0.0.1:9", KEY), timeout=2)
     with pytest.raises(UploadDeferred):
-        client.upload(clip)
+        full_upload(client, clip)
 
 
 @pytest.mark.parametrize("status", [401, 403])
@@ -141,7 +149,7 @@ def test_auth_errors_reject(clip, status):
     server = fake_aigo([], create=(status, {"code": "UNAUTHORIZED", "message": "로그인이 필요합니다."}))
     try:
         with pytest.raises(UploadRejected) as caught:
-            client_for(server).upload(clip)
+            full_upload(client_for(server), clip)
     finally:
         server.shutdown()
     assert caught.value.auth and str(caught.value) == "AIGO 키 확인 필요"
@@ -151,14 +159,35 @@ def test_other_4xx_rejects_with_server_message(clip):
     server = fake_aigo([], create=(400, {"code": "VIDEO_TOO_LARGE", "message": "영상은 200MB 이하여야 합니다."}))
     try:
         with pytest.raises(UploadRejected) as caught:
-            client_for(server).upload(clip)
+            full_upload(client_for(server), clip)
     finally:
         server.shutdown()
     assert not caught.value.auth and str(caught.value) == "영상은 200MB 이하여야 합니다."
 
 
+@pytest.mark.parametrize("status", [400, 403])
+def test_put_client_errors_reject_instead_of_retrying(clip, status):
+    server = fake_aigo([], put=status)
+    try:
+        with pytest.raises(UploadRejected) as caught:
+            full_upload(client_for(server), clip)
+    finally:
+        server.shutdown()
+    assert not caught.value.auth
+
+
+def test_submit_409_asks_for_restart(clip):
+    server = fake_aigo([], submit=(409, {"code": "UPLOAD_INCOMPLETE", "message": "영상 업로드가 끝나지 않았습니다."}))
+    try:
+        with pytest.raises(UploadRestart):
+            client_for(server).submit(7)
+    finally:
+        server.shutdown()
+
+
 # ---- 업로드 대기열 (aigo.json) ----
 from datetime import UTC, timedelta  # noqa: E402
+from pathlib import Path  # noqa: E402
 
 from dashpi.aigo_upload import AIGO_STATE, AigoUploader, mark_pending, read_state  # noqa: E402
 from dashpi.models import FileArtifact, IncidentMetadata, IncidentState  # noqa: E402
@@ -168,15 +197,33 @@ NOW = datetime(2026, 11, 8, 12, 0, tzinfo=UTC)
 
 
 class FakeClient:
-    def __init__(self, *results):
-        self.results, self.calls = list(results), []
+    """시도마다 results에서 하나를 꺼낸다. 숫자면 분석 id, 예외면 at 단계에서 던진다."""
 
-    def upload(self, clip):
+    def __init__(self, *results, at="create"):
+        self.results, self.at = list(results), at
+        self.calls: list[Path] = []  # create에 넘어온 클립
+        self.steps: list[tuple] = []
+        self.current = None
+
+    def _maybe_fail(self, step):
+        if step == self.at and isinstance(self.current, Exception):
+            error, self.current = self.current, None
+            raise error
+
+    def create(self, clip):
         self.calls.append(clip)
-        result = self.results.pop(0) if self.results else 7
-        if isinstance(result, Exception):
-            raise result
-        return result
+        self.current = self.results.pop(0) if self.results else 7
+        self.steps.append(("create",))
+        self._maybe_fail("create")
+        return Ticket(self.current if isinstance(self.current, int) else 7, "https://s3/put", {})
+
+    def put(self, clip, ticket):
+        self.steps.append(("put", ticket.analysis_id))
+        self._maybe_fail("put")
+
+    def submit(self, analysis_id):
+        self.steps.append(("submit", analysis_id))
+        self._maybe_fail("submit")
 
 
 def incident(store, incident_id="inc1", state=IncidentState.READY):
@@ -285,12 +332,69 @@ def test_digest_mismatch_fails_without_request(store):
     assert read_state(store, "inc1")["state"] == "failed"
 
 
-def test_submit_failure_stays_pending(store):
+def test_submit_failure_resubmits_without_new_analysis(store):
+    class Flaky(FakeClient):
+        def __init__(self):
+            super().__init__(42)
+            self.fails = 1
+
+        def submit(self, analysis_id):
+            self.steps.append(("submit", analysis_id))
+            if self.fails:
+                self.fails -= 1
+                raise UploadDeferred("응답 없음")
+
     incident(store)
     mark_pending(store, "inc1")
-    run(AigoUploader(store, FakeClient(UploadDeferred("AIGO 일시 오류 (HTTP 502)")), now=lambda: NOW))
+    clock = [NOW]
+    client = Flaky()
+    uploader = AigoUploader(store, client, now=lambda: clock[0])
+    run(uploader)
     state = read_state(store, "inc1")
-    assert state["state"] == "pending" and "analysis_id" not in state
+    assert state["state"] == "pending" and state["analysis_id"] == 42 and state["phase"] == "put"
+    clock[0] = NOW + timedelta(minutes=5)
+    run(uploader)
+    state = read_state(store, "inc1")
+    assert state["state"] == "uploaded" and state["analysis_id"] == 42
+    assert [step[0] for step in client.steps] == ["create", "put", "submit", "submit"]
+
+
+def test_restart_when_server_lost_the_upload(store):
+    incident(store)
+    atomic_write(store.directory("inc1") / AIGO_STATE,
+                 json.dumps({"state": "pending", "attempts": 1, "analysis_id": 5, "phase": "put"}).encode())
+
+    class Lost(FakeClient):
+        def submit(self, analysis_id):
+            self.steps.append(("submit", analysis_id))
+            if analysis_id == 5:
+                raise UploadRestart("다시 올림")
+
+    client = Lost()
+    uploader = AigoUploader(store, client, now=lambda: NOW)
+    run(uploader)
+    state = read_state(store, "inc1")
+    assert state["state"] == "pending" and "phase" not in state and "analysis_id" not in state
+    run(uploader)
+    assert read_state(store, "inc1")["state"] == "uploaded" and read_state(store, "inc1")["analysis_id"] == 7
+
+
+def test_close_does_not_wait_for_running_upload(store):
+    gate = threading.Event()
+
+    class Stuck(FakeClient):
+        def create(self, clip):
+            gate.wait(10)
+            return super().create(clip)
+
+    incident(store)
+    mark_pending(store, "inc1")
+    uploader = AigoUploader(store, Stuck(), now=lambda: NOW)
+    uploader.tick()
+    started = time.monotonic()
+    uploader.close()
+    assert time.monotonic() - started < 1
+    gate.set()
 
 
 def test_upload_does_not_touch_metadata(store):
@@ -305,9 +409,9 @@ def test_one_upload_at_a_time_earliest_first(store):
     gate = threading.Event()
 
     class SlowClient(FakeClient):
-        def upload(self, clip):
+        def create(self, clip):
             gate.wait(5)
-            return super().upload(clip)
+            return super().create(clip)
 
     for name in ("inc1", "inc2"):
         incident(store, name)

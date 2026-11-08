@@ -70,6 +70,8 @@ class IncidentPipeline:
 
         if self.on_clip is not None:
             try:
+                # 업로더가 metadata에서 클립 지문을 읽으므로 먼저 저장한다.
+                self.store.save(incident)
                 self.on_clip(incident)
             except Exception:
                 logging.getLogger("dashpi").exception("클립 저장 후 처리 실패: %s", incident.incident_id)
