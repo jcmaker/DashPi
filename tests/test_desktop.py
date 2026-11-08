@@ -1428,3 +1428,63 @@ def test_native_optical_falls_back_to_html_with_notice_for_invalid_image_report(
         assert store.load(item.incident_id).state is IncidentState.READY
     finally:
         window.close()
+
+
+class FakeUploader:
+    def __init__(self, fail=False):
+        self.fail, self.ticks, self.recovered, self.closed = fail, 0, 0, False
+
+    def recover(self):
+        self.recovered += 1
+
+    def tick(self):
+        self.ticks += 1
+        if self.fail:
+            raise RuntimeError("boom")
+
+    def close(self):
+        self.closed = True
+
+
+def test_uploader_recovers_ticks_and_survives_errors(qapp, tmp_path):
+    from dashpi.desktop import DashPiWindow
+
+    uploader = FakeUploader(fail=True)
+    window = DashPiWindow(FakeSession(), IncidentStore(tmp_path), tmp_path / "settings.json", uploader=uploader)
+    try:
+        wait_until(qapp, lambda: uploader.ticks >= 1)
+        assert uploader.recovered == 1
+        window._upload_tick()
+        assert uploader.ticks >= 2
+    finally:
+        window.close()
+    assert uploader.closed
+
+
+@pytest.mark.parametrize("state,expected", [
+    (None, None),
+    ({"state": "pending", "attempts": 0}, "AIGO: 업로드 대기"),
+    ({"state": "uploaded", "analysis_id": 7}, "AIGO: 업로드 완료"),
+    ({"state": "failed", "reason": "AIGO 키 확인 필요"}, "AIGO: 업로드 실패 · AIGO 키 확인 필요"),
+])
+def test_incident_detail_shows_aigo_status(qapp, tmp_path, state, expected):
+    from dashpi.desktop import DashPiWindow
+
+    store = IncidentStore(tmp_path)
+    incident = IncidentMetadata.new("incident-aigo", datetime.now(UTC).isoformat(), 100.0, 15.0)
+    incident.transition(IncidentState.ANALYSIS_FAILED, datetime.now(UTC).isoformat(), "AI unavailable")
+    store.save(incident)
+    if state is not None:
+        atomic_write(store.directory("incident-aigo") / "aigo.json", json.dumps(state).encode())
+    window = DashPiWindow(FakeSession(), store, tmp_path / "settings.json")
+    try:
+        window.show_records()
+        item = next(window.record_list.item(i) for i in range(window.record_list.count())
+                    if window.record_list.item(i).data(Qt.ItemDataRole.UserRole)[0] == "incident")
+        window._open_record(item)
+        if expected is None:
+            assert window.aigo_status.isHidden()
+        else:
+            assert not window.aigo_status.isHidden() and window.aigo_status.text() == expected
+    finally:
+        window.close()

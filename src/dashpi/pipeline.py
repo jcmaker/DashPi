@@ -33,11 +33,13 @@ class IncidentPipeline:
         store: IncidentStore,
         detector=None,
         wait_for_capacity: Callable[[], None] = lambda: None,
+        on_clip: Callable[[IncidentMetadata], None] | None = None,
     ):
         self.settings = settings
         self.store = store
         self.detector = detector
         self.wait_for_capacity = wait_for_capacity
+        self.on_clip = on_clip  # 클립 저장 직후 한 번. AIGO 업로드 대기 표시에 쓴다.
 
     def process(
         self,
@@ -66,6 +68,11 @@ class IncidentPipeline:
             self.store.save(incident)
             return incident
 
+        if self.on_clip is not None:
+            try:
+                self.on_clip(incident)
+            except Exception:
+                logging.getLogger("dashpi").exception("클립 저장 후 처리 실패: %s", incident.incident_id)
         return self.generate_report(incident, analyze, incident_offset_override, overlays)
 
     def regenerate_report(
