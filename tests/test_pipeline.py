@@ -400,3 +400,62 @@ def test_new_transfer_write_cannot_follow_partial_symlink_to_evidence(pipeline_f
     assert result.clip.sha256 == sha256_file(result.clip.path)
     assert (result.report_transfer is None) == collision
     assert result.report_html.sha256 == sha256_file(result.report_html.path)
+
+
+def test_on_clip_called_after_clip_before_analysis(pipeline_fixture):
+    pipeline, incident, segments = pipeline_fixture
+    seen = []
+    pipeline.on_clip = lambda item: seen.append((item.incident_id, item.clip.sha256, item.state))
+
+    def analyze(*_args):
+        assert seen, "on_clip must run before analysis"
+        return {"incident_timestamp": 3.0, "summary": "Stopped", "observations": [], "limitations": []}
+
+    result = pipeline.process(incident, segments, analyze)
+    assert result.state is IncidentState.READY
+    assert seen == [("inc-1", result.clip.sha256, IncidentState.CLIPPING)]
+
+
+def test_on_clip_error_does_not_change_incident(pipeline_fixture):
+    pipeline, incident, segments = pipeline_fixture
+
+    def boom(_item):
+        raise OSError("disk")
+
+    pipeline.on_clip = boom
+    result = pipeline.process(
+        incident, segments,
+        lambda *_: {"incident_timestamp": 3.0, "summary": "Stopped", "observations": [], "limitations": []},
+    )
+    assert result.state is IncidentState.READY
+
+
+def test_clip_failure_does_not_call_on_clip(pipeline_fixture, monkeypatch):
+    pipeline, incident, segments = pipeline_fixture
+    seen = []
+    pipeline.on_clip = seen.append
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("ffmpeg")
+
+    monkeypatch.setattr(pipeline_module, "build_clip", broken)
+    result = pipeline.process(incident, segments, lambda *_: {})
+    assert result.state is IncidentState.CLIP_FAILED and seen == []
+
+
+def test_on_clip_is_a_constructor_option(tmp_path):
+    marker = lambda _item: None  # noqa: E731
+    settings = Settings(tmp_path, "test-model")
+    assert IncidentPipeline(settings, IncidentStore(tmp_path), on_clip=marker).on_clip is marker
+    assert IncidentPipeline(settings, IncidentStore(tmp_path)).on_clip is None
+
+
+def test_on_clip_sees_clip_already_saved_to_metadata(pipeline_fixture):
+    pipeline, incident, segments = pipeline_fixture
+    saved = []
+    pipeline.on_clip = lambda item: saved.append(pipeline.store.load(item.incident_id).clip)
+    pipeline.process(
+        incident, segments,
+        lambda *_: {"incident_timestamp": 3.0, "summary": "Stopped", "observations": [], "limitations": []},
+    )
+    assert saved and saved[0] is not None and saved[0].sha256

@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QStackedWidget, QStyle, QStyleOptionToolButton, QStylePainter, QToolButton, QVBoxLayout, QWidget,
 )
 
+from dashpi.aigo_upload import AigoClient, AigoUploader, load_aigo_config, mark_pending, read_state
 from dashpi.analysis import api_key_configured, build_analyzer
 from dashpi.analysis_retry import AnalysisRetrier
 from dashpi.analysis_worker import AnalysisWorker
@@ -248,9 +249,11 @@ def home_tile(text: str, icon: QIcon, callback, *, primary: bool = False) -> QTo
 
 
 class DashPiWindow(QMainWindow):
-    def __init__(self, session: DeviceSession, store: IncidentStore, settings_path: Path):
+    def __init__(self, session: DeviceSession, store: IncidentStore, settings_path: Path,
+                 uploader: AigoUploader | None = None):
         super().__init__()
         self.session, self.store, self.settings_path = session, store, settings_path
+        self.uploader = uploader
         self.setWindowTitle("DashPi")
         self.resize(1024, 600)
         theme.apply(QApplication.instance())
@@ -294,6 +297,11 @@ class DashPiWindow(QMainWindow):
             self.retry_timer.timeout.connect(self._retry_tick)
             self.retry_timer.start(60_000)
             QTimer.singleShot(0, self._start_retries)
+        if self.uploader is not None:
+            self.upload_timer = QTimer(self)
+            self.upload_timer.timeout.connect(self._upload_tick)
+            self.upload_timer.start(10_000)
+            QTimer.singleShot(0, self._start_uploads)
         self.optical_timer = QTimer(self)
         self.optical_timer.timeout.connect(self._render_optical_frame)
         self.showFullScreen()
@@ -461,6 +469,11 @@ class DashPiWindow(QMainWindow):
         report_scroll.setWidgetResizable(True)
         report_scroll.setWidget(self.report_text)
         side.addWidget(report_scroll, 1)
+        self.aigo_status = QLabel("")
+        self.aigo_status.setObjectName("status")
+        self.aigo_status.setWordWrap(True)
+        self.aigo_status.hide()
+        side.addWidget(self.aigo_status)
         body.addLayout(side, 2)
         layout.addLayout(body, 1)
         # One row: stacked, these buttons made the page taller than the 480px LCD, and the window
@@ -728,6 +741,21 @@ class DashPiWindow(QMainWindow):
             log.exception("중단된 분석 복구 실패")
         self._retry_tick()
 
+    def _start_uploads(self):
+        try:
+            self.uploader.recover()
+        except Exception:
+            log.exception("AIGO 업로드 복구 실패")
+        self._upload_tick()
+
+    def _upload_tick(self):
+        if self.uploader is None:
+            return
+        try:
+            self.uploader.tick()
+        except Exception:
+            log.exception("AIGO 업로드 확인 실패")
+
     def _retry_tick(self):
         if self.retrier is None:
             return
@@ -858,6 +886,15 @@ class DashPiWindow(QMainWindow):
                 item.setData(Qt.ItemDataRole.UserRole, ("recording", recording))
                 self.record_list.addItem(item)
 
+    def _show_aigo_status(self, incident_id: str | None):
+        state = read_state(self.store, incident_id) if incident_id else None
+        labels = {"pending": "AIGO: 업로드 대기", "uploaded": "AIGO: 업로드 완료", "failed": "AIGO: 업로드 실패"}
+        text = labels.get((state or {}).get("state"), "")
+        if text and state.get("state") == "failed" and state.get("reason"):
+            text += f" · {state['reason']}"
+        self.aigo_status.setText(text)
+        self.aigo_status.setVisible(bool(text))
+
     def _open_record(self, item: QListWidgetItem):
         self._detail_generation += 1
         generation = self._detail_generation
@@ -877,6 +914,7 @@ class DashPiWindow(QMainWindow):
         self.reanalyze_button.setVisible(kind == "incident" and value.state is IncidentState.ANALYSIS_FAILED)
         self.segment_list.clear()
         self.report_text.setText("")
+        self._show_aigo_status(value.incident_id if kind == "incident" else None)
         self.detail_title.setText(item.text())
         if kind == "external":
             part = QListWidgetItem(value.name)
@@ -1292,6 +1330,9 @@ class DashPiWindow(QMainWindow):
         if self.retrier is not None:
             self.retry_timer.stop()
         self.optical_timer.stop()
+        if self.uploader is not None:
+            self.upload_timer.stop()
+            self.uploader.close()
         self.player.stop()
         self._executor.shutdown(wait=False, cancel_futures=False)
         event.accept()
@@ -1317,9 +1358,14 @@ def main():
     worker = AnalysisWorker()
     recorder = PiCameraRecorder(root, current)
     settings = Settings(root, current.ai_model, current.ai_report_model)
-    session = DeviceSession(recorder, settings, IncidentStore(root), worker,
-                            build_analyzer(settings.ai_model, settings.ai_report_model, root))
-    window = DashPiWindow(session, IncidentStore(root), root / "settings.json")
+    store = IncidentStore(root)
+    aigo = load_aigo_config()
+    uploader = AigoUploader(store, AigoClient(aigo)) if aigo else None
+    log.info("AIGO 업로드 %s", "켜짐" if uploader else "꺼짐 (aigo.env 없음)")
+    session = DeviceSession(recorder, settings, store, worker,
+                            build_analyzer(settings.ai_model, settings.ai_report_model, root),
+                            on_clip=(lambda incident: mark_pending(store, incident.incident_id)) if uploader else None)
+    window = DashPiWindow(session, store, root / "settings.json", uploader=uploader)
     try:
         app.exec()
     finally:

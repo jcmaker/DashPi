@@ -260,6 +260,19 @@ dashpi simulate input.mp4 \
 
 Detector는 YOLOv8 COCO ONNX의 `[1,84,8400]` 또는 `[1,8400,84]` output 형식만 지원합니다.
 
+## AIGO 업로드 (선택)
+
+설정하면 사고 분석 버튼으로 잘라낸 클립(`clip.mp4`)을 AIGO 서버에도 올립니다. AIGO가 따로 분석하고, 같은 계정으로 로그인한 AIGO 웹과 앱에 `DashPi` 배지가 붙은 분석으로 보입니다. Pi의 로컬 분석, 광학 QR, Local Wi-Fi는 그대로 동작하며 두 쪽은 서로를 기다리지 않습니다.
+
+```bash
+cp aigo.env.example ~/.config/dashpi/aigo.env && chmod 600 ~/.config/dashpi/aigo.env
+# DASHPI_AIGO_API_KEY에 AIGO에서 발급한 키를 넣는다(AIGO 저장소 README "DashPi 업로드 키")
+```
+
+- 키가 없으면 업로드는 꺼지고 지금과 똑같이 동작합니다. 외부 영상 분석과 다시 분석은 올리지 않습니다.
+- 업로드 상태는 사고 폴더의 `aigo.json`에 남고, 녹화기록 상세에 "AIGO: 업로드 대기 / 완료 / 실패"로 보입니다.
+- 인터넷이 없거나 서버 오류면 1·2·5·10·30분 간격으로, 하루 한도에 걸리면 다음 날 00:05에 다시 시도합니다. 키 오류는 앱을 다시 시작할 때 한 번 더 시도합니다.
+
 ## 사고 리포트와 전송
 
 `report.html`의 **Download HTML**은 재생 가능한 10초 annotated video를 포함한 오프라인 단일 파일을 저장합니다. **Save as PDF**는 브라우저의 인쇄 대화상자를 사용해 작성 분석과 핵심 장면 3장을 정적 PDF로 저장하므로, 재생 가능한 영상은 HTML에만 남습니다.

@@ -28,9 +28,11 @@ class DeviceSession:
         worker: AnalysisWorker,
         analyze: Callable,
         detector=None,
+        on_clip: Callable | None = None,
     ):
         self.recorder, self.settings, self.store = recorder, settings, store
         self.worker, self.analyze, self.detector = worker, analyze, detector
+        self.on_clip = on_clip
         self.coordinator = IncidentCoordinator(settings, lambda: uuid.uuid4().hex)
         self.pending_stop = False
         self.last_error: str | None = None
@@ -90,7 +92,7 @@ class DeviceSession:
             )
             if not segments or segments[-1].end_mono < incident.post_deadline_mono:
                 continue
-            pipeline = IncidentPipeline(self.settings, self.store, self.detector)
+            pipeline = IncidentPipeline(self.settings, self.store, self.detector, on_clip=self.on_clip)
             job = self.worker.submit(
                 lambda incident=incident, segments=segments, pipeline=pipeline:
                 pipeline.process(incident, segments, self.analyze)
