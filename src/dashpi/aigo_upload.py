@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 import http.client
 import json
 import logging
@@ -13,12 +14,14 @@ from pathlib import Path
 import urllib.error
 import urllib.request
 
-from dashpi.ai_client import AnalysisError, _NoRedirect, _read_env_file, _valid_base_url
+from dashpi.ai_client import AnalysisError, _NoRedirect, _read_env_file, _valid_base_url, retry_delay
+from dashpi.storage import IncidentStore, atomic_write, sha256_file
 
 log = logging.getLogger("dashpi")
 
 DEFAULT_AIGO_CONFIG = Path.home() / ".config" / "dashpi" / "aigo.env"
 AUTH_REASON = "AIGO 키 확인 필요"
+AIGO_STATE = "aigo.json"  # metadata.json과 따로 둔다. Pi 분석 스레드와 서로 덮어쓰지 않게.
 
 
 @dataclass(frozen=True)
@@ -120,3 +123,107 @@ class AigoClient:
         except (ValueError, AttributeError, OSError):
             message = None
         return UploadRejected(message if isinstance(message, str) and message else f"AIGO 업로드 거부 (HTTP {status})")
+
+
+def read_state(store: IncidentStore, incident_id: str) -> dict | None:
+    try:
+        state = json.loads((store.directory(incident_id) / AIGO_STATE).read_text())
+    except (FileNotFoundError, KeyError, OSError, ValueError):
+        return None
+    return state if isinstance(state, dict) else None
+
+
+def _write_state(store: IncidentStore, incident_id: str, state: dict) -> None:
+    atomic_write(store.directory(incident_id) / AIGO_STATE, json.dumps(state, sort_keys=True).encode())
+
+
+def mark_pending(store: IncidentStore, incident_id: str) -> None:
+    """클립 저장 직후 부른다. 이미 상태 파일이 있으면 그대로 둔다."""
+    if read_state(store, incident_id) is None:
+        _write_state(store, incident_id, {"state": "pending", "attempts": 0})
+
+
+class AigoUploader:
+    """aigo.json이 pending인 사고를 하나씩 올린다. 분석 worker와 별도 스레드."""
+
+    def __init__(self, store: IncidentStore, client: AigoClient,
+                 now: Callable[[], datetime] = lambda: datetime.now(UTC)):
+        self.store, self.client, self.now = store, client, now
+        self.running: Future | None = None
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dashpi-aigo")
+
+    def _ids(self) -> list[str]:
+        try:
+            return os.listdir(self.store.root / "incidents")
+        except OSError:
+            return []
+
+    def recover(self) -> None:
+        """키 문제로 실패한 업로드를 앱 시작 때 한 번 다시 대기시킨다(키를 고친 뒤 재시작하면 올라간다)."""
+        for incident_id in self._ids():
+            state = read_state(self.store, incident_id)
+            if state and state.get("state") == "failed" and state.get("reason") == AUTH_REASON:
+                _write_state(self.store, incident_id, {"state": "pending", "attempts": 0})
+
+    def tick(self) -> str | None:
+        if self.running is not None and not self.running.done():
+            return None
+        now = self.now()
+        due = []
+        for incident_id in self._ids():
+            state = read_state(self.store, incident_id)
+            if not state or state.get("state") != "pending":
+                continue
+            try:
+                when = datetime.fromisoformat(state["next_attempt_at"]) if state.get("next_attempt_at") else None
+            except (TypeError, ValueError):
+                when = None
+            if when is None or when <= now:
+                due.append((when or datetime.min.replace(tzinfo=UTC), incident_id))
+        if not due:
+            return None
+        _, incident_id = min(due)
+        self.running = self._executor.submit(self._upload, incident_id)
+        return incident_id
+
+    def _upload(self, incident_id: str) -> None:
+        state = read_state(self.store, incident_id) or {"attempts": 0}
+        try:
+            incident = self.store.load(incident_id)
+        except (FileNotFoundError, KeyError, OSError, ValueError):
+            log.warning("AIGO 업로드 대상 사고를 찾을 수 없음: %s", incident_id)
+            _write_state(self.store, incident_id, {**state, "state": "failed", "reason": "사고 기록 없음"})
+            return
+        clip = self.store.directory(incident_id) / "clip.mp4"
+        try:
+            ok = incident.clip is not None and sha256_file(clip) == incident.clip.sha256
+        except OSError:
+            ok = False
+        if not ok:
+            _write_state(self.store, incident_id, {**state, "state": "failed", "reason": "클립 확인 실패"})
+            return
+        now = self.now()
+        try:
+            analysis_id = self.client.upload(clip)
+        except UploadDeferred as error:
+            attempts = int(state.get("attempts", 0)) + 1
+            retry_at = error.retry_at or now + retry_delay(attempts)
+            _write_state(self.store, incident_id, {"state": "pending", "attempts": attempts,
+                                                   "next_attempt_at": retry_at.isoformat(), "reason": str(error)})
+            log.info("AIGO 업로드 대기: %s (%s)", incident_id, error)
+        except UploadRejected as error:
+            _write_state(self.store, incident_id, {**state, "state": "failed", "reason": str(error)})
+            log.warning("AIGO 업로드 실패: %s (%s)", incident_id, error)
+        except Exception as error:  # 예상 못 한 오류도 사고 기록을 건드리지 않고 다음에 다시 시도한다
+            log.exception("AIGO 업로드 오류: %s", incident_id)
+            attempts = int(state.get("attempts", 0)) + 1
+            _write_state(self.store, incident_id, {"state": "pending", "attempts": attempts,
+                                                   "next_attempt_at": (now + retry_delay(attempts)).isoformat(),
+                                                   "reason": type(error).__name__})
+        else:
+            _write_state(self.store, incident_id, {"state": "uploaded", "analysis_id": analysis_id,
+                                                   "uploaded_at": now.isoformat()})
+            log.info("AIGO 업로드 완료: %s → 분석 #%s", incident_id, analysis_id)
+
+    def close(self) -> None:
+        self._executor.shutdown(wait=True, cancel_futures=True)
