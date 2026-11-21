@@ -15,7 +15,7 @@ from dashpi.storage import IncidentStore
 
 
 def analyze_external_video(source: Path, position: float, settings: Settings,
-                           store: IncidentStore, analyze) -> IncidentMetadata:
+                           store: IncidentStore, analyze, on_clip=None) -> IncidentMetadata:
     if not source.is_file():
         raise FileNotFoundError(f"영상을 찾을 수 없습니다: {source}")
     duration = probe_duration(source)
@@ -30,7 +30,7 @@ def analyze_external_video(source: Path, position: float, settings: Settings,
         uuid.uuid4().hex, datetime.now(UTC).isoformat(), position, after, before,
     )
     incident.manual_offset_seconds = before
-    return IncidentPipeline(settings, store).process(
+    return IncidentPipeline(settings, store, on_clip=on_clip).process(
         incident, [Segment(source, 0.0, duration)], analyze,
         incident_offset_override=before,
     )

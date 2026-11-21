@@ -1109,7 +1109,8 @@ class DashPiWindow(QMainWindow):
             analyze = build_analyzer(settings.ai_model, settings.ai_report_model, self.settings_path.parent)
             def run():
                 with progress.reporting(lambda *event: events.append(event)):
-                    return analyze_external_video(source, position, settings, self.store, analyze)
+                    return analyze_external_video(source, position, settings, self.store, analyze,
+                                                  getattr(self.session, "on_clip", None))
 
             future = self.session.worker.submit(run)
             self._jobs.append((future, lambda done: self._external_analysis_done(done, generation)))

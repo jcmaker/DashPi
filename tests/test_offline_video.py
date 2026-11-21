@@ -79,8 +79,8 @@ def test_external_analysis_reports_each_pipeline_step(tmp_path):
     ]
 
 
-def test_external_video_never_marks_aigo_upload(tmp_path):
-    from dashpi.aigo_upload import AIGO_STATE
+def test_external_video_marks_aigo_upload_when_on_clip_given(tmp_path):
+    from dashpi.aigo_upload import AIGO_STATE, mark_pending
     from dashpi.offline_video import analyze_external_video
 
     source = make_video(tmp_path / "source.mp4", 6)
@@ -89,5 +89,6 @@ def test_external_video_never_marks_aigo_upload(tmp_path):
     result = analyze_external_video(
         source, 3.0, settings, store,
         lambda *_: {"incident_timestamp": 3.0, "summary": "s", "observations": [], "limitations": []},
+        lambda incident: mark_pending(store, incident.incident_id),
     )
-    assert not (store.directory(result.incident_id) / AIGO_STATE).exists()
+    assert (store.directory(result.incident_id) / AIGO_STATE).exists()
