@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
+import hashlib
 import http.client
 import json
 import logging
@@ -57,21 +58,32 @@ class UploadRejected(Exception):
         self.auth = auth
 
 
-def load_aigo_config(path: Path = DEFAULT_AIGO_CONFIG, environ: Mapping[str, str] = os.environ) -> AigoConfig | None:
+def load_aigo_configs(path: Path = DEFAULT_AIGO_CONFIG, environ: Mapping[str, str] = os.environ) -> list[AigoConfig]:
+    """DASHPI_AIGO_API_KEY에 쉼표로 여러 키를 넣으면 계정마다 같은 클립을 올린다. 첫 키가 화면 표시 기준."""
     values = _read_env_file(path)
     values.update({key: value for key, value in environ.items() if key.startswith("DASHPI_AIGO_")})
-    api_key = values.get("DASHPI_AIGO_API_KEY", "").strip()
-    if not api_key:
-        return None
-    if any(ord(char) < 32 or ord(char) == 127 for char in api_key):
+    keys = [key.strip() for key in values.get("DASHPI_AIGO_API_KEY", "").split(",") if key.strip()]
+    if not keys:
+        return []
+    if any(ord(char) < 32 or ord(char) == 127 for key in keys for char in key):
         log.warning("AIGO 키 형식 오류 — 업로드를 끕니다")
-        return None
+        return []
     try:
         api_url = _valid_base_url(values.get("DASHPI_AIGO_API_URL", "").strip())
     except AnalysisError:
         log.warning("AIGO 주소는 https여야 합니다 — 업로드를 끕니다")
-        return None
-    return AigoConfig(api_url, api_key)
+        return []
+    return [AigoConfig(api_url, key) for key in dict.fromkeys(keys)]
+
+
+def load_aigo_config(path: Path = DEFAULT_AIGO_CONFIG, environ: Mapping[str, str] = os.environ) -> AigoConfig | None:
+    configs = load_aigo_configs(path, environ)
+    return configs[0] if configs else None
+
+
+def state_name(index: int, api_key: str) -> str:
+    """첫 키는 기존 aigo.json을 그대로 쓴다. 나머지는 키 지문으로 이름을 붙여 순서가 바뀌어도 섞이지 않게 한다."""
+    return AIGO_STATE if index == 0 else f"aigo-{hashlib.sha256(api_key.encode()).hexdigest()[:12]}.json"
 
 
 def next_day_0005(now: datetime) -> datetime:
@@ -143,32 +155,41 @@ class AigoClient:
         return UploadRejected(message if isinstance(message, str) and message else f"AIGO 업로드 거부 (HTTP {status})")
 
 
-def read_state(store: IncidentStore, incident_id: str) -> dict | None:
+def read_state(store: IncidentStore, incident_id: str, name: str = AIGO_STATE) -> dict | None:
     try:
-        state = json.loads((store.directory(incident_id) / AIGO_STATE).read_text())
+        state = json.loads((store.directory(incident_id) / name).read_text())
     except (FileNotFoundError, KeyError, OSError, ValueError):
         return None
     return state if isinstance(state, dict) else None
 
 
-def _write_state(store: IncidentStore, incident_id: str, state: dict) -> None:
-    atomic_write(store.directory(incident_id) / AIGO_STATE, json.dumps(state, sort_keys=True).encode())
+def _write_state(store: IncidentStore, incident_id: str, state: dict, name: str = AIGO_STATE) -> None:
+    atomic_write(store.directory(incident_id) / name, json.dumps(state, sort_keys=True).encode())
 
 
-def mark_pending(store: IncidentStore, incident_id: str) -> None:
+def mark_pending(store: IncidentStore, incident_id: str, name: str = AIGO_STATE) -> None:
     """클립 저장 직후 부른다. 이미 상태 파일이 있으면 그대로 둔다."""
-    if read_state(store, incident_id) is None:
-        _write_state(store, incident_id, {"state": "pending", "attempts": 0})
+    if read_state(store, incident_id, name) is None:
+        _write_state(store, incident_id, {"state": "pending", "attempts": 0}, name)
 
 
 class AigoUploader:
     """aigo.json이 pending인 사고를 하나씩 올린다. 분석 worker와 별도 스레드."""
 
     def __init__(self, store: IncidentStore, client: AigoClient,
-                 now: Callable[[], datetime] = lambda: datetime.now(UTC)):
-        self.store, self.client, self.now = store, client, now
+                 now: Callable[[], datetime] = lambda: datetime.now(UTC), state_name: str = AIGO_STATE):
+        self.store, self.client, self.now, self.state_name = store, client, now, state_name
         self.running: Future | None = None
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dashpi-aigo")
+
+    def _read(self, incident_id: str) -> dict | None:
+        return read_state(self.store, incident_id, self.state_name)
+
+    def _write(self, incident_id: str, state: dict) -> None:
+        _write_state(self.store, incident_id, state, self.state_name)
+
+    def mark_pending(self, incident_id: str) -> None:
+        mark_pending(self.store, incident_id, self.state_name)
 
     def _ids(self) -> list[str]:
         try:
@@ -179,9 +200,9 @@ class AigoUploader:
     def recover(self) -> None:
         """키 문제로 실패한 업로드를 앱 시작 때 한 번 다시 대기시킨다(키를 고친 뒤 재시작하면 올라간다)."""
         for incident_id in self._ids():
-            state = read_state(self.store, incident_id)
+            state = self._read(incident_id)
             if state and state.get("state") == "failed" and state.get("reason") == AUTH_REASON:
-                _write_state(self.store, incident_id, {"state": "pending", "attempts": 0})
+                self._write(incident_id, {"state": "pending", "attempts": 0})
 
     def tick(self) -> str | None:
         if self.running is not None and not self.running.done():
@@ -189,7 +210,7 @@ class AigoUploader:
         now = self.now()
         due = []
         for incident_id in self._ids():
-            state = read_state(self.store, incident_id)
+            state = self._read(incident_id)
             if not state or state.get("state") != "pending":
                 continue
             try:
@@ -205,12 +226,12 @@ class AigoUploader:
         return incident_id
 
     def _upload(self, incident_id: str) -> None:
-        state = read_state(self.store, incident_id) or {"attempts": 0}
+        state = self._read(incident_id) or {"attempts": 0}
         try:
             incident = self.store.load(incident_id)
         except (FileNotFoundError, KeyError, OSError, ValueError):
             log.warning("AIGO 업로드 대상 사고를 찾을 수 없음: %s", incident_id)
-            _write_state(self.store, incident_id, {**state, "state": "failed", "reason": "사고 기록 없음"})
+            self._write(incident_id, {**state, "state": "failed", "reason": "사고 기록 없음"})
             return
         clip = self.store.directory(incident_id) / "clip.mp4"
         try:
@@ -218,7 +239,7 @@ class AigoUploader:
         except OSError:
             ok = False
         if not ok:
-            _write_state(self.store, incident_id, {**state, "state": "failed", "reason": "클립 확인 실패"})
+            self._write(incident_id, {**state, "state": "failed", "reason": "클립 확인 실패"})
             return
         now = self.now()
         try:
@@ -229,33 +250,66 @@ class AigoUploader:
                 analysis_id = ticket.analysis_id
                 self.client.put(clip, ticket)
                 state = {**state, "analysis_id": analysis_id, "phase": "put"}
-                _write_state(self.store, incident_id, {**state, "state": "pending"})
+                self._write(incident_id, {**state, "state": "pending"})
             self.client.submit(analysis_id)
         except UploadRestart as error:
             state = {key: value for key, value in state.items() if key not in ("analysis_id", "phase")}
-            _write_state(self.store, incident_id, {**state, "state": "pending", "next_attempt_at": None,
+            self._write(incident_id, {**state, "state": "pending", "next_attempt_at": None,
                                                    "reason": str(error)})
             log.info("AIGO 업로드 다시 시작: %s", incident_id)
         except UploadDeferred as error:
             attempts = int(state.get("attempts", 0)) + 1
             retry_at = error.retry_at or now + retry_delay(attempts)
-            _write_state(self.store, incident_id, {**state, "state": "pending", "attempts": attempts,
+            self._write(incident_id, {**state, "state": "pending", "attempts": attempts,
                                                    "next_attempt_at": retry_at.isoformat(), "reason": str(error)})
             log.info("AIGO 업로드 대기: %s (%s)", incident_id, error)
         except UploadRejected as error:
-            _write_state(self.store, incident_id, {**state, "state": "failed", "reason": str(error)})
+            self._write(incident_id, {**state, "state": "failed", "reason": str(error)})
             log.warning("AIGO 업로드 실패: %s (%s)", incident_id, error)
         except Exception as error:  # 예상 못 한 오류도 사고 기록을 건드리지 않고 다음에 다시 시도한다
             log.exception("AIGO 업로드 오류: %s", incident_id)
             attempts = int(state.get("attempts", 0)) + 1
-            _write_state(self.store, incident_id, {**state, "state": "pending", "attempts": attempts,
+            self._write(incident_id, {**state, "state": "pending", "attempts": attempts,
                                                    "next_attempt_at": (now + retry_delay(attempts)).isoformat(),
                                                    "reason": type(error).__name__})
         else:
-            _write_state(self.store, incident_id, {"state": "uploaded", "analysis_id": analysis_id,
+            self._write(incident_id, {"state": "uploaded", "analysis_id": analysis_id,
                                                    "uploaded_at": now.isoformat()})
             log.info("AIGO 업로드 완료: %s → 분석 #%s", incident_id, analysis_id)
 
     def close(self) -> None:
         # 종료 때 화면을 붙잡지 않는다. 진행 중인 업로드는 다음 실행에서 이어서 한다.
         self._executor.shutdown(wait=False, cancel_futures=True)
+
+
+class AigoUploaders:
+    """계정(키)마다 업로더 하나. 화면과 타이머는 이 묶음 하나만 본다."""
+
+    def __init__(self, uploaders: list[AigoUploader]):
+        self.uploaders = uploaders
+
+    def mark_pending(self, incident_id: str) -> None:
+        for uploader in self.uploaders:
+            uploader.mark_pending(incident_id)
+
+    def recover(self) -> None:
+        for uploader in self.uploaders:
+            uploader.recover()
+
+    def tick(self) -> None:
+        for uploader in self.uploaders:
+            try:
+                uploader.tick()
+            except Exception:  # 한 계정이 막혀도 나머지는 올린다
+                log.exception("AIGO 업로드 확인 실패")
+
+    def close(self) -> None:
+        for uploader in self.uploaders:
+            uploader.close()
+
+
+def build_uploaders(store: IncidentStore, configs: list[AigoConfig]) -> AigoUploaders | None:
+    if not configs:
+        return None
+    return AigoUploaders([AigoUploader(store, AigoClient(config), state_name=state_name(index, config.api_key))
+                          for index, config in enumerate(configs)])
