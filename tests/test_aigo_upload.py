@@ -436,3 +436,26 @@ def test_deleted_incident_is_skipped(store):
     client = FakeClient()
     run(AigoUploader(store, client, now=lambda: NOW))
     assert client.calls == []
+
+
+def test_comma_separated_keys_upload_the_clip_to_every_account(store, tmp_path):
+    from dashpi.aigo_upload import AigoUploaders, load_aigo_configs, state_name
+
+    path = tmp_path / "aigo.env"
+    path.write_text("DASHPI_AIGO_API_URL=https://aigo.example\nDASHPI_AIGO_API_KEY=ak_a, ak_b,ak_a\n")
+    configs = load_aigo_configs(path, environ={})
+    assert [c.api_key for c in configs] == ["ak_a", "ak_b"]  # 중복 키는 한 번만
+    names = [state_name(i, c.api_key) for i, c in enumerate(configs)]
+    assert names[0] == AIGO_STATE and names[1] != AIGO_STATE
+
+    incident(store)
+    clients = [FakeClient(11), FakeClient(22)]
+    group = AigoUploaders([AigoUploader(store, client, now=lambda: NOW, state_name=name)
+                           for client, name in zip(clients, names)])
+    group.mark_pending("inc1")
+    group.tick()
+    for uploader in group.uploaders:
+        uploader.running.result(timeout=5)
+    assert read_state(store, "inc1")["analysis_id"] == 11  # 화면은 첫 계정 기준
+    assert read_state(store, "inc1", names[1])["analysis_id"] == 22
+    group.close()

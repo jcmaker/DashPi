@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
     QStackedWidget, QStyle, QStyleOptionToolButton, QStylePainter, QToolButton, QVBoxLayout, QWidget,
 )
 
-from dashpi.aigo_upload import AigoClient, AigoUploader, load_aigo_config, mark_pending, read_state
+from dashpi.aigo_upload import AigoUploaders, build_uploaders, load_aigo_configs, read_state
 from dashpi.analysis import api_key_configured, build_analyzer
 from dashpi.analysis_retry import AnalysisRetrier
 from dashpi.analysis_worker import AnalysisWorker
@@ -250,7 +250,7 @@ def home_tile(text: str, icon: QIcon, callback, *, primary: bool = False) -> QTo
 
 class DashPiWindow(QMainWindow):
     def __init__(self, session: DeviceSession, store: IncidentStore, settings_path: Path,
-                 uploader: AigoUploader | None = None):
+                 uploader: AigoUploaders | None = None):
         super().__init__()
         self.session, self.store, self.settings_path = session, store, settings_path
         self.uploader = uploader
@@ -1109,7 +1109,8 @@ class DashPiWindow(QMainWindow):
             analyze = build_analyzer(settings.ai_model, settings.ai_report_model, self.settings_path.parent)
             def run():
                 with progress.reporting(lambda *event: events.append(event)):
-                    return analyze_external_video(source, position, settings, self.store, analyze)
+                    return analyze_external_video(source, position, settings, self.store, analyze,
+                                                  getattr(self.session, "on_clip", None))
 
             future = self.session.worker.submit(run)
             self._jobs.append((future, lambda done: self._external_analysis_done(done, generation)))
@@ -1359,12 +1360,11 @@ def main():
     recorder = PiCameraRecorder(root, current)
     settings = Settings(root, current.ai_model, current.ai_report_model)
     store = IncidentStore(root)
-    aigo = load_aigo_config()
-    uploader = AigoUploader(store, AigoClient(aigo)) if aigo else None
-    log.info("AIGO 업로드 %s", "켜짐" if uploader else "꺼짐 (aigo.env 없음)")
+    uploader = build_uploaders(store, load_aigo_configs())
+    log.info("AIGO 업로드 %s", f"켜짐 ({len(uploader.uploaders)}개 계정)" if uploader else "꺼짐 (aigo.env 없음)")
     session = DeviceSession(recorder, settings, store, worker,
                             build_analyzer(settings.ai_model, settings.ai_report_model, root),
-                            on_clip=(lambda incident: mark_pending(store, incident.incident_id)) if uploader else None)
+                            on_clip=(lambda incident: uploader.mark_pending(incident.incident_id)) if uploader else None)
     window = DashPiWindow(session, store, root / "settings.json", uploader=uploader)
     try:
         app.exec()
